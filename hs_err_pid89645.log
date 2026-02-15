@@ -1,0 +1,43 @@
+#
+# A fatal error has been detected by the Java Runtime Environment:
+#
+#  SIGSEGV (0xb) at pc=0x000074250564797b, pid=89645, tid=89725
+#
+# JRE version: OpenJDK Runtime Environment (11.0.22+12) (build 11.0.22+12-LTS)
+# Java VM: OpenJDK 64-Bit Server VM (11.0.22+12-LTS, mixed mode, tiered, compressed oops, g1 gc, linux-amd64)
+# Problematic frame:
+# C  [libc.so.6+0x4797b]
+#
+# Core dump will be written. Default location: Core dumps may be processed with "/usr/share/apport/apport -p%p -s%s -c%c -d%d -P%P -u%u -g%g -- %E" (or dumping to /home/darik/IdeaProjects/CryptoCombainer/core.89645)
+#
+# If you would like to submit a bug report, please visit:
+#   https://bell-sw.com/support
+# The crash happened outside the Java Virtual Machine in native code.
+# See problematic frame for where to report the bug.
+#
+
+---------------  S U M M A R Y ------------
+
+Command Line: -javaagent:/snap/intellij-idea-community/566/lib/idea_rt.jar=46245:/snap/intellij-idea-community/566/bin -Dfile.encoding=UTF-8 ExecPack.App
+
+Host: Intel(R) Core(TM) i7-3610QM CPU @ 2.30GHz, 8 cores, 7G, Ubuntu 24.04.1 LTS
+Time: Tue Jan 21 22:52:53 2025 +05 elapsed time: 7292.147680 seconds (0d 2h 1m 32s)
+
+---------------  T H R E A D  ---------------
+
+Current thread (0x000074243c23a800):  JavaThread "AWT-XAWT" daemon [_thread_in_native, id=89725, stack(0x00007424b8000000,0x00007424b8100000)]
+
+Stack: [0x00007424b8000000,0x00007424b8100000],  sp=0x00007424b80fe730,  free space=1017k
+Native frames: (J=compiled Java code, A=aot compiled Java code, j=interpreted, Vv=VM code, C=native code)
+C  [libc.so.6+0x4797b]
+C  [libc.so.6+0x47bae]
+C  [libX11.so.6+0x3db62]
+C  [libX11.so.6+0x40915]  _XIOError+0x75
+C  [libX11.so.6+0x44a7d]  _XEventsQueued+0x8d
+C  [libX11.so.6+0x378c8]  XEventsQueued+0x68
+J 2392  sun.awt.X11.XlibWrapper.XEventsQueued(JI)I java.desktop@11.0.22 (0 bytes) @ 0x00007424ea9e77f9 [0x00007424ea9e7740+0x00000000000000b9]
+j  sun.awt.X11.XToolkit.run(Z)V+63 java.desktop@11.0.22
+j  sun.awt.X11.XToolkit.run()V+5 java.desktop@11.0.22
+j  java.lang.Thread.run()V+11 java.base@11.0.22
+v  ~StubRoutines::call_stub
+V  [libjvm.so+0x8e20bb]

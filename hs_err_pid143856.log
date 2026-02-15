@@ -1,0 +1,54 @@
+#
+# A fatal error has been detected by the Java Runtime Environment:
+#
+#  SIGSEGV (0xb) at pc=0x00007d932b84797b, pid=143856, tid=143952
+#
+# JRE version: OpenJDK Runtime Environment (11.0.22+12) (build 11.0.22+12-LTS)
+# Java VM: OpenJDK 64-Bit Server VM (11.0.22+12-LTS, mixed mode, tiered, compressed oops, g1 gc, linux-amd64)
+# Problematic frame:
+# C  [libc.so.6+0x4797b]
+#
+# Core dump will be written. Default location: Core dumps may be processed with "/usr/share/apport/apport -p%p -s%s -c%c -d%d -P%P -u%u -g%g -- %E" (or dumping to /home/darik/IdeaProjects/CryptoCombainer/core.143856)
+#
+# If you would like to submit a bug report, please visit:
+#   https://bell-sw.com/support
+# The crash happened outside the Java Virtual Machine in native code.
+# See problematic frame for where to report the bug.
+#
+
+---------------  S U M M A R Y ------------
+
+Command Line: -javaagent:/snap/intellij-idea-community/570/lib/idea_rt.jar=36501:/snap/intellij-idea-community/570/bin -Dfile.encoding=UTF-8 ExecPack.App
+
+Host: Intel(R) Core(TM) i7-3610QM CPU @ 2.30GHz, 8 cores, 7G, Ubuntu 24.04.1 LTS
+Time: Thu Jan 30 23:26:05 2025 +05 elapsed time: 4270.087170 seconds (0d 1h 11m 10s)
+
+---------------  T H R E A D  ---------------
+
+Current thread (0x00007d927011e800):  JavaThread "JavaFX Application Thread" [_thread_in_native, id=143952, stack(0x00007d92e1074000,0x00007d92e1174000)]
+
+Stack: [0x00007d92e1074000,0x00007d92e1174000],  sp=0x00007d92e1172360,  free space=1016k
+Native frames: (J=compiled Java code, A=aot compiled Java code, j=interpreted, Vv=VM code, C=native code)
+C  [libc.so.6+0x4797b]
+C  [libc.so.6+0x47bae]
+C  [libX11.so.6+0x3db62]
+C  [libX11.so.6+0x40915]  _XIOError+0x75
+C  [libX11.so.6+0x46932]  _XReply+0x3f2
+C  [libX11.so.6+0x1e3be]  XGetSelectionOwner+0x5e
+C  [libgdk-3.so.0+0xaaad3]
+C  [libgdk-3.so.0+0xaab85]
+C  [libgdk-3.so.0+0x8bb80]
+C  [libgdk-3.so.0+0x93a45]
+C  [libgdk-3.so.0+0x376eb]  gdk_display_get_event+0x9b
+C  [libgdk-3.so.0+0x93e1e]
+C  [libglib-2.0.so.0+0x5d5b5]
+C  [libglib-2.0.so.0+0xbc717]
+C  [libglib-2.0.so.0+0x5df77]  g_main_loop_run+0x127
+C  [libgtk-3.so.0+0x1feb45]  gtk_main+0x85
+C  [libglassgtk3.so+0x2b772]  Java_com_sun_glass_ui_gtk_GtkApplication__1runLoop+0x52
+j  com.sun.glass.ui.gtk.GtkApplication._runLoop(Ljava/lang/Runnable;Z)V+0 javafx.graphics@11.0.22
+j  com.sun.glass.ui.gtk.GtkApplication.lambda$runLoop$11(Ljava/lang/Runnable;Z)V+7 javafx.graphics@11.0.22
+j  com.sun.glass.ui.gtk.GtkApplication$$Lambda$262.run()V+12 javafx.graphics@11.0.22
+j  java.lang.Thread.run()V+11 java.base@11.0.22
+v  ~StubRoutines::call_stub
+V  [libjvm.so+0x8e20bb]
