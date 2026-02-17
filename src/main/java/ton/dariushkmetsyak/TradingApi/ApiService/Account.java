@@ -19,11 +19,28 @@ public abstract class Account {
     protected   SpotTrader spotTrader;
     protected   Wallet wallet;
     public enum USD_TOKENS {
-        USDT("USDT"),
-        USDC("USDC");
+        USDT("USDT"){
+            public Coin getCoin (){
+                try {
+                    return Coin.createCoin("Tether");
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        },
+        USDC("USDC") {
+            public Coin getCoin() {
+                try {
+                    return Coin.createCoin("Circle");
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        };
         private String tokenName;
         USD_TOKENS(String tokenName) {
             this.tokenName = tokenName;}
+        public abstract Coin getCoin();
         @Override
         public String toString() {return tokenName;}
     }
@@ -34,12 +51,12 @@ public abstract class Account {
     public Wallet wallet(){return wallet;}
 
     protected abstract void initSpotTrader();
-    protected abstract void initWallet();
+    protected abstract void initWallet() throws IOException;
 
     public abstract  class SpotTrader {
         protected SpotTrader(){}
-        public abstract Boolean buy(Coin coin, double price, double quantity) throws NoSuchSymbolException, InsufficientAmountOfUsdtException;
-        public abstract Boolean sell(Coin coin, double price, double quantity) throws NoSuchSymbolException, InsufficientAmountOfCoinException;
+        public abstract Double buy(Coin coin, double price, double quantity) throws NoSuchSymbolException, InsufficientAmountOfUsdtException;
+        public abstract Double sell(Coin coin, double price, double quantity) throws NoSuchSymbolException, InsufficientAmountOfCoinException;
         public abstract Map<String,String> getOrder ();
         public abstract Boolean cancelOrder ();
         }

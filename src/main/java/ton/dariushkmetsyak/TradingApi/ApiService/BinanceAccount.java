@@ -10,11 +10,15 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import ton.dariushkmetsyak.Telegram.ImageAndMessageSender;
 import ton.dariushkmetsyak.TradingApi.ApiService.Exceptions.NoSuchSymbolException;
 import ton.dariushkmetsyak.GeckoApiService.geckoEntities.Coin;
+import ton.dariushkmetsyak.Util.Prices;
 
 import java.io.IOException;
+import java.sql.Time;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 public class BinanceAccount extends Account {
     private static final Logger log = LoggerFactory.getLogger(BinanceAccount.class);
@@ -39,31 +43,45 @@ public class BinanceAccount extends Account {
     }
 
     @Override
-    public void initWallet() {
+    public void initWallet() throws IOException {
         super.wallet = new BinanceWallet(this);
     }
 
      class BinanceSpotTrader extends SpotTrader {
-       private final SpotClient client;
+       private SpotClient client;
        private Map<String,Object> orderParameters;
 
        BinanceSpotTrader(BinanceAccount binanceAccount) {
-           try {
-               Ed25519SignatureGenerator signatureGenerator = new Ed25519SignatureGenerator(String.valueOf(binanceAccount.getPrivate_key()));
-               client= new SpotClientImpl(String.valueOf(binanceAccount.getApi_key()), signatureGenerator, baseUrl.toString());
-           } catch (IOException e) {
-               throw new RuntimeException(e);
+           boolean result = false;
+           while (!result) {
+               try {
+                   Ed25519SignatureGenerator signatureGenerator = new Ed25519SignatureGenerator(String.valueOf(binanceAccount.getPrivate_key()));
+                   client = new SpotClientImpl(String.valueOf(binanceAccount.getApi_key()), signatureGenerator, baseUrl.toString());
+                   result=true;
+               } catch (Exception e) {
+                   ImageAndMessageSender.sendTelegramMessage("При создании аккаунта Binance произошла ошибка:\n" + e.getMessage());
+
+                   e.printStackTrace();
+                   try {
+                       TimeUnit.SECONDS.sleep(10);
+                   } catch (InterruptedException ex) {
+                       return;
+                   }
+
+               }
            }
        }
 
-       public Boolean sell(Coin coin, double price, double quantity) {
+       public Double sell(Coin coin, double price, double quantity) {
 
            Map<String, Object> parameters = new LinkedHashMap<>();
+           System.out.println("Quantity: "+ quantity);
+           System.out.println("Precised quantity: " +Prices.round(quantity-(quantity*0.2/100)));
            parameters.put("symbol", coin.getUsdtPair());
            parameters.put("side", "SELL");
            parameters.put("type", "LIMIT");
            parameters.put("timeInForce", "GTC");
-           parameters.put("quantity", quantity);
+           parameters.put("quantity", Prices.round(quantity-(quantity*0.2/100)));
            parameters.put("price", price);
 
            try {
@@ -71,36 +89,40 @@ public class BinanceAccount extends Account {
                orderParameters=getOrderParameters(response);
            } catch (BinanceConnectorException e) {
                System.err.println((String) String.format("fullErrMessage: %s", e.getMessage()));
-               return false;
+               return null;
            } catch (BinanceClientException e) {
                System.err.println((String) String.format("fullErrMessage: %s \nerrMessage: %s \nerrCode: %d \nHTTPStatusCode: %d",
                        e.getMessage(), e.getErrMsg(), e.getErrorCode(), e.getHttpStatusCode()));
-               return false;
+               return null;
            }
-           return true;
+           return price;
            }
 
 
-           public Boolean buy(Coin coin, double price, double quantity) {
+           public Double buy(Coin coin, double price, double quantity) {
+               System.out.println("Quantity: "+ quantity);
+               System.out.println("Precised quantity: " +Prices.round(quantity-(quantity*0.2/100)));
                Map<String, Object> parameters = new LinkedHashMap<>();
                parameters.put("symbol", coin.getUsdtPair());
                parameters.put("side", "BUY");
                parameters.put("type", "LIMIT");
                parameters.put("timeInForce", "GTC");
-               parameters.put("quantity", quantity);
+             //  parameters.put("quantity", Prices.round(quantity)-(Prices.round(quantity)*0.2/100));
+                 parameters.put("quantity", Prices.round(quantity-(quantity*0.2/100)));
+
                parameters.put("price", price);
 
                try {
                    String response = client.createTrade().newOrder(parameters);
                    orderParameters = getOrderParameters(response);
-                   return true;
+                   return price;
                } catch (BinanceConnectorException e) {
                    System.err.println((String) String.format("fullErrMessage: %s", e.getMessage()));
                } catch (BinanceClientException e) {
                    System.err.println((String) String.format("fullErrMessage: %s \nerrMessage: %s \nerrCode: %d \nHTTPStatusCode: %d",
                            e.getMessage(), e.getErrMsg(), e.getErrorCode(), e.getHttpStatusCode()));
                }
-           return false;
+           return null;
            }
 
            public Boolean cancelOrder () {
@@ -163,15 +185,13 @@ public class BinanceAccount extends Account {
 
     public  class BinanceWallet extends Wallet {
 
-        private final SpotClient client;
+        private SpotClient client;
 
-        BinanceWallet(BinanceAccount binanceAccount) {
-            try {
+        BinanceWallet(BinanceAccount binanceAccount) throws IOException {
+
                 Ed25519SignatureGenerator signatureGenerator = new Ed25519SignatureGenerator(String.valueOf(binanceAccount.getPrivate_key()));
                 client = new SpotClientImpl(String.valueOf(binanceAccount.getApi_key()), signatureGenerator, baseUrl.toString());
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
+
         }
 
 
@@ -226,7 +246,13 @@ public class BinanceAccount extends Account {
         public Map<Coin, Double> getAllAssets() {
             Map<String, Object> parameters = new LinkedHashMap<>();
             Map<Coin, Double> result = new HashMap<>();
-            String response = client.createTrade().account(parameters);
+            String response=null;
+            try {
+                response = client.createTrade().account(parameters);
+            } catch (RuntimeException e){
+                e.printStackTrace();
+            }
+
             try (JsonParser parser = new JsonFactory().createParser(response)) {
                 while (parser.nextToken() != JsonToken.END_ARRAY) {
 
@@ -236,12 +262,15 @@ public class BinanceAccount extends Account {
                         parser.nextToken();
                         try {
                             key = Coin.createCoin(parser.getValueAsString());
+//                            System.out.print(key);
                         } catch (Exception e){
+
                             System.err.println(e);
                         }
                         parser.nextToken();
                         parser.nextToken();
                         value = Double.parseDouble(parser.getText());
+//                        System.out.println(value);
                         if (value!=0&&key!=null) result.put(key, value);
                     }
                 }

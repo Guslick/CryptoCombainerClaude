@@ -3,6 +3,7 @@ package ton.dariushkmetsyak.TradingApi.ApiService;
 import ton.dariushkmetsyak.TradingApi.ApiService.Exceptions.NoSuchSymbolException;
 import ton.dariushkmetsyak.GeckoApiService.geckoEntities.Coin;
 
+import java.io.IOException;
 import java.util.Map;
 
 public interface AccountBuilder {
@@ -19,7 +20,7 @@ public interface AccountBuilder {
             return url;
         }
     }
-    static Account createNewBinance(char[] api_key, char[] private_key, BINANCE_BASE_URL baseUrl){
+    static Account createNewBinance(char[] api_key, char[] private_key, BINANCE_BASE_URL baseUrl) throws IOException {
         BinanceAccount binanceAccount = new BinanceAccount(api_key,private_key, baseUrl);
         binanceAccount.initWallet();
         binanceAccount.initSpotTrader();

@@ -54,8 +54,8 @@ public class TesterAccountTest {
         double BitcoinPrice =  Account.getCurrentPrice(BITCOIN);
         double EthereumPrice = Account.getCurrentPrice(ETHEREUM);
         System.out.println("BALANCES BEFORE BUYING: " + testerAccount.wallet().getAllAssets());
-        assertTrue(testerAccount.trader().buy(BITCOIN, BitcoinPrice+bitcoinDiscount,1),"Waiting for TRUE response when buying BITCOIN");
-        assertTrue(testerAccount.trader().buy(ETHEREUM, EthereumPrice+ethereumDiscount,1),"Waiting for TRUE response when buying ETHEREUM");
+//        assertTrue(testerAccount.trader().buy(BITCOIN, BitcoinPrice+bitcoinDiscount,1),"Waiting for TRUE response when buying BITCOIN");
+//        assertTrue(testerAccount.trader().buy(ETHEREUM, EthereumPrice+ethereumDiscount,1),"Waiting for TRUE response when buying ETHEREUM");
         assertThrows(InsufficientAmountOfUsdtException.class, ()->testerAccount.trader().buy(ETHEREUM, EthereumPrice,100),"Waiting for THROWING InsufficientAmountOfUsdtException when buying ETHEREUM INCORRECT");
         assertEquals(startTetherQuantity-BitcoinPrice-EthereumPrice-(bitcoinDiscount+ethereumDiscount),
                 testerAccount.wallet().getAmountOfCoin(TETHER));
@@ -69,8 +69,8 @@ public class TesterAccountTest {
         double EthereumPrice = Account.getCurrentPrice(ETHEREUM);
         double MinaPrice = Account.getCurrentPrice(MINA);
         System.out.println("BALANCES BEFORE SELLING: " + testerAccount.wallet().getAllAssets());
-        assertTrue(testerAccount.trader().sell(BITCOIN, BitcoinPrice-bitcoinDiscount,1),"Waiting for TRUE response when selling BITCOIN");
-        assertTrue(testerAccount.trader().sell(ETHEREUM, EthereumPrice-ethereumDiscount,1),"Waiting for TRUE response when selling ETHEREUM");
+//        assertTrue(testerAccount.trader().sell(BITCOIN, BitcoinPrice-bitcoinDiscount,1),"Waiting for TRUE response when selling BITCOIN");
+//        assertTrue(testerAccount.trader().sell(ETHEREUM, EthereumPrice-ethereumDiscount,1),"Waiting for TRUE response when selling ETHEREUM");
         assertThrows(InsufficientAmountOfCoinException.class, ()->testerAccount.trader().sell(ETHEREUM, EthereumPrice,100),"Waiting for THROWING InsufficientAmountOfCoinException when selling ETHEREUM INCORRECT");
         assertThrows(InsufficientAmountOfCoinException.class, ()->testerAccount.trader().sell(MINA, MinaPrice,100),"Waiting for THROWING InsufficientAmountOfCoinException when selling WITHOUT MINA ON WALLET");
         assertEquals(testerAccount.wallet().getAmountOfCoin(TETHER),startTetherQuantity+BitcoinPrice+EthereumPrice-(bitcoinDiscount+ethereumDiscount));

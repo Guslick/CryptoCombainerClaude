@@ -14,7 +14,8 @@ public class ImageAndMessageSender {
 
     // Токен вашего бота
     private static final String BOT_TOKEN = "7420980540:AAENPop_SY3bBVHl8kNxT97Mxazxthvk8Jo";
-     private static String chatId = "-1002382149738";
+     private static String chatId ;
+//             = "-1002382149738";
 //    final private static String chatId = "-1002453915115";
 //   final private static String chatId = "-1002382149738";
 

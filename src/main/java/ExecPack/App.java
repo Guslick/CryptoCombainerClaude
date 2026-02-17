@@ -37,9 +37,20 @@ public class App {
 
 
         //  TradingChart.makeScreenShot("");
-
-
+        CoinsList.loadCoinsWithMarketDataFormJsonFile(new File("coins"));
         new MenuHandler().start();
+//        CoinsList.loadCoinsWithMarketDataFormJsonFile(new File("coins"));
+//        Coin coin = CoinsList.getCoinByName("ethereum");
+//
+//        char[] TEST_Ed25519_PRIVATE_KEY = "/home/darik/Desktop//test-prv-key.pem".toCharArray();
+//        char[] TEST_Ed25519_API_KEY = "dLlBZX4SsOwXuDioeLWfOFCldwqgwGrIGhGEZdIUWtBCSKsTvqXyl0eYm6lepcAr".toCharArray();
+//        Account testBinanceAccount = AccountBuilder.createNewBinance(TEST_Ed25519_API_KEY, TEST_Ed25519_PRIVATE_KEY, AccountBuilder.BINANCE_BASE_URL.TESTNET);
+//        new ReversalPointsStrategyTrader(testBinanceAccount,coin,10,3,3, 3, 30, Long.decode(chatId)).startTrading();
+
+
+
+
+
     }
 }
 

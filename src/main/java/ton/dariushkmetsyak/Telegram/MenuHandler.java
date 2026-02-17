@@ -1,5 +1,6 @@
 package ton.dariushkmetsyak.Telegram;
 
+import com.binance.connector.client.exceptions.BinanceClientException;
 import org.jetbrains.annotations.NotNull;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.TelegramBotsApi;
@@ -39,6 +40,8 @@ public class MenuHandler extends TelegramLongPollingBot {
         CONDUCTING_REAL_TIME_RESEARCH,  // Ждём строку
         BEFORE_BACK_TESTING_RESEARCH,
         CONDUCTING_BACK_TESTING_RESEARCH,  // Ждём строку
+        BEFORE_BINANCE_TRADING,
+        CONDUCTING_BINANCE_TRADING,
         BEFORE_BINANCE_TEST_TRADING,
         CONDUCTING_BINANCE_TEST_TRADING,
         WAITING_FOR_INT_1,   // Ждём первое число
@@ -53,6 +56,7 @@ public class MenuHandler extends TelegramLongPollingBot {
         if (update.hasMessage() && update.getMessage().hasText()) {
             String messageText = update.getMessage().getText();
             long chatId = update.getMessage().getChatId();
+            ImageAndMessageSender.setChatId(chatId);
 
             switch (currentState){
                 case WAITING_FOR_OPTION: {
@@ -63,10 +67,24 @@ public class MenuHandler extends TelegramLongPollingBot {
                         setMenu(chatId, "Что будем делать");
                         break;
                     } else if (messageText.equals("Торговля")) {
-                        sendText(chatId, "Еще не готово");
+                        currentState = UserState.BEFORE_BINANCE_TRADING;
+                        SendMessage message = new SendMessage();
+                        message.setChatId(String.valueOf(chatId));
+                        message.setReplyMarkup(keyboardMarkup); // Устанавливаем на клавиатуре кнопку "Остановить"
+                        message.setText(" Введите параметры для торговли на Binance. \n\n" +
+                                "Образец: монета, сумма_сделки_в_USDT, коэффициент_покупки_(в %), коэффициент_продажи_в_прибыль_(в %),коэффициент_продажи_в_убыток_(в %) частота_обновления_графика(в сек) \n\n"+
+                                "Пример: bitcoin, 100, 3.5, 2, 8, 30 ");
+                        setCancelKeyboard(chatId,message);
                         break;
                     } else if (messageText.equals("Тестовая торговля на Binance")) {
-                        sendText(chatId, "Еще не готово");
+                        currentState = UserState.BEFORE_BINANCE_TEST_TRADING;
+                        SendMessage message = new SendMessage();
+                        message.setChatId(String.valueOf(chatId));
+                        message.setReplyMarkup(keyboardMarkup); // Устанавливаем на клавиатуре кнопку "Остановить"
+                        message.setText(" Введите параметры для тестовой торговли на Binance. \n\n" +
+                                "Образец: монета, сумма_сделки_в_USDT, коэффициент_покупки_(в %), коэффициент_продажи_в_прибыль_(в %),коэффициент_продажи_в_убыток_(в %) частота_обновления_графика(в сек) \n\n"+
+                                "Пример: bitcoin, 100, 3.5, 2, 8, 30 ");
+                        setCancelKeyboard(chatId,message);
                         break;
                     } else if (messageText.equals("Историческое исследование")) {
                         currentState = UserState.BEFORE_BACK_TESTING_RESEARCH;
@@ -115,8 +133,47 @@ public class MenuHandler extends TelegramLongPollingBot {
                     break;
                 }
 
+                case BEFORE_BINANCE_TRADING:{
+                    if (messageText.equals("Отмена")) {
+                        //    processThread.interrupt();
+                        currentState = UserState.WAITING_FOR_OPTION;
+                        setMenu(chatId, "Отменено. Что будем делать в этот раз?");
+                        return;
+                    }
+                    conducting_binance_trading(update, chatId, messageText);
+                    break;
+                }
 
+                case CONDUCTING_BINANCE_TRADING:{
+                    if (messageText.equals("Остановить")){
+                        processThread.interrupt();
+                        currentState=UserState.WAITING_FOR_OPTION;
+                        setMenu(chatId, "Остановлено. Что будем делать в этот раз?");
+                        break;
+                    }
 
+                }
+
+                case BEFORE_BINANCE_TEST_TRADING:{
+                    if (messageText.equals("Отмена")) {
+                        //    processThread.interrupt();
+                        currentState = UserState.WAITING_FOR_OPTION;
+                        setMenu(chatId, "Отменено. Что будем делать в этот раз?");
+                        return;
+                    }
+                    conducting_binance_test_trading(update, chatId, messageText);
+                    break;
+                }
+
+                case CONDUCTING_BINANCE_TEST_TRADING:{
+                    if (messageText.equals("Остановить")){
+                        processThread.interrupt();
+                        currentState=UserState.WAITING_FOR_OPTION;
+                        setMenu(chatId, "Остановлено. Что будем делать в этот раз?");
+                        break;
+                    }
+
+                }
 
                 case BEFORE_REAL_TIME_RESEARCH: {
                     if (messageText.equals("Отмена")) {
@@ -266,8 +323,6 @@ private  void conducting_back_testing_research (long chatId, String stringCoin){
     Coin coin;
     Chart chart;
 
-
-
     try {
         CoinsList.loadCoinsWithMarketDataFormJsonFile(new File("coins"));
     } catch (IOException e) {
@@ -317,11 +372,11 @@ private  void conducting_back_testing_research (long chatId, String stringCoin){
             TreeSet<ReversalPointStrategyBackTester.BackTestResult> backTestResults = new TreeSet<>();
             double step = 0.1;
             double startBuyGap = 0.1;
-            double maxBuyGap = 3;
-            double startSellWithProfitGap = 0.1;
-            double maxSellWithProfitGap = 3;
-            double startSellWithLossGap = 0.1;
-            double maxSellWithLossGap = 3;
+            double maxBuyGap = 5;
+            double startSellWithProfitGap = 1;
+            double maxSellWithProfitGap = 5;
+            double startSellWithLossGap = 1;
+            double maxSellWithLossGap = 5;
             final int  iterations  = (int) (((maxSellWithLossGap - startSellWithLossGap+step) / step) * ((maxSellWithProfitGap - startSellWithProfitGap+step) / step) * ((maxBuyGap - startBuyGap+step) / step)-step);
             AtomicInteger counter = new AtomicInteger(iterations);
 
@@ -501,6 +556,231 @@ private void conducting_real_time_research (Update update, long chatId, String m
         TradingChart.clearChart();
     }
 }
+
+
+    private void conducting_binance_test_trading (Update update, long chatId, String messageText){
+        Coin coin;
+        double buyGap, sellWithProfitGap, sellWithLossGap, startAssets, tradingSum;
+        int updateTimeout;
+        char[] TEST_Ed25519_PRIVATE_KEY = "/home/kmieciaki/Рабочий стол//test-prv-key.pem".toCharArray();
+        char[] TEST_Ed25519_API_KEY = "dLlBZX4SsOwXuDioeLWfOFCldwqgwGrIGhGEZdIUWtBCSKsTvqXyl0eYm6lepcAr".toCharArray();
+
+        Account testBinanceAccount = null;
+        try {
+            testBinanceAccount = AccountBuilder.createNewBinance(TEST_Ed25519_API_KEY, TEST_Ed25519_PRIVATE_KEY, AccountBuilder.BINANCE_BASE_URL.TESTNET);
+        } catch (IOException e) {
+            e.printStackTrace();
+            ImageAndMessageSender.sendTelegramMessage("Ошибка при создани аккаунта Binance:\n" + e.getMessage());
+        }
+
+        String[] parameters = messageText.trim().split(",");
+        parameters=Stream.of(parameters)
+                .map(String::trim)
+                .toArray(String[]::new);
+        if (parameters.length!=6) {sendText(chatId, " При вводе строки параметров была допущена ошибка"); return;}
+        try {
+            coin = CoinsList.getCoinByName(parameters[0].toLowerCase());
+            System.out.println(parameters[0]);
+        } catch (Exception e) {
+            sendText(chatId, " При попытке создать монету была допущена ошибка или нет такой криптовалюты");
+            return;
+        }
+        try {
+            tradingSum= Double.parseDouble(parameters[1]);
+        } catch (Exception e) {
+            sendText(chatId, " Ошибка определения суммы сделки");
+            return;
+        }
+        try {
+            buyGap= Double.parseDouble(parameters[2]);
+        } catch (Exception e) {
+            sendText(chatId, " Ошибка определения коэффициента покупки");
+            return;
+        }
+        try {
+            sellWithProfitGap= Double.parseDouble(parameters[3]);
+        } catch (Exception e) {
+            sendText(chatId, " Ошибка определения коэффициента продажи в прибыль");
+            return;
+        }
+        try {
+            sellWithLossGap= Double.parseDouble(parameters[4]);
+        } catch (Exception e) {
+            sendText(chatId, " Ошибка определения коэффициента продажи в убыток");
+            return;
+        }
+        try {
+            updateTimeout= Integer.parseInt(parameters[5]);
+        } catch (Exception e) {
+            sendText(chatId, " Ошибка определения частоты обновления графика");
+            return;
+        }
+
+        try {
+            try {
+                List<KeyboardRow> keyboardCancel = new ArrayList<>();
+                KeyboardRow keyboardRow = new KeyboardRow(1);
+                keyboardRow.add("Остановить");
+                keyboardCancel.add(keyboardRow);
+                keyboardMarkup.setKeyboard(keyboardCancel);
+                keyboardMarkup.setResizeKeyboard(true);
+                SendMessage message = new SendMessage();
+                message.setChatId(String.valueOf(chatId));
+                message.setText("Начинаем тестовую торговлю на Binance \n" +
+                        "Монета: " + coin.getName() + "\n" +
+                        "Текущее количество USDT: " + testBinanceAccount.wallet().getCoinBalance(Account.USD_TOKENS.USDT.getCoin()) + "\n" +
+                        "Сумма сделки: " + parameters[1] + " USDT" + "\n" +
+                        "Коэффициент покупки: " + buyGap + "%" + "\n" +
+                        "Коэффициент продажи в прибыль: " + sellWithProfitGap + "%" + "\n" +
+                        "Коэффициент продажи в убыток: " + sellWithLossGap + "%" + "\n" +
+                        "Частота обновления графика: " + updateTimeout + " сек" + "\n"
+                );
+                message.setReplyMarkup(keyboardMarkup); // Устанавливаем на клавиатуре кнопку "Остановить"
+                execute(message); // Отправка
+                Account finalTestBinanceAccount = testBinanceAccount;  // создаем final переменную, чтобы можно было ее использовать в innerClass
+                processThread = new Thread() {
+                    @Override
+                    public void run() {
+                        try {
+                            CoinsList.loadCoinsWithMarketDataFormJsonFile(new File("coins"));
+                            currentState=UserState.CONDUCTING_REAL_TIME_RESEARCH;
+                            new ReversalPointsStrategyTrader(finalTestBinanceAccount,coin,tradingSum,buyGap,sellWithProfitGap, sellWithLossGap, updateTimeout, chatId).startTrading();
+
+                        } catch (BinanceClientException | IOException | NullPointerException e) {
+                            System.err.println("Ошибка во время проведения исследования в реальном времени");
+                            e.printStackTrace();
+                            ImageAndMessageSender.sendTelegramMessage(e.getMessage());
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                            ImageAndMessageSender.sendTelegramMessage(e.getMessage());
+                        }
+                    }
+                };
+                processThread.start();
+
+            } catch (TelegramApiException e) {
+                e.printStackTrace();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            throw new RuntimeException(e);
+        }finally {
+
+            TradingChart.clearChart();
+        }
+    }
+
+    private void conducting_binance_trading (Update update, long chatId, String messageText){
+        Coin coin;
+        double buyGap, sellWithProfitGap, sellWithLossGap, startAssets, tradingSum;
+        int updateTimeout;
+        final  char[] Ed25519_PRIVATE_KEY = "/home/kmieciaki/Рабочий стол//Ed PV.pem".toCharArray();
+        final  char[] Ed25519_API_KEY = "cPhdnHOtrzMU2fxBnY8zG68H1ZujKCs8oZCn1YBNLPqh98F0aaD2PfWl9HwpXKCo".toCharArray();
+
+        Account BinanceAccount = null;
+        try {
+            BinanceAccount = AccountBuilder.createNewBinance(Ed25519_API_KEY, Ed25519_PRIVATE_KEY, AccountBuilder.BINANCE_BASE_URL.MAINNET);
+        } catch (IOException e) {
+            e.printStackTrace();
+            ImageAndMessageSender.sendTelegramMessage("Ошибка при создани аккаунта Binance:\n" + e.getMessage());
+        }
+
+        String[] parameters = messageText.trim().split(",");
+        parameters=Stream.of(parameters)
+                .map(String::trim)
+                .toArray(String[]::new);
+        if (parameters.length!=6) {sendText(chatId, " При вводе строки параметров была допущена ошибка"); return;}
+        try {
+            coin = CoinsList.getCoinByName(parameters[0].toLowerCase());
+            System.out.println(parameters[0]);
+        } catch (Exception e) {
+            sendText(chatId, " При попытке создать монету была допущена ошибка или нет такой криптовалюты");
+            return;
+        }
+        try {
+            tradingSum= Double.parseDouble(parameters[1]);
+        } catch (Exception e) {
+            sendText(chatId, " Ошибка определения суммы сделки");
+            return;
+        }
+        try {
+            buyGap= Double.parseDouble(parameters[2]);
+        } catch (Exception e) {
+            sendText(chatId, " Ошибка определения коэффициента покупки");
+            return;
+        }
+        try {
+            sellWithProfitGap= Double.parseDouble(parameters[3]);
+        } catch (Exception e) {
+            sendText(chatId, " Ошибка определения коэффициента продажи в прибыль");
+            return;
+        }
+        try {
+            sellWithLossGap= Double.parseDouble(parameters[4]);
+        } catch (Exception e) {
+            sendText(chatId, " Ошибка определения коэффициента продажи в убыток");
+            return;
+        }
+        try {
+            updateTimeout= Integer.parseInt(parameters[5]);
+        } catch (Exception e) {
+            sendText(chatId, " Ошибка определения частоты обновления графика");
+            return;
+        }
+
+        try {
+            try {
+                List<KeyboardRow> keyboardCancel = new ArrayList<>();
+                KeyboardRow keyboardRow = new KeyboardRow(1);
+                keyboardRow.add("Остановить");
+                keyboardCancel.add(keyboardRow);
+                keyboardMarkup.setKeyboard(keyboardCancel);
+                keyboardMarkup.setResizeKeyboard(true);
+                SendMessage message = new SendMessage();
+                message.setChatId(String.valueOf(chatId));
+                message.setText("Начинаем торговлю на Binance \n" +
+                        "Монета: " + coin.getName() + "\n" +
+                        "Текущее количество USDT: " + BinanceAccount.wallet().getCoinBalance(Account.USD_TOKENS.USDT.getCoin()) + "\n" +
+                        "Сумма сделки: " + parameters[1] + " USDT" + "\n" +
+                        "Коэффициент покупки: " + buyGap + "%" + "\n" +
+                        "Коэффициент продажи в прибыль: " + sellWithProfitGap + "%" + "\n" +
+                        "Коэффициент продажи в убыток: " + sellWithLossGap + "%" + "\n" +
+                        "Частота обновления графика: " + updateTimeout + " сек" + "\n"
+                );
+                message.setReplyMarkup(keyboardMarkup); // Устанавливаем на клавиатуре кнопку "Остановить"
+                execute(message); // Отправка
+                Account finalBinanceAccount = BinanceAccount;  // создаем final переменную, чтобы можно было ее использовать в innerClass
+                processThread = new Thread() {
+                    @Override
+                    public void run() {
+                        try {
+                            CoinsList.loadCoinsWithMarketDataFormJsonFile(new File("coins"));
+                            currentState=UserState.CONDUCTING_REAL_TIME_RESEARCH;
+                            new ReversalPointsStrategyTrader(finalBinanceAccount,coin,tradingSum,buyGap,sellWithProfitGap, sellWithLossGap, updateTimeout, chatId).startTrading();
+
+                        } catch (BinanceClientException | IOException | NullPointerException e) {
+                            System.err.println("Ошибка во время проведения исследования в реальном времени");
+                            e.printStackTrace();
+                            ImageAndMessageSender.sendTelegramMessage(e.getMessage());
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                            ImageAndMessageSender.sendTelegramMessage(e.getMessage());
+                        }
+                    }
+                };
+                processThread.start();
+
+            } catch (TelegramApiException e) {
+                e.printStackTrace();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            throw new RuntimeException(e);
+        }finally {
+
+            TradingChart.clearChart();
+        }
+    }
 
 }
 

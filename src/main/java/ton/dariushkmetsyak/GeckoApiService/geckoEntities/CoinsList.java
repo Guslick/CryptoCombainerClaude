@@ -68,43 +68,59 @@ public class CoinsList{
         coins.clear();
         coins.addAll(objectMapper.readValue(file, new TypeReference<ArrayList<Coin>>(){}));
     }
+//    static Coin getCoin (String coinId){
+//        try {
+//           return getCoinByName(coinId);
+//        } catch (Exception e) {
+//            try {
+//              return   getCoinBySymbol(coinId);
+//            } catch (Exception ex) {
+//                throw new RuntimeException(ex);
+//            }
+//        }
+//    }
+
     static Coin getCoin (String coinId){
-        try {
-           return getCoinByName(coinId);
-        } catch (Exception e) {
-            try {
-              return   getCoinBySymbol(coinId);
-            } catch (Exception ex) {
-                throw new RuntimeException(ex);
-            }
-        }
+
+            if (getCoinByName(coinId)!=null) return getCoinByName(coinId);
+
+                if (getCoinBySymbol(coinId)!=null) return   getCoinBySymbol(coinId);
+                return null;
+
+
     }
-    public static Coin getCoinByName(String coin) throws Exception {
+
+
+
+    public static Coin getCoinByName(String coin) {
         for (Coin c: coins){
 
             if(c.getName().equalsIgnoreCase(coin)) {
                 return c;
             }
-        }
-        class NoSuchCoinException extends Exception{
-            NoSuchCoinException(String coin){
-                super(coin);
-            }
-        }
-        throw new NoSuchCoinException(coin);
+        } return null;
+//        class NoSuchCoinException extends Exception{
+//            NoSuchCoinException(String coin){
+//
+//                super(coin);
+////                printStackTrace();
+//            }
+//        }
+//
+//        throw new NoSuchCoinException(coin);
     }
-    public static Coin getCoinBySymbol(String coin) throws Exception {
+    public static Coin getCoinBySymbol(String coin){
         for (Coin c: coins){
             if(c.getSymbol().equalsIgnoreCase(coin)) {
                 return c;
             }
-        }
-        class NoSuchCoinException extends Exception{
-            NoSuchCoinException(String coin){
-                super(coin);
-            }
-        }
-        throw new NoSuchCoinException(coin);
+        }return null;
+//        class NoSuchCoinException extends Exception{
+//            NoSuchCoinException(String coin){
+//                super(coin);
+//            }
+//        }
+//        throw new NoSuchCoinException(coin);
     }
 
     public static ArrayList<Coin> getCoins(){return coins;}

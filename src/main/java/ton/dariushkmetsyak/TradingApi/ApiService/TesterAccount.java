@@ -46,7 +46,7 @@ public class TesterAccount extends Account {
            }
         private Map<String,String> orderParams  = new HashMap<>();
         @Override
-        public Boolean buy(Coin coin, double price, double quantity) throws InsufficientAmountOfUsdtException, NoSuchSymbolException {
+        public Double buy(Coin coin, double price, double quantity) throws InsufficientAmountOfUsdtException, NoSuchSymbolException {
                 int buyAttemts = 10; // число попыток покупки, после которых метод завершится неудачей и вернет false
                 double costInUsdt = price*quantity;
                 if (!assets.containsKey(USDT)||assets.containsKey(USDT) & assets.get(USDT)<costInUsdt) throw new InsufficientAmountOfUsdtException();
@@ -60,7 +60,7 @@ public class TesterAccount extends Account {
                         buyAttemts--;
                         if (orderParams.isEmpty()){
                             System.out.println("ORDER IS CANCELLED");
-                            return false;
+                            return null;
                         }
                         double currentPrice = getCurrentPrice(coin);
                         ImageAndMessageSender.sendTelegramMessage(String.format("SIDE\\BUY    | Order price: %-10.5g | Current price: %-10.5g | \n", Prices.round(price) , Prices.round(currentPrice)));
@@ -71,7 +71,7 @@ public class TesterAccount extends Account {
                             assets.computeIfPresent(coin, (key,value)->value+quantity);
                             assets.computeIfAbsent(coin, (value)->quantity);
                             System.out.println("You paid: " + costInUsdt + " USDT\n" );
-                            return true;
+                            return price;
                         }
                         try {
                             TimeUnit.SECONDS.sleep(15);
@@ -81,15 +81,15 @@ public class TesterAccount extends Account {
                     }
                 }
                     System.out.println("Exceeded limit of attempts to buy");
-                    return false;
+                    return null;
 
             }
 
 
 
         @Override
-        public Boolean sell(Coin coin, double price, double quantity) throws NoSuchSymbolException, InsufficientAmountOfCoinException {
-                double incomeInUsdt = price*quantity;
+        public Double sell(Coin coin, double price, double quantity) throws NoSuchSymbolException, InsufficientAmountOfCoinException {
+
                 if (!assets.containsKey(coin) || assets.get(coin)<quantity) throw new InsufficientAmountOfCoinException(coin.getName());
                 if (assets.containsKey(coin) && assets.get(coin)>=quantity){
                     orderParams.put("side","SELL");
@@ -100,18 +100,19 @@ public class TesterAccount extends Account {
                     while (true){
                         if (orderParams.isEmpty()){
                             System.out.println("ORDER IS CANCELLED");
-                            return false;
+                            return null;
                         }
                         double currentPrice = getCurrentPrice(coin);
                         ImageAndMessageSender.sendTelegramMessage(String.format("SIDE\\SELL    | Order price: %-10.5g | Current price: %-10.5g | \n", price , currentPrice));
                         System.out.printf("SIDE\\SELL    | Order price: %-10.5g | Current price: %-10.5g | \n", price , currentPrice);
                         if (currentPrice >= price) {
+                            double incomeInUsdt = price*quantity;
                             System.out.println("SELLING " + quantity + " " + coin);
                             assets.computeIfPresent(USDT, (key,value) -> value+incomeInUsdt);
                             assets.computeIfAbsent(USDT, (value) -> incomeInUsdt);
                             assets.compute(coin, (key,value)->value-quantity);
                             System.out.println("You got: " + incomeInUsdt + " USDT");
-                            return true;
+                            return price;
                         }
                         try {
                             price=price/100*99.9;
@@ -121,7 +122,7 @@ public class TesterAccount extends Account {
                         }
                     }
                 }
-                else return false;
+                else return null;
 
         }
 

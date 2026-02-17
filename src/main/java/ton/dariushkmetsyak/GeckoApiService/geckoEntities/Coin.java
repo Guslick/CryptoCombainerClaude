@@ -36,7 +36,7 @@ public class Coin{
 
     @Override
     public int hashCode() {
-        return super.hashCode();
+        return id == null ? 0 : id.toLowerCase().hashCode();
     }
 
     @Override
@@ -45,10 +45,11 @@ public class Coin{
             return true;
         }
         if (obj == null || getClass() != obj.getClass()) {
+
             return false;
         }
         Coin coin = (Coin) obj;
-        return this.getSymbol().equals(coin.getSymbol());
+        return this.getId().equalsIgnoreCase(coin.getId());
 
     }
 }
