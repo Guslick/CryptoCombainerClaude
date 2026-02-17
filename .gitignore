@@ -35,4 +35,8 @@ build/
 .vscode/
 
 ### Mac OS ###
-.DS_Store
+.DS_Store-e 
+# Trading state files
+trading_states/
+logs/
+*.backup.*
