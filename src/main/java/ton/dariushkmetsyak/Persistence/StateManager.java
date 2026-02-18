@@ -353,4 +353,41 @@ public class StateManager {
         String filePath = getStateFilePath(coinName, accountType);
         return TradingState.stateFileExists(filePath);
     }
+    
+    /**
+     * Найти любое сохранённое состояние для указанного типа аккаунта.
+     * Возвращает самое свежее состояние (не старше 24ч).
+     */
+    public TradingState findAnyState(String accountType) {
+        File dir = new File(stateDirectory);
+        if (!dir.exists() || !dir.isDirectory()) return null;
+        
+        String suffix = "_" + accountType.toLowerCase() + ".json";
+        File[] stateFiles = dir.listFiles((d, name) -> 
+            name.endsWith(suffix) && !name.contains(".backup."));
+        
+        if (stateFiles == null || stateFiles.length == 0) return null;
+        
+        // Берём самый свежий файл
+        File latestFile = stateFiles[0];
+        for (File f : stateFiles) {
+            if (f.lastModified() > latestFile.lastModified()) {
+                latestFile = f;
+            }
+        }
+        
+        try {
+            TradingState state = TradingState.loadFromFile(latestFile.getPath());
+            // Проверяем актуальность
+            long ageMs = System.currentTimeMillis() - state.getTimestamp();
+            if (ageMs > java.util.concurrent.TimeUnit.HOURS.toMillis(24)) {
+                log.info("State file too old (>24h), ignoring: {}", latestFile.getName());
+                return null;
+            }
+            return state;
+        } catch (Exception e) {
+            log.error("Failed to load state from {}", latestFile.getName(), e);
+            return null;
+        }
+    }
 }

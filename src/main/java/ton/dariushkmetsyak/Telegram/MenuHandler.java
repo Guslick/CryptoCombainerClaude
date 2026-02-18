@@ -18,6 +18,8 @@ import ton.dariushkmetsyak.Strategies.ReversalPointsStrategy.ResearchingStrategy
 import ton.dariushkmetsyak.Strategies.ReversalPointsStrategy.ResearchingStrategy.ReversalPointsStrategyTrader;
 import ton.dariushkmetsyak.TradingApi.ApiService.Account;
 import ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder;
+import ton.dariushkmetsyak.Persistence.StateManager;
+import ton.dariushkmetsyak.Persistence.TradingState;
 
 
 import javax.sound.midi.Soundbank;
@@ -33,6 +35,7 @@ public class MenuHandler extends TelegramLongPollingBot {
   //  final private static String chatId = "-1002382149738";
     ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
     Thread processThread;
+    TradingState savedState = null;  // Для хранения найденного сохранённого состояния
     enum UserState {
         IDLE,          // Ничего не ждём
         WAITING_FOR_OPTION,  // Ждём выбор варианта (1-4)
@@ -40,6 +43,8 @@ public class MenuHandler extends TelegramLongPollingBot {
         CONDUCTING_REAL_TIME_RESEARCH,  // Ждём строку
         BEFORE_BACK_TESTING_RESEARCH,
         CONDUCTING_BACK_TESTING_RESEARCH,  // Ждём строку
+        CHECK_SAVED_STATE_BINANCE,  // Проверяем наличие сохранённого состояния для Binance
+        CHECK_SAVED_STATE_BINANCE_TEST,  // Проверяем наличие сохранённого состояния для Binance Test
         BEFORE_BINANCE_TRADING,
         CONDUCTING_BINANCE_TRADING,
         BEFORE_BINANCE_TEST_TRADING,
@@ -67,24 +72,12 @@ public class MenuHandler extends TelegramLongPollingBot {
                         setMenu(chatId, "Что будем делать");
                         break;
                     } else if (messageText.equals("Торговля")) {
-                        currentState = UserState.BEFORE_BINANCE_TRADING;
-                        SendMessage message = new SendMessage();
-                        message.setChatId(String.valueOf(chatId));
-                        message.setReplyMarkup(keyboardMarkup); // Устанавливаем на клавиатуре кнопку "Остановить"
-                        message.setText(" Введите параметры для торговли на Binance. \n\n" +
-                                "Образец: монета, сумма_сделки_в_USDT, коэффициент_покупки_(в %), коэффициент_продажи_в_прибыль_(в %),коэффициент_продажи_в_убыток_(в %) частота_обновления_графика(в сек) \n\n"+
-                                "Пример: bitcoin, 100, 3.5, 2, 8, 30 ");
-                        setCancelKeyboard(chatId,message);
+                        currentState = UserState.CHECK_SAVED_STATE_BINANCE;
+                        checkSavedStateAndPrompt(chatId, "BINANCEACCOUNT");
                         break;
                     } else if (messageText.equals("Тестовая торговля на Binance")) {
-                        currentState = UserState.BEFORE_BINANCE_TEST_TRADING;
-                        SendMessage message = new SendMessage();
-                        message.setChatId(String.valueOf(chatId));
-                        message.setReplyMarkup(keyboardMarkup); // Устанавливаем на клавиатуре кнопку "Остановить"
-                        message.setText(" Введите параметры для тестовой торговли на Binance. \n\n" +
-                                "Образец: монета, сумма_сделки_в_USDT, коэффициент_покупки_(в %), коэффициент_продажи_в_прибыль_(в %),коэффициент_продажи_в_убыток_(в %) частота_обновления_графика(в сек) \n\n"+
-                                "Пример: bitcoin, 100, 3.5, 2, 8, 30 ");
-                        setCancelKeyboard(chatId,message);
+                        currentState = UserState.CHECK_SAVED_STATE_BINANCE_TEST;
+                        checkSavedStateAndPrompt(chatId, "TESTERACCOUNT");
                         break;
                     } else if (messageText.equals("Историческое исследование")) {
                         currentState = UserState.BEFORE_BACK_TESTING_RESEARCH;
@@ -129,6 +122,62 @@ public class MenuHandler extends TelegramLongPollingBot {
                         currentState=UserState.WAITING_FOR_OPTION;
                         setMenu(chatId, "Остановлено. Что будем делать в этот раз?");
                         break;
+                    }
+                    break;
+                }
+
+                case CHECK_SAVED_STATE_BINANCE: {
+                    if (messageText.equals("Отмена")) {
+                        currentState = UserState.WAITING_FOR_OPTION;
+                        setMenu(chatId, "Отменено. Что будем делать?");
+                        return;
+                    } else if (messageText.equals("📊 Продолжить торговлю")) {
+                        // Восстановить торговлю из сохранённого состояния
+                        resumeBinanceTrading(chatId, savedState);
+                        return;
+                    } else if (messageText.equals("🆕 Начать заново")) {
+                        // Удалить старое состояние и запросить новые параметры
+                        StateManager sm = new StateManager();
+                        if (savedState != null) {
+                            sm.deleteState(savedState.getCoinName(), savedState.getAccountType());
+                            savedState = null;
+                        }
+                        currentState = UserState.BEFORE_BINANCE_TRADING;
+                        SendMessage message = new SendMessage();
+                        message.setChatId(String.valueOf(chatId));
+                        message.setText(" Введите параметры для торговли на Binance. \n\n" +
+                                "Образец: монета, сумма_сделки_в_USDT, коэффициент_покупки_(в %), коэффициент_продажи_в_прибыль_(в %),коэффициент_продажи_в_убыток_(в %) частота_обновления_графика(в сек) \n\n"+
+                                "Пример: bitcoin, 100, 3.5, 2, 8, 30 ");
+                        setCancelKeyboard(chatId, message);
+                        return;
+                    }
+                    break;
+                }
+
+                case CHECK_SAVED_STATE_BINANCE_TEST: {
+                    if (messageText.equals("Отмена")) {
+                        currentState = UserState.WAITING_FOR_OPTION;
+                        setMenu(chatId, "Отменено. Что будем делать?");
+                        return;
+                    } else if (messageText.equals("📊 Продолжить торговлю")) {
+                        // Восстановить торговлю из сохранённого состояния
+                        resumeBinanceTestTrading(chatId, savedState);
+                        return;
+                    } else if (messageText.equals("🆕 Начать заново")) {
+                        // Удалить старое состояние и запросить новые параметры
+                        StateManager sm = new StateManager();
+                        if (savedState != null) {
+                            sm.deleteState(savedState.getCoinName(), savedState.getAccountType());
+                            savedState = null;
+                        }
+                        currentState = UserState.BEFORE_BINANCE_TEST_TRADING;
+                        SendMessage message = new SendMessage();
+                        message.setChatId(String.valueOf(chatId));
+                        message.setText(" Введите параметры для тестовой торговли на Binance. \n\n" +
+                                "Образец: монета, сумма_сделки_в_USDT, коэффициент_покупки_(в %), коэффициент_продажи_в_прибыль_(в %),коэффициент_продажи_в_убыток_(в %) частота_обновления_графика(в сек) \n\n"+
+                                "Пример: bitcoin, 100, 3.5, 2, 8, 30 ");
+                        setCancelKeyboard(chatId, message);
+                        return;
                     }
                     break;
                 }
@@ -779,6 +828,176 @@ private void conducting_real_time_research (Update update, long chatId, String m
         }finally {
 
             TradingChart.clearChart();
+        }
+    }
+
+    /**
+     * Проверяет наличие сохранённого состояния и показывает кнопки выбора
+     */
+    private void checkSavedStateAndPrompt(long chatId, String accountType) {
+        StateManager stateManager = new StateManager();
+        savedState = stateManager.findAnyState(accountType);
+        
+        if (savedState != null) {
+            // Есть сохранённое состояние - показать выбор
+            List<KeyboardRow> keyboard = new ArrayList<>();
+            KeyboardRow row1 = new KeyboardRow();
+            row1.add("📊 Продолжить торговлю");
+            KeyboardRow row2 = new KeyboardRow();
+            row2.add("🆕 Начать заново");
+            KeyboardRow row3 = new KeyboardRow();
+            row3.add("Отмена");
+            keyboard.add(row1);
+            keyboard.add(row2);
+            keyboard.add(row3);
+            keyboardMarkup.setKeyboard(keyboard);
+            keyboardMarkup.setResizeKeyboard(true);
+            
+            SendMessage message = new SendMessage();
+            message.setChatId(String.valueOf(chatId));
+            message.setText("🔄 Найдена незавершённая торговая сессия!\n\n" +
+                    "Монета: " + savedState.getCoinName() + "\n" +
+                    "Сохранено: " + new Date(savedState.getTimestamp()) + "\n" +
+                    "Сумма сделки: " + savedState.getTradingSum() + " USDT\n" +
+                    "Коэффициенты: buy=" + savedState.getBuyGap() + "%, profit=" + 
+                    savedState.getSellWithProfitGap() + "%, loss=" + savedState.getSellWithLossGap() + "%\n" +
+                    "Статус: " + (savedState.isTrading() ? "В торговле" : "Ищет точку входа") + "\n\n" +
+                    "Что делать?");
+            message.setReplyMarkup(keyboardMarkup);
+            
+            try {
+                execute(message);
+            } catch (TelegramApiException e) {
+                e.printStackTrace();
+            }
+        } else {
+            // Нет сохранённого состояния - сразу запросить параметры
+            savedState = null;
+            if (accountType.equals("BINANCEACCOUNT")) {
+                currentState = UserState.BEFORE_BINANCE_TRADING;
+            } else {
+                currentState = UserState.BEFORE_BINANCE_TEST_TRADING;
+            }
+            
+            SendMessage message = new SendMessage();
+            message.setChatId(String.valueOf(chatId));
+            String tradingType = accountType.equals("BINANCEACCOUNT") ? "торговли" : "тестовой торговли";
+            message.setText(" Введите параметры для " + tradingType + " на Binance. \n\n" +
+                    "Образец: монета, сумма_сделки_в_USDT, коэффициент_покупки_(в %), коэффициент_продажи_в_прибыль_(в %),коэффициент_продажи_в_убыток_(в %) частота_обновления_графика(в сек) \n\n"+
+                    "Пример: bitcoin, 100, 3.5, 2, 8, 30 ");
+            setCancelKeyboard(chatId, message);
+        }
+    }
+
+    /**
+     * Восстановить торговлю на Binance из сохранённого состояния
+     */
+    private void resumeBinanceTrading(long chatId, TradingState state) {
+        if (state == null) {
+            sendText(chatId, "Ошибка: состояние не найдено");
+            return;
+        }
+        
+        try {
+            CoinsList.loadCoinsWithMarketDataFormJsonFile(new File("coins"));
+            Coin coin = CoinsList.getCoinByName(state.getCoinName());
+            
+            final char[] Ed25519_PRIVATE_KEY = "/home/kmieciaki/Рабочий стол//Ed PV.pem".toCharArray();
+            final char[] Ed25519_API_KEY = "cPhdnHOtrzMU2fxBnY8zG68H1ZujKCs8oZCn1YBNLPqh98F0aaD2PfWl9HwpXKCo".toCharArray();
+            Account binanceAccount = AccountBuilder.createNewBinance(Ed25519_API_KEY, Ed25519_PRIVATE_KEY, AccountBuilder.BINANCE_BASE_URL.MAINNET);
+            
+            List<KeyboardRow> keyboard = new ArrayList<>();
+            KeyboardRow row = new KeyboardRow(1);
+            row.add("Остановить");
+            keyboard.add(row);
+            keyboardMarkup.setKeyboard(keyboard);
+            keyboardMarkup.setResizeKeyboard(true);
+            
+            SendMessage message = new SendMessage();
+            message.setChatId(String.valueOf(chatId));
+            message.setText("🔄 Восстанавливаю торговлю...");
+            message.setReplyMarkup(keyboardMarkup);
+            execute(message);
+            
+            Account finalAccount = binanceAccount;
+            processThread = new Thread() {
+                @Override
+                public void run() {
+                    try {
+                        currentState = UserState.CONDUCTING_BINANCE_TRADING;
+                        // Передаём savedState в конструктор трейдера
+                        new ReversalPointsStrategyTrader(
+                                finalAccount, coin, 0, 0, 0, 0, 0, chatId, state
+                        ).startTrading();
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        ImageAndMessageSender.sendTelegramMessage("❌ Ошибка: " + e.getMessage());
+                    }
+                }
+            };
+            processThread.start();
+            
+        } catch (Exception e) {
+            e.printStackTrace();
+            sendText(chatId, "Ошибка при восстановлении торговли: " + e.getMessage());
+        } finally {
+            savedState = null;
+        }
+    }
+
+    /**
+     * Восстановить тестовую торговлю на Binance из сохранённого состояния
+     */
+    private void resumeBinanceTestTrading(long chatId, TradingState state) {
+        if (state == null) {
+            sendText(chatId, "Ошибка: состояние не найдено");
+            return;
+        }
+        
+        try {
+            CoinsList.loadCoinsWithMarketDataFormJsonFile(new File("coins"));
+            Coin coin = CoinsList.getCoinByName(state.getCoinName());
+            
+            char[] TEST_Ed25519_PRIVATE_KEY = "/home/kmieciaki/Рабочий стол//test-prv-key.pem".toCharArray();
+            char[] TEST_Ed25519_API_KEY = "dLlBZX4SsOwXuDioeLWfOFCldwqgwGrIGhGEZdIUWtBCSKsTvqXyl0eYm6lepcAr".toCharArray();
+            Account testBinanceAccount = AccountBuilder.createNewBinance(TEST_Ed25519_API_KEY, TEST_Ed25519_PRIVATE_KEY, AccountBuilder.BINANCE_BASE_URL.TESTNET);
+            
+            List<KeyboardRow> keyboard = new ArrayList<>();
+            KeyboardRow row = new KeyboardRow(1);
+            row.add("Остановить");
+            keyboard.add(row);
+            keyboardMarkup.setKeyboard(keyboard);
+            keyboardMarkup.setResizeKeyboard(true);
+            
+            SendMessage message = new SendMessage();
+            message.setChatId(String.valueOf(chatId));
+            message.setText("🔄 Восстанавливаю тестовую торговлю...");
+            message.setReplyMarkup(keyboardMarkup);
+            execute(message);
+            
+            Account finalAccount = testBinanceAccount;
+            processThread = new Thread() {
+                @Override
+                public void run() {
+                    try {
+                        currentState = UserState.CONDUCTING_BINANCE_TEST_TRADING;
+                        // Передаём savedState в конструктор трейдера
+                        new ReversalPointsStrategyTrader(
+                                finalAccount, coin, 0, 0, 0, 0, 0, chatId, state
+                        ).startTrading();
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        ImageAndMessageSender.sendTelegramMessage("❌ Ошибка: " + e.getMessage());
+                    }
+                }
+            };
+            processThread.start();
+            
+        } catch (Exception e) {
+            e.printStackTrace();
+            sendText(chatId, "Ошибка при восстановлении тестовой торговли: " + e.getMessage());
+        } finally {
+            savedState = null;
         }
     }
 

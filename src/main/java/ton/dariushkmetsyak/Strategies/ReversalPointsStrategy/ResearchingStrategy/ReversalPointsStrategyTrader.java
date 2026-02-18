@@ -63,33 +63,59 @@ public class ReversalPointsStrategyTrader {
 
     public ReversalPointsStrategyTrader(Account account, Coin coin, double tradingSum,
                                         double percentageGap, int updateTimeout, Long chatID) {
-        this(account, coin, tradingSum, percentageGap, percentageGap / 2, percentageGap, updateTimeout, chatID);
+        this(account, coin, tradingSum, percentageGap, percentageGap / 2, percentageGap, updateTimeout, chatID, null);
     }
 
     public ReversalPointsStrategyTrader(Account account, Coin coin, double tradingSum,
                                         double buyGap, double sellWithProfitGap,
                                         double sellWithLossGap, int updateTimeout, Long chatID) {
+        this(account, coin, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chatID, null);
+    }
+
+    /**
+     * Главный конструктор с возможностью восстановления из сохранённого состояния.
+     * 
+     * @param savedState Если не null - восстанавливает торговлю из этого состояния, 
+     *                   игнорируя параметры tradingSum, buyGap и т.д.
+     */
+    public ReversalPointsStrategyTrader(Account account, Coin coin, double tradingSum,
+                                        double buyGap, double sellWithProfitGap,
+                                        double sellWithLossGap, int updateTimeout, Long chatID,
+                                        TradingState savedState) {
         this.account = account;
         this.coin = coin;
-        this.tradingSum = tradingSum;
-        this.buyGap = buyGap;
-        this.sellWithProfitGap = sellWithProfitGap;
-        this.sellWithLossGap = sellWithLossGap;
-        this.updateTimeout = updateTimeout;
         this.chatID = chatID;
         this.accountType = account.getClass().getSimpleName().toUpperCase();
         this.stateManager = new StateManager();
 
-        // Пытаемся восстановить состояние
-        if (!tryRestoreState()) {
+        // Если передано сохранённое состояние - восстанавливаем из него
+        if (savedState != null && tryRestoreFromState(savedState)) {
+            // Параметры восстановлены из savedState
             ImageAndMessageSender.sendTelegramMessage(
-                    "Баланс кошелька: " + account.wallet().getAllAssets().toString(), chatID);
+                    "✅ Торговля восстановлена!\n" +
+                    "Монета: " + this.coin.getName() + "\n" +
+                    "Сохранено: " + new Date(savedState.getTimestamp()) + "\n" +
+                    "Сумма сделки: " + this.tradingSum + " USDT\n" +
+                    "Коэффициенты: buy=" + this.buyGap + "%, profit=" + 
+                    this.sellWithProfitGap + "%, loss=" + this.sellWithLossGap + "%\n" +
+                    "Статус: " + (trading ? "В торговле, куплено за " + Prices.round(boughtFor) : "Ищет точку входа"),
+                    chatID);
+        } else {
+            // Новая сессия - используем переданные параметры
+            this.tradingSum = tradingSum;
+            this.buyGap = buyGap;
+            this.sellWithProfitGap = sellWithProfitGap;
+            this.sellWithLossGap = sellWithLossGap;
+            this.updateTimeout = updateTimeout;
+            
+            ImageAndMessageSender.sendTelegramMessage(
+                    "🆕 Новая торговая сессия\nБаланс: " + account.wallet().getAllAssets(), chatID);
         }
 
         // Автосохранение каждые 30 секунд
         stateManager.startAutosave();
 
-        // Сохраняем при любом завершении JVM
+        // Сохраняем при завершении JVM
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             System.out.println("[Trader] Завершение — финальное сохранение...");
             persistState();
@@ -99,17 +125,21 @@ public class ReversalPointsStrategyTrader {
 
     // ---- Persistence: восстановление ----
 
-    private boolean tryRestoreState() {
-        TradingState state = stateManager.loadState(coin.getName(), accountType);
+    /**
+     * Восстановление из переданного состояния.
+     * Возвращает true если успешно.
+     */
+    private boolean tryRestoreFromState(TradingState state) {
         if (state == null) return false;
 
-        long ageMs = System.currentTimeMillis() - state.getTimestamp();
-        if (ageMs > TimeUnit.HOURS.toMillis(24)) {
-            ImageAndMessageSender.sendTelegramMessage(
-                    "Сохранённое состояние устарело (>24ч), начинаем заново", chatID);
-            return false;
-        }
-
+        // Восстанавливаем ВСЕ параметры из состояния
+        this.tradingSum = state.getTradingSum();
+        this.buyGap = state.getBuyGap();
+        this.sellWithProfitGap = state.getSellWithProfitGap();
+        this.sellWithLossGap = state.getSellWithLossGap();
+        this.updateTimeout = state.getUpdateTimeout();
+        
+        // Восстанавливаем торговое состояние
         this.trading = state.isTrading();
         this.buyPrice = state.getBuyPrice() != null ? state.getBuyPrice() : 0;
         this.boughtFor = state.getBoughtFor();
@@ -132,11 +162,6 @@ public class ReversalPointsStrategyTrader {
                         new double[]{rp.getTimestamp(), rp.getPrice()}, rp.getTag()));
         }
 
-        ImageAndMessageSender.sendTelegramMessage(
-                "Состояние восстановлено!\n" +
-                "Сохранено: " + new Date(state.getTimestamp()) + "\n" +
-                "В торговле: " + (trading ? "Да, куплено за " + Prices.round(boughtFor) : "Нет"),
-                chatID);
         return true;
     }
 
