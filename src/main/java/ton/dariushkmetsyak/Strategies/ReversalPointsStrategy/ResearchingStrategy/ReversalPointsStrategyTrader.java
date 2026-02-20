@@ -1,6 +1,8 @@
 package ton.dariushkmetsyak.Strategies.ReversalPointsStrategy.ResearchingStrategy;
 
 import com.binance.connector.client.exceptions.BinanceConnectorException;
+import ton.dariushkmetsyak.ErrorHandling.ErrorHandler;
+import ton.dariushkmetsyak.ErrorHandling.RetryPolicy;
 import ton.dariushkmetsyak.GeckoApiService.geckoEntities.Coin;
 import ton.dariushkmetsyak.Graphics.DrawTradingChart.TradingChart;
 import ton.dariushkmetsyak.Persistence.StateManager;
@@ -11,6 +13,8 @@ import ton.dariushkmetsyak.TradingApi.ApiService.Exceptions.InsufficientAmountOf
 import ton.dariushkmetsyak.TradingApi.ApiService.Exceptions.InsufficientAmountOfUsdtException;
 import ton.dariushkmetsyak.TradingApi.ApiService.Exceptions.NoSuchSymbolException;
 import ton.dariushkmetsyak.Util.Prices;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -20,6 +24,7 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 public class ReversalPointsStrategyTrader {
+    private static final Logger log = LoggerFactory.getLogger(ReversalPointsStrategyTrader.class);
 
     TreeMap<Double, Double> prices = new TreeMap<>();
     ArrayList<Reversal> reversalArrayList = new ArrayList<>();
@@ -315,36 +320,177 @@ public class ReversalPointsStrategyTrader {
     }
 
     public void startTrading() {
+        log.info("[Trader] Starting trading for {}", coin.getName());
+        
+        // Инициализация с retry
+        RetryPolicy initRetry = RetryPolicy.forApiCalls();
         try {
-            this.init(System.currentTimeMillis(), Prices.round(Account.getCurrentPrice(coin)));
-        } catch (NoSuchSymbolException e) {
-            throw new RuntimeException(e);
+            initRetry.executeVoid(() -> {
+                try {
+                    this.init(System.currentTimeMillis(), Prices.round(Account.getCurrentPrice(coin)));
+                } catch (NoSuchSymbolException e) {
+                    throw new RuntimeException(e);
+                }
+            }, "Trading initialization");
+        } catch (Exception e) {
+            ErrorHandler.handleFatalError(e, "Trading Initialization",
+                "Initializing trader for " + coin.getName());
+            return; // Невозможно продолжить без инициализации
         }
+        
+        int consecutiveErrors = 0;
+        int maxConsecutiveErrors = 10;
+        
         while (true) {
             try {
                 TimeUnit.SECONDS.sleep(updateTimeout);
-                this.startResearchingChart(
-                        System.currentTimeMillis(),
-                        Prices.round(Account.getCurrentPrice(coin)));
-            } catch (NoSuchSymbolException | InsufficientAmountOfUsdtException |
-                     BinanceConnectorException e) {
-                e.printStackTrace();
-                ImageAndMessageSender.sendTelegramMessage("Ошибка: " + e.getMessage());
-                persistState(); // сохранить при ошибке
+                
+                // Получение цены с retry
+                double currentPrice;
+                try {
+                    RetryPolicy priceRetry = RetryPolicy.forApiCalls();
+                    currentPrice = priceRetry.execute(() -> {
+                        try {
+                            return Prices.round(Account.getCurrentPrice(coin));
+                        } catch (NoSuchSymbolException e) {
+                            throw new RuntimeException(e);
+                        }
+                    }, "Get current price");
+                } catch (Exception e) {
+                    ErrorHandler.handleWarning(e, "Price Fetching",
+                        "Getting price for " + coin.getName());
+                    consecutiveErrors++;
+                    if (consecutiveErrors >= maxConsecutiveErrors) {
+                        ErrorHandler.handleFatalError(e, "Price Fetching",
+                            String.format("Failed to get price %d times in a row", maxConsecutiveErrors));
+                        break;
+                    }
+                    continue; // Пропустить этот тик
+                }
+                
+                // Анализ графика и торговля
+                this.startResearchingChart(System.currentTimeMillis(), currentPrice);
+                
+                // Сброс счётчика ошибок при успехе
+                consecutiveErrors = 0;
+                
+            } catch (NoSuchSymbolException | InsufficientAmountOfUsdtException e) {
+                consecutiveErrors++;
+                boolean canRecover = ErrorHandler.handleError(e,
+                    "Trading Loop",
+                    "Processing trading logic for " + coin.getName(),
+                    true);
+                
+                persistState(); // Сохранить состояние при ошибке
+                
+                if (consecutiveErrors >= maxConsecutiveErrors) {
+                    ErrorHandler.handleFatalError(e, "Trading Loop",
+                        String.format("Too many consecutive errors (%d)", maxConsecutiveErrors));
+                    break;
+                }
+                
+                // Задержка перед следующей попыткой
+                try {
+                    TimeUnit.SECONDS.sleep(30);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+                
+            } catch (BinanceConnectorException e) {
+                consecutiveErrors++;
+                ErrorHandler.handleError(e,
+                    "Binance API",
+                    "API call during trading",
+                    true);
+                
+                persistState();
+                
+                if (consecutiveErrors >= maxConsecutiveErrors) {
+                    ErrorHandler.handleFatalError(e, "Binance API",
+                        "Binance API unavailable for too long");
+                    break;
+                }
+                
+                try {
+                    TimeUnit.SECONDS.sleep(60); // Длинная задержка для API проблем
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+                
             } catch (NullPointerException e) {
-                e.printStackTrace();
+                log.error("[Trader] Unexpected NullPointerException", e);
+                ErrorHandler.handleError(e,
+                    "Trading Loop",
+                    "Null pointer in trading logic - possible data corruption",
+                    true);
+                
+                persistState();
+                consecutiveErrors++;
+                
+                if (consecutiveErrors >= 3) {
+                    ErrorHandler.handleFatalError(e, "Trading Loop",
+                        "Repeated null pointer exceptions indicate data corruption");
+                    break;
+                }
+                
             } catch (InterruptedException e) {
-                System.out.println("[Trader] Прерван — сохраняем состояние");
+                log.info("[Trader] Trading interrupted - shutting down gracefully");
                 persistState();
                 stateManager.shutdown();
+                
+                try {
+                    ImageAndMessageSender.sendTelegramMessage(
+                        "🛑 Торговля остановлена по команде пользователя\n" +
+                        "Состояние сохранено.");
+                } catch (Exception ignored) {}
+                
+                Thread.currentThread().interrupt();
                 return;
+                
+            } catch (Exception e) {
+                // Неожиданная ошибка
+                consecutiveErrors++;
+                log.error("[Trader] Unexpected error in trading loop", e);
+                
+                ErrorHandler.handleError(e,
+                    "Trading Loop",
+                    "Unexpected exception: " + e.getClass().getSimpleName(),
+                    true);
+                
+                persistState();
+                
+                if (consecutiveErrors >= 5) {
+                    ErrorHandler.handleFatalError(e, "Trading Loop",
+                        "Too many unexpected errors");
+                    break;
+                }
             }
         }
+        
+        // Завершение работы
+        log.info("[Trader] Trading stopped");
+        persistState();
+        stateManager.shutdown();
+        
+        try {
+            ImageAndMessageSender.sendTelegramMessage(
+                "⛔ Торговля остановлена из-за критических ошибок\n" +
+                "Состояние сохранено. Требуется перезапуск.");
+        } catch (Exception ignored) {}
     }
 
     public void sendPhotoToTelegram() {
         String currentPicturePath = LocalDateTime.now().toString();
-        TradingChart.makeScreenShot(currentPicturePath);
+        
+        try {
+            TradingChart.makeScreenShot(currentPicturePath);
+        } catch (Exception e) {
+            log.error("Failed to create chart screenshot", e);
+            ErrorHandler.handleWarning(e, "Chart Screenshot", "Creating chart image");
+            return; // Не можем отправить без картинки
+        }
 
         if (!trading) {
             chartScreenshotMessage =
@@ -375,12 +521,21 @@ public class ReversalPointsStrategyTrader {
             boughtFor = soldFor = null;
         }
 
-        prevMessageId = ImageAndMessageSender.sendPhoto(currentPicturePath, chartScreenshotMessage);
+        try {
+            prevMessageId = ImageAndMessageSender.sendPhoto(currentPicturePath, chartScreenshotMessage);
+        } catch (Exception e) {
+            log.error("Failed to send photo to Telegram", e);
+            ErrorHandler.handleWarning(e, "Telegram Photo", "Sending chart to Telegram");
+            // Продолжаем работу даже если не удалось отправить фото
+        }
+        
+        // Безопасное удаление временного файла
         try {
             Files.delete(Path.of(currentPicturePath));
         } catch (IOException e) {
-            System.err.println("Error deleting file: " + currentPicturePath);
-            throw new RuntimeException(e);
+            log.warn("Failed to delete temporary file: {}", currentPicturePath);
+            // НЕ бросаем исключение - это не критично
+            // Файл будет удалён позже или при следующем запуске
         }
     }
 }

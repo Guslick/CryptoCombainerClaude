@@ -52,76 +52,199 @@ public class BinanceAccount extends Account {
        private Map<String,Object> orderParameters;
 
        BinanceSpotTrader(BinanceAccount binanceAccount) {
-           boolean result = false;
-           while (!result) {
+           int maxAttempts = 5;
+           int attempt = 0;
+           Exception lastError = null;
+           
+           while (attempt < maxAttempts) {
+               attempt++;
                try {
+                   log.info("Creating Binance client, attempt {}/{}", attempt, maxAttempts);
                    Ed25519SignatureGenerator signatureGenerator = new Ed25519SignatureGenerator(String.valueOf(binanceAccount.getPrivate_key()));
                    client = new SpotClientImpl(String.valueOf(binanceAccount.getApi_key()), signatureGenerator, baseUrl.toString());
-                   result=true;
+                   log.info("Binance client created successfully");
+                   return; // Успех
+                   
                } catch (Exception e) {
-                   ImageAndMessageSender.sendTelegramMessage("При создании аккаунта Binance произошла ошибка:\n" + e.getMessage());
-
-                   e.printStackTrace();
+                   lastError = e;
+                   log.error("Failed to create Binance client, attempt {}/{}: {}", 
+                       attempt, maxAttempts, e.getMessage());
+                   
+                   String message = String.format(
+                       "⚠️ Попытка %d/%d создания Binance клиента\n" +
+                       "Ошибка: %s",
+                       attempt, maxAttempts, e.getMessage()
+                   );
+                   
                    try {
-                       TimeUnit.SECONDS.sleep(10);
-                   } catch (InterruptedException ex) {
-                       return;
+                       ImageAndMessageSender.sendTelegramMessage(message);
+                   } catch (Exception ignored) {}
+                   
+                   if (attempt < maxAttempts) {
+                       try {
+                           TimeUnit.SECONDS.sleep(10);
+                       } catch (InterruptedException ex) {
+                           Thread.currentThread().interrupt();
+                           throw new RuntimeException("Interrupted while creating Binance client", ex);
+                       }
                    }
-
                }
            }
+           
+           // Все попытки неудачны
+           String fatalMessage = String.format(
+               "🛑 КРИТИЧЕСКАЯ ОШИБКА\n\n" +
+               "Не удалось создать Binance клиент после %d попыток\n" +
+               "Последняя ошибка: %s\n\n" +
+               "Проверьте:\n" +
+               "1. API ключи корректны\n" +
+               "2. Файл приватного ключа доступен\n" +
+               "3. Сеть доступна",
+               maxAttempts, lastError != null ? lastError.getMessage() : "Unknown"
+           );
+           
+           try {
+               ImageAndMessageSender.sendTelegramMessage(fatalMessage);
+           } catch (Exception ignored) {}
+           
+           throw new RuntimeException("Failed to create Binance client after " + maxAttempts + " attempts", lastError);
        }
 
        public Double sell(Coin coin, double price, double quantity) {
 
            Map<String, Object> parameters = new LinkedHashMap<>();
+           double adjustedQuantity = Prices.round(quantity-(quantity*0.2/100));
+           
+           log.info("Attempting to sell {} {} at price {}", adjustedQuantity, coin.getName(), price);
            System.out.println("Quantity: "+ quantity);
-           System.out.println("Precised quantity: " +Prices.round(quantity-(quantity*0.2/100)));
+           System.out.println("Precised quantity: " + adjustedQuantity);
+           
            parameters.put("symbol", coin.getUsdtPair());
            parameters.put("side", "SELL");
            parameters.put("type", "LIMIT");
            parameters.put("timeInForce", "GTC");
-           parameters.put("quantity", Prices.round(quantity-(quantity*0.2/100)));
+           parameters.put("quantity", adjustedQuantity);
            parameters.put("price", price);
 
            try {
                String response = client.createTrade().newOrder(parameters);
                orderParameters=getOrderParameters(response);
+               log.info("Sell order placed successfully");
+               return price;
+               
            } catch (BinanceConnectorException e) {
-               System.err.println((String) String.format("fullErrMessage: %s", e.getMessage()));
+               String errorMsg = String.format(
+                   "❌ Ошибка продажи %s\n\n" +
+                   "Тип: BinanceConnectorException\n" +
+                   "Сообщение: %s\n" +
+                   "Цена: %s\n" +
+                   "Количество: %s",
+                   coin.getName(), e.getMessage(), price, adjustedQuantity
+               );
+               log.error("Sell order failed: {}", e.getMessage());
+               System.err.println(errorMsg);
+               
+               try {
+                   ImageAndMessageSender.sendTelegramMessage(errorMsg);
+               } catch (Exception ignored) {}
+               
                return null;
+               
            } catch (BinanceClientException e) {
-               System.err.println((String) String.format("fullErrMessage: %s \nerrMessage: %s \nerrCode: %d \nHTTPStatusCode: %d",
-                       e.getMessage(), e.getErrMsg(), e.getErrorCode(), e.getHttpStatusCode()));
+               String errorMsg = String.format(
+                   "❌ Ошибка продажи %s\n\n" +
+                   "Тип: BinanceClientException\n" +
+                   "Код ошибки: %d\n" +
+                   "HTTP статус: %d\n" +
+                   "Сообщение: %s\n" +
+                   "Детали: %s\n\n" +
+                   "Цена: %s\n" +
+                   "Количество: %s",
+                   coin.getName(),
+                   e.getErrorCode(),
+                   e.getHttpStatusCode(),
+                   e.getMessage(),
+                   e.getErrMsg(),
+                   price,
+                   adjustedQuantity
+               );
+               log.error("Sell order failed: {} (code: {}, http: {})", 
+                   e.getMessage(), e.getErrorCode(), e.getHttpStatusCode());
+               System.err.println(errorMsg);
+               
+               try {
+                   ImageAndMessageSender.sendTelegramMessage(errorMsg);
+               } catch (Exception ignored) {}
+               
                return null;
            }
-           return price;
            }
 
 
            public Double buy(Coin coin, double price, double quantity) {
+               double adjustedQuantity = Prices.round(quantity-(quantity*0.2/100));
+               
+               log.info("Attempting to buy {} {} at price {}", adjustedQuantity, coin.getName(), price);
                System.out.println("Quantity: "+ quantity);
-               System.out.println("Precised quantity: " +Prices.round(quantity-(quantity*0.2/100)));
+               System.out.println("Precised quantity: " + adjustedQuantity);
+               
                Map<String, Object> parameters = new LinkedHashMap<>();
                parameters.put("symbol", coin.getUsdtPair());
                parameters.put("side", "BUY");
                parameters.put("type", "LIMIT");
                parameters.put("timeInForce", "GTC");
-             //  parameters.put("quantity", Prices.round(quantity)-(Prices.round(quantity)*0.2/100));
-                 parameters.put("quantity", Prices.round(quantity-(quantity*0.2/100)));
-
+               parameters.put("quantity", adjustedQuantity);
                parameters.put("price", price);
 
                try {
                    String response = client.createTrade().newOrder(parameters);
                    orderParameters = getOrderParameters(response);
+                   log.info("Buy order placed successfully");
                    return price;
+                   
                } catch (BinanceConnectorException e) {
-                   System.err.println((String) String.format("fullErrMessage: %s", e.getMessage()));
+                   String errorMsg = String.format(
+                       "❌ Ошибка покупки %s\n\n" +
+                       "Тип: BinanceConnectorException\n" +
+                       "Сообщение: %s\n" +
+                       "Цена: %s\n" +
+                       "Количество: %s",
+                       coin.getName(), e.getMessage(), price, adjustedQuantity
+                   );
+                   log.error("Buy order failed: {}", e.getMessage());
+                   System.err.println(errorMsg);
+                   
+                   try {
+                       ImageAndMessageSender.sendTelegramMessage(errorMsg);
+                   } catch (Exception ignored) {}
+                   
                } catch (BinanceClientException e) {
-                   System.err.println((String) String.format("fullErrMessage: %s \nerrMessage: %s \nerrCode: %d \nHTTPStatusCode: %d",
-                           e.getMessage(), e.getErrMsg(), e.getErrorCode(), e.getHttpStatusCode()));
+                   String errorMsg = String.format(
+                       "❌ Ошибка покупки %s\n\n" +
+                       "Тип: BinanceClientException\n" +
+                       "Код ошибки: %d\n" +
+                       "HTTP статус: %d\n" +
+                       "Сообщение: %s\n" +
+                       "Детали: %s\n\n" +
+                       "Цена: %s\n" +
+                       "Количество: %s",
+                       coin.getName(),
+                       e.getErrorCode(),
+                       e.getHttpStatusCode(),
+                       e.getMessage(),
+                       e.getErrMsg(),
+                       price,
+                       adjustedQuantity
+                   );
+                   log.error("Buy order failed: {} (code: {}, http: {})", 
+                       e.getMessage(), e.getErrorCode(), e.getHttpStatusCode());
+                   System.err.println(errorMsg);
+                   
+                   try {
+                       ImageAndMessageSender.sendTelegramMessage(errorMsg);
+                   } catch (Exception ignored) {}
                }
+               
            return null;
            }
 

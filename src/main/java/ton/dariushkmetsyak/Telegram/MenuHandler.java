@@ -11,6 +11,8 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.Keyboard
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.updatesreceivers.DefaultBotSession;
 import ton.dariushkmetsyak.Charts.Chart;
+import ton.dariushkmetsyak.ErrorHandling.ErrorHandler;
+import ton.dariushkmetsyak.ErrorHandling.RetryPolicy;
 import ton.dariushkmetsyak.GeckoApiService.geckoEntities.Coin;
 import ton.dariushkmetsyak.GeckoApiService.geckoEntities.CoinsList;
 import ton.dariushkmetsyak.Graphics.DrawTradingChart.TradingChart;
@@ -20,6 +22,8 @@ import ton.dariushkmetsyak.TradingApi.ApiService.Account;
 import ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder;
 import ton.dariushkmetsyak.Persistence.StateManager;
 import ton.dariushkmetsyak.Persistence.TradingState;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 
 import javax.sound.midi.Soundbank;
@@ -31,6 +35,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 public class MenuHandler extends TelegramLongPollingBot {
+    private static final Logger log = LoggerFactory.getLogger(MenuHandler.class);
     private static final String BOT_TOKEN = "7420980540:AAENPop_SY3bBVHl8kNxT97Mxazxthvk8Jo";
   //  final private static String chatId = "-1002382149738";
     ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
@@ -894,17 +899,46 @@ private void conducting_real_time_research (Update update, long chatId, String m
      */
     private void resumeBinanceTrading(long chatId, TradingState state) {
         if (state == null) {
-            sendText(chatId, "Ошибка: состояние не найдено");
+            ErrorHandler.handleError(new IllegalStateException("State is null"),
+                "Resume Binance Trading", "State validation", false);
+            sendText(chatId, "❌ Ошибка: состояние не найдено");
             return;
         }
         
         try {
-            CoinsList.loadCoinsWithMarketDataFormJsonFile(new File("coins"));
+            // Загрузка списка монет с retry
+            RetryPolicy fileRetry = RetryPolicy.forFileOperations();
+            fileRetry.executeVoid(() -> {
+                try {
+                    CoinsList.loadCoinsWithMarketDataFormJsonFile(new File("coins"));
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            }, "Load coins list");
+            
             Coin coin = CoinsList.getCoinByName(state.getCoinName());
             
             final char[] Ed25519_PRIVATE_KEY = "/home/kmieciaki/Рабочий стол//Ed PV.pem".toCharArray();
             final char[] Ed25519_API_KEY = "cPhdnHOtrzMU2fxBnY8zG68H1ZujKCs8oZCn1YBNLPqh98F0aaD2PfWl9HwpXKCo".toCharArray();
-            Account binanceAccount = AccountBuilder.createNewBinance(Ed25519_API_KEY, Ed25519_PRIVATE_KEY, AccountBuilder.BINANCE_BASE_URL.MAINNET);
+            
+            // Создание аккаунта с retry
+            Account binanceAccount;
+            try {
+                RetryPolicy accountRetry = RetryPolicy.forApiCalls();
+                binanceAccount = accountRetry.execute(() -> {
+                    try {
+                        return AccountBuilder.createNewBinance(Ed25519_API_KEY, Ed25519_PRIVATE_KEY, 
+                            AccountBuilder.BINANCE_BASE_URL.MAINNET);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                }, "Create Binance account");
+            } catch (Exception e) {
+                ErrorHandler.handleFatalError(e, "Binance Account Creation",
+                    "Creating Binance account for resume trading");
+                sendText(chatId, "❌ Не удалось создать Binance аккаунт. Проверьте API ключи.");
+                return;
+            }
             
             List<KeyboardRow> keyboard = new ArrayList<>();
             KeyboardRow row = new KeyboardRow(1);
@@ -930,16 +964,19 @@ private void conducting_real_time_research (Update update, long chatId, String m
                                 finalAccount, coin, 0, 0, 0, 0, 0, chatId, state
                         ).startTrading();
                     } catch (Exception e) {
-                        e.printStackTrace();
-                        ImageAndMessageSender.sendTelegramMessage("❌ Ошибка: " + e.getMessage());
+                        log.error("Error during resumed Binance trading", e);
+                        ErrorHandler.handleFatalError(e, "Binance Trading", 
+                            "Running resumed trading session");
                     }
                 }
             };
             processThread.start();
             
         } catch (Exception e) {
-            e.printStackTrace();
-            sendText(chatId, "Ошибка при восстановлении торговли: " + e.getMessage());
+            log.error("Failed to resume Binance trading", e);
+            ErrorHandler.handleFatalError(e, "Resume Binance Trading",
+                "Setting up resumed trading session");
+            sendText(chatId, "❌ Ошибка при восстановлении торговли: " + e.getMessage());
         } finally {
             savedState = null;
         }
@@ -950,17 +987,46 @@ private void conducting_real_time_research (Update update, long chatId, String m
      */
     private void resumeBinanceTestTrading(long chatId, TradingState state) {
         if (state == null) {
-            sendText(chatId, "Ошибка: состояние не найдено");
+            ErrorHandler.handleError(new IllegalStateException("State is null"),
+                "Resume Binance Test Trading", "State validation", false);
+            sendText(chatId, "❌ Ошибка: состояние не найдено");
             return;
         }
         
         try {
-            CoinsList.loadCoinsWithMarketDataFormJsonFile(new File("coins"));
+            // Загрузка списка монет с retry
+            RetryPolicy fileRetry = RetryPolicy.forFileOperations();
+            fileRetry.executeVoid(() -> {
+                try {
+                    CoinsList.loadCoinsWithMarketDataFormJsonFile(new File("coins"));
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            }, "Load coins list");
+            
             Coin coin = CoinsList.getCoinByName(state.getCoinName());
             
             char[] TEST_Ed25519_PRIVATE_KEY = "/home/kmieciaki/Рабочий стол//test-prv-key.pem".toCharArray();
             char[] TEST_Ed25519_API_KEY = "dLlBZX4SsOwXuDioeLWfOFCldwqgwGrIGhGEZdIUWtBCSKsTvqXyl0eYm6lepcAr".toCharArray();
-            Account testBinanceAccount = AccountBuilder.createNewBinance(TEST_Ed25519_API_KEY, TEST_Ed25519_PRIVATE_KEY, AccountBuilder.BINANCE_BASE_URL.TESTNET);
+            
+            // Создание тестового аккаунта с retry
+            Account testBinanceAccount;
+            try {
+                RetryPolicy accountRetry = RetryPolicy.forApiCalls();
+                testBinanceAccount = accountRetry.execute(() -> {
+                    try {
+                        return AccountBuilder.createNewBinance(TEST_Ed25519_API_KEY, TEST_Ed25519_PRIVATE_KEY, 
+                            AccountBuilder.BINANCE_BASE_URL.TESTNET);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                }, "Create Binance test account");
+            } catch (Exception e) {
+                ErrorHandler.handleFatalError(e, "Binance Test Account Creation",
+                    "Creating Binance test account for resume trading");
+                sendText(chatId, "❌ Не удалось создать Binance тестовый аккаунт. Проверьте API ключи.");
+                return;
+            }
             
             List<KeyboardRow> keyboard = new ArrayList<>();
             KeyboardRow row = new KeyboardRow(1);
@@ -986,16 +1052,19 @@ private void conducting_real_time_research (Update update, long chatId, String m
                                 finalAccount, coin, 0, 0, 0, 0, 0, chatId, state
                         ).startTrading();
                     } catch (Exception e) {
-                        e.printStackTrace();
-                        ImageAndMessageSender.sendTelegramMessage("❌ Ошибка: " + e.getMessage());
+                        log.error("Error during resumed Binance test trading", e);
+                        ErrorHandler.handleFatalError(e, "Binance Test Trading", 
+                            "Running resumed test trading session");
                     }
                 }
             };
             processThread.start();
             
         } catch (Exception e) {
-            e.printStackTrace();
-            sendText(chatId, "Ошибка при восстановлении тестовой торговли: " + e.getMessage());
+            log.error("Failed to resume Binance test trading", e);
+            ErrorHandler.handleFatalError(e, "Resume Binance Test Trading",
+                "Setting up resumed test trading session");
+            sendText(chatId, "❌ Ошибка при восстановлении тестовой торговли: " + e.getMessage());
         } finally {
             savedState = null;
         }
