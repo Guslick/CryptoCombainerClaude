@@ -10,6 +10,8 @@ import ton.dariushkmetsyak.Util.Prices;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
@@ -26,6 +28,8 @@ public class App {
 
 
     public static void main(String[] args) throws Exception {
+
+        initDefaultLogDirectory();
 
 
 //        Map<Coin, Double> assets = new HashMap<>();
@@ -51,6 +55,25 @@ public class App {
 
 
 
+    }
+
+    private static void initDefaultLogDirectory() {
+        String configuredLogDir = System.getProperty("LOG_DIR");
+        if (configuredLogDir == null || configuredLogDir.isBlank()) {
+            configuredLogDir = System.getenv("LOG_DIR");
+        }
+        if (configuredLogDir == null || configuredLogDir.isBlank()) {
+            configuredLogDir = "logs";
+        }
+
+        System.setProperty("LOG_DIR", configuredLogDir);
+
+        try {
+            Files.createDirectories(Path.of(configuredLogDir));
+        } catch (IOException e) {
+            System.err.println("Не удалось создать каталог логов: " + configuredLogDir);
+            e.printStackTrace();
+        }
     }
 }
 

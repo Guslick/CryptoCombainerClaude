@@ -54,6 +54,10 @@ public class ReversalPointsStrategyTrader {
     private final StateManager stateManager;
     private final String accountType;
     private int tickCounter = 0;
+    private long lastBuyFailureNotificationAt = 0;
+    private String lastBuyFailureSignature = "";
+
+    private static final long BUY_FAILURE_NOTIFICATION_COOLDOWN_MS = TimeUnit.MINUTES.toMillis(5);
 
     class Reversal {
         private final double[] data;
@@ -290,24 +294,11 @@ public class ReversalPointsStrategyTrader {
                 max = false;
                 currentMinPrice[0] = pointPrice;
                 currentMinPriceTimestamp[0] = pointTimestamp;
-                if (100 - (currentMinPrice[0] / currentMaxPrice[0] * 100) > buyGap) {
-                    if (!Objects.equals(previousRec.tag, "max")) {
-                        if (!trading) {
-                            boughtFor = account.trader().buy(coin, pointPrice, tradingSum / pointPrice);
-                            if (boughtFor != null) {
-                                TradingChart.addBuyIntervalMarker(pointTimestamp, boughtFor);
-                                reversalArrayList.add(new Reversal(
-                                        new double[]{currentMaxPriceTimestamp[0], currentMaxPrice[0]}, "max"));
-                                buyPrice = boughtFor;
-                                trading = true;
-                                ImageAndMessageSender.sendTelegramMessage(
-                                        "Баланс кошелька: " + account.wallet().getAllAssets().toString());
-                                currentMaxPrice[0] = boughtFor;
-                                persistState(); // сохранить после покупки
-                            }
-                        }
-                    }
-                }
+            }
+
+            boolean buySignalReached = isBuySignalReached(pointPrice);
+            if (buySignalReached && !Objects.equals(previousRec.tag, "max") && !trading) {
+                attemptBuy(pointTimestamp, pointPrice);
             }
         }
 
@@ -317,6 +308,85 @@ public class ReversalPointsStrategyTrader {
 
         sendPhotoToTelegram();
         return false;
+    }
+
+    private boolean isBuySignalReached(double currentPrice) {
+        if (currentMaxPrice[0] == null || currentMaxPrice[0] <= 0) {
+            return false;
+        }
+        return getDropFromMaxPercent(currentPrice) > buyGap;
+    }
+
+    private double getDropFromMaxPercent(double currentPrice) {
+        if (currentMaxPrice[0] == null || currentMaxPrice[0] <= 0) {
+            return 0;
+        }
+        return 100 - (currentPrice / currentMaxPrice[0] * 100);
+    }
+
+    private void attemptBuy(double pointTimestamp, double executionPrice)
+            throws NoSuchSymbolException, InsufficientAmountOfUsdtException {
+        Double buyResult = null;
+        String failureReason = "";
+
+        try {
+            buyResult = account.trader().buy(coin, executionPrice, tradingSum / executionPrice);
+            if (buyResult == null) {
+                failureReason = "биржа не подтвердила исполнение ордера (получен null-ответ)";
+            }
+        } catch (InsufficientAmountOfUsdtException | NoSuchSymbolException e) {
+            failureReason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            throw e;
+        } catch (RuntimeException e) {
+            failureReason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            log.warn("Buy attempt failed with runtime exception", e);
+        }
+
+        if (buyResult != null) {
+            boughtFor = buyResult;
+            TradingChart.addBuyIntervalMarker(pointTimestamp, boughtFor);
+            reversalArrayList.add(new Reversal(
+                    new double[]{currentMaxPriceTimestamp[0], currentMaxPrice[0]}, "max"));
+            buyPrice = boughtFor;
+            trading = true;
+            ImageAndMessageSender.sendTelegramMessage(
+                    "Баланс кошелька: " + account.wallet().getAllAssets().toString());
+            currentMaxPrice[0] = boughtFor;
+            persistState();
+            return;
+        }
+
+        notifyBuyFailure(failureReason, executionPrice);
+    }
+
+    private void notifyBuyFailure(String reason, double executionPrice) {
+        String normalizedReason = (reason == null || reason.isBlank())
+                ? "неизвестная причина"
+                : reason;
+        String signature = Prices.round(executionPrice) + "|" + normalizedReason;
+        long now = System.currentTimeMillis();
+
+        if (signature.equals(lastBuyFailureSignature)
+                && now - lastBuyFailureNotificationAt < BUY_FAILURE_NOTIFICATION_COOLDOWN_MS) {
+            return;
+        }
+
+        lastBuyFailureSignature = signature;
+        lastBuyFailureNotificationAt = now;
+
+        double dropFromMax = getDropFromMaxPercent(executionPrice);
+        String message = "⚠️ Сигнал на покупку сработал, но вход не выполнен\n" +
+                "Монета: " + coin.getName() + "\n" +
+                "Текущая цена: " + Prices.round(executionPrice) + "\n" +
+                "Максимум волны: " + Prices.round(currentMaxPrice[0]) + "\n" +
+                "Падение от максимума: " + String.format("%.2f", dropFromMax) + "%\n" +
+                "Порог покупки: " + buyGap + "%\n" +
+                "Баланс USDT: " + account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin()) + "\n" +
+                "Причина: " + normalizedReason + "\n" +
+                "Действие: проверьте фильтры Binance (LOT_SIZE/MIN_NOTIONAL), остаток под комиссию и статус ордера.";
+
+        log.warn("Buy signal reached but order was not executed. {}", message);
+        ImageAndMessageSender.sendTelegramMessage(message, chatID);
     }
 
     public void startTrading() {
@@ -493,13 +563,18 @@ public class ReversalPointsStrategyTrader {
         }
 
         if (!trading) {
+            double dropFromMax = getDropFromMaxPercent(pointPrice);
+            double leftToDrop = buyGap - dropFromMax;
+            String buySignalStatus = leftToDrop > 0
+                    ? "Осталось снизиться на " + String.format("%.2f", leftToDrop) + "%"
+                    : "Сигнал входа превышен на " + String.format("%.2f", Math.abs(leftToDrop)) + "%";
+
             chartScreenshotMessage =
                     "Ищу точку входа..." + "\n" +
                     "Текущая цена: " + Prices.round(pointPrice) + "\n" +
                     "Максимальная цена: " + Prices.round(currentMaxPrice[0]) + "\n" +
                     "Коэффициент покупки: " + buyGap + "%" + "\n" +
-                    "Осталось снизиться на " + String.format("%.2f",
-                            ((pointPrice - currentMaxPrice[0]) / currentMaxPrice[0] * 100) + buyGap) + "%" + "\n" +
+                    buySignalStatus + "\n" +
                     "Баланс USDT: " + account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin());
         }
         if (trading && !isSold) {

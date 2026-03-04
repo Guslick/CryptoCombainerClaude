@@ -19,6 +19,7 @@ JVM_OPTS="-Xmx512m -Xms256m"
 LOG_DIR="$APP_DIR/logs"
 mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/app-$(date +%Y%m%d).log"
+export LOG_DIR
 
 # Проверка наличия JAR файла
 if [ ! -f "$JAR_FILE" ]; then
@@ -50,7 +51,7 @@ fi
 
 # Запуск приложения
 echo "Launching Java application..." >> "$LOG_FILE"
-$JAVA_CMD $JVM_OPTS -jar "$JAR_FILE" >> "$LOG_FILE" 2>&1
+$JAVA_CMD $JVM_OPTS -DLOG_DIR="$LOG_DIR" -jar "$JAR_FILE" >> "$LOG_FILE" 2>&1
 
 # При завершении
 EXIT_CODE=$?
