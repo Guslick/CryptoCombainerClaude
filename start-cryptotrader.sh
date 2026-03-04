@@ -19,6 +19,10 @@ JVM_OPTS="-Xmx512m -Xms256m"
 LOG_DIR="$APP_DIR/logs"
 mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/app-$(date +%Y%m%d).log"
+export LOG_DIR
+export APP_MODE="${APP_MODE:-BOTH}"
+export API_PORT="${API_PORT:-8080}"
+export MINI_APP_URL="${MINI_APP_URL:-http://localhost:${API_PORT}/miniapp}"
 
 # Проверка наличия JAR файла
 if [ ! -f "$JAR_FILE" ]; then
@@ -50,7 +54,7 @@ fi
 
 # Запуск приложения
 echo "Launching Java application..." >> "$LOG_FILE"
-$JAVA_CMD $JVM_OPTS -jar "$JAR_FILE" >> "$LOG_FILE" 2>&1
+$JAVA_CMD $JVM_OPTS -DLOG_DIR="$LOG_DIR" -DAPP_MODE="$APP_MODE" -DAPI_PORT="$API_PORT" -DMINI_APP_URL="$MINI_APP_URL" -jar "$JAR_FILE" >> "$LOG_FILE" 2>&1
 
 # При завершении
 EXIT_CODE=$?
