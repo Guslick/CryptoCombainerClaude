@@ -7,10 +7,14 @@ import org.telegram.telegrambots.meta.TelegramBotsApi;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.*;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardRow;
+import org.telegram.telegrambots.meta.api.objects.webapp.WebAppInfo;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.updatesreceivers.DefaultBotSession;
 import ton.dariushkmetsyak.Charts.Chart;
+import ton.dariushkmetsyak.Config.RuntimeConfig;
 import ton.dariushkmetsyak.ErrorHandling.ErrorHandler;
 import ton.dariushkmetsyak.ErrorHandling.RetryPolicy;
 import ton.dariushkmetsyak.GeckoApiService.geckoEntities.Coin;
@@ -36,7 +40,8 @@ import java.util.stream.Stream;
 
 public class MenuHandler extends TelegramLongPollingBot {
     private static final Logger log = LoggerFactory.getLogger(MenuHandler.class);
-    private static final String BOT_TOKEN = "7420980540:AAENPop_SY3bBVHl8kNxT97Mxazxthvk8Jo";
+    private static final String BOT_TOKEN = RuntimeConfig.getRequired("TELEGRAM_BOT_TOKEN");
+    private static final String MINI_APP_URL = RuntimeConfig.get("MINI_APP_URL", "http://localhost:8080/miniapp");
   //  final private static String chatId = "-1002382149738";
     ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
     Thread processThread;
@@ -83,6 +88,9 @@ public class MenuHandler extends TelegramLongPollingBot {
                     } else if (messageText.equals("Тестовая торговля на Binance")) {
                         currentState = UserState.CHECK_SAVED_STATE_BINANCE_TEST;
                         checkSavedStateAndPrompt(chatId, "TESTERACCOUNT");
+                        break;
+                    } else if (messageText.equals("Mini App")) {
+                        sendMiniAppEntry(chatId);
                         break;
                     } else if (messageText.equals("Историческое исследование")) {
                         currentState = UserState.BEFORE_BACK_TESTING_RESEARCH;
@@ -321,8 +329,9 @@ public class MenuHandler extends TelegramLongPollingBot {
         row2.add("Исследование в реальном времени");
         row2.add("Историческое исследование");
 
-        // Третий ряд (одна кнопка)
+        // Третий ряд
         KeyboardRow row3 = new KeyboardRow();
+        row3.add("Mini App");
         row3.add("Отмена");
 
         // Добавляем ряды в клавиатуру
@@ -346,6 +355,29 @@ public class MenuHandler extends TelegramLongPollingBot {
         }
     }
 
+    private void sendMiniAppEntry(long chatId) {
+        InlineKeyboardButton openWebApp = new InlineKeyboardButton();
+        openWebApp.setText("Открыть терминал");
+        openWebApp.setWebApp(new WebAppInfo(MINI_APP_URL));
+
+        List<InlineKeyboardButton> row = new ArrayList<>();
+        row.add(openWebApp);
+
+        InlineKeyboardMarkup inlineKeyboardMarkup = new InlineKeyboardMarkup();
+        inlineKeyboardMarkup.setKeyboard(List.of(row));
+
+        SendMessage message = new SendMessage();
+        message.setChatId(String.valueOf(chatId));
+        message.setText("Откройте Mini App для управления торговлей");
+        message.setReplyMarkup(inlineKeyboardMarkup);
+
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            log.error("Failed to send Mini App button", e);
+        }
+    }
+
     // Отправка простого текста
     private void sendText(long chatId, String text) {
         SendMessage message = new SendMessage();
@@ -358,6 +390,10 @@ public class MenuHandler extends TelegramLongPollingBot {
     }
 }
 
+
+    private char[] getRequiredSecret(String key) {
+        return RuntimeConfig.getRequired(key).toCharArray();
+    }
 
 private void setCancelKeyboard(long chatId, SendMessage message) {
         try {
@@ -616,8 +652,8 @@ private void conducting_real_time_research (Update update, long chatId, String m
         Coin coin;
         double buyGap, sellWithProfitGap, sellWithLossGap, startAssets, tradingSum;
         int updateTimeout;
-        char[] TEST_Ed25519_PRIVATE_KEY = "/home/kmieciaki/Рабочий стол//test-prv-key.pem".toCharArray();
-        char[] TEST_Ed25519_API_KEY = "dLlBZX4SsOwXuDioeLWfOFCldwqgwGrIGhGEZdIUWtBCSKsTvqXyl0eYm6lepcAr".toCharArray();
+        char[] TEST_Ed25519_PRIVATE_KEY = getRequiredSecret("BINANCE_TEST_PRIVATE_KEY");
+        char[] TEST_Ed25519_API_KEY = getRequiredSecret("BINANCE_TEST_API_KEY");
 
         Account testBinanceAccount = null;
         try {
@@ -728,8 +764,8 @@ private void conducting_real_time_research (Update update, long chatId, String m
         Coin coin;
         double buyGap, sellWithProfitGap, sellWithLossGap, startAssets, tradingSum;
         int updateTimeout;
-        final  char[] Ed25519_PRIVATE_KEY = "/home/kmieciaki/Рабочий стол//Ed PV.pem".toCharArray();
-        final  char[] Ed25519_API_KEY = "cPhdnHOtrzMU2fxBnY8zG68H1ZujKCs8oZCn1YBNLPqh98F0aaD2PfWl9HwpXKCo".toCharArray();
+        final  char[] Ed25519_PRIVATE_KEY = getRequiredSecret("BINANCE_MAIN_PRIVATE_KEY");
+        final  char[] Ed25519_API_KEY = getRequiredSecret("BINANCE_MAIN_API_KEY");
 
         Account BinanceAccount = null;
         try {
@@ -918,8 +954,8 @@ private void conducting_real_time_research (Update update, long chatId, String m
             
             Coin coin = CoinsList.getCoinByName(state.getCoinName());
             
-            final char[] Ed25519_PRIVATE_KEY = "/home/kmieciaki/Рабочий стол//Ed PV.pem".toCharArray();
-            final char[] Ed25519_API_KEY = "cPhdnHOtrzMU2fxBnY8zG68H1ZujKCs8oZCn1YBNLPqh98F0aaD2PfWl9HwpXKCo".toCharArray();
+            final char[] Ed25519_PRIVATE_KEY = getRequiredSecret("BINANCE_MAIN_PRIVATE_KEY");
+            final char[] Ed25519_API_KEY = getRequiredSecret("BINANCE_MAIN_API_KEY");
             
             // Создание аккаунта с retry
             Account binanceAccount;
@@ -1006,8 +1042,8 @@ private void conducting_real_time_research (Update update, long chatId, String m
             
             Coin coin = CoinsList.getCoinByName(state.getCoinName());
             
-            char[] TEST_Ed25519_PRIVATE_KEY = "/home/kmieciaki/Рабочий стол//test-prv-key.pem".toCharArray();
-            char[] TEST_Ed25519_API_KEY = "dLlBZX4SsOwXuDioeLWfOFCldwqgwGrIGhGEZdIUWtBCSKsTvqXyl0eYm6lepcAr".toCharArray();
+            char[] TEST_Ed25519_PRIVATE_KEY = getRequiredSecret("BINANCE_TEST_PRIVATE_KEY");
+            char[] TEST_Ed25519_API_KEY = getRequiredSecret("BINANCE_TEST_API_KEY");
             
             // Создание тестового аккаунта с retry
             Account testBinanceAccount;

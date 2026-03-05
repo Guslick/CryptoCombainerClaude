@@ -2,6 +2,7 @@ package ton.dariushkmetsyak.Telegram;
 
 import org.json.JSONObject;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
+import ton.dariushkmetsyak.Config.RuntimeConfig;
 
 import java.io.*;
 import java.net.HttpURLConnection;
@@ -13,7 +14,7 @@ import java.nio.charset.StandardCharsets;
 public class ImageAndMessageSender {
 
     // Токен вашего бота
-    private static final String BOT_TOKEN = "7420980540:AAENPop_SY3bBVHl8kNxT97Mxazxthvk8Jo";
+    private static final String BOT_TOKEN = RuntimeConfig.getRequired("TELEGRAM_BOT_TOKEN");
      private static String chatId ;
 //             = "-1002382149738";
 //    final private static String chatId = "-1002453915115";

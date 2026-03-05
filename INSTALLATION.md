@@ -290,3 +290,50 @@ sudo systemctl status cryptotrader.service && \
 echo "--- Recent Logs ---" && \
 tail -20 /opt/cryptotrader/logs/app-$(date +%Y%m%d).log
 ```
+
+## New runtime variables for Telegram Mini App mode
+
+- `TELEGRAM_BOT_TOKEN` (required)
+- `BINANCE_MAIN_API_KEY` (required for real Binance trading)
+- `BINANCE_MAIN_PRIVATE_KEY` (required for real Binance trading)
+- `BINANCE_TEST_API_KEY` (required for Binance test trading)
+- `BINANCE_TEST_PRIVATE_KEY` (required for Binance test trading)
+- `APP_MODE` = `BOT` | `API` | `BOTH` (default `BOTH`)
+- `API_PORT` (default `8080`)
+- `MINI_APP_URL` (default `http://localhost:8080/miniapp`)
+
+Example:
+
+```bash
+export TELEGRAM_BOT_TOKEN=xxx
+export BINANCE_MAIN_API_KEY=xxx
+export BINANCE_MAIN_PRIVATE_KEY=xxx
+export BINANCE_TEST_API_KEY=xxx
+export BINANCE_TEST_PRIVATE_KEY=xxx
+export APP_MODE=BOTH
+export API_PORT=8080
+export MINI_APP_URL=https://your-domain/miniapp
+```
+
+## Browser chart rendering (Mini App)
+
+Now chart visualization is available in browser via Mini App, sourced from latest `trading_states/*.json` state snapshots.
+
+- API endpoint: `GET /api/chart/latest`
+- Mini App chart auto-refreshes every 10 seconds.
+- `USE_XVFB=false` by default (legacy JavaFX screenshots can be enabled with `USE_XVFB=true`).
+
+## Environment helper scripts
+
+- Create/edit env template and validate:
+  ```bash
+  ./scripts/setup-env.sh .env
+  ```
+- Check env presence only:
+  ```bash
+  ./scripts/check-env.sh .env
+  ```
+- Apply env in current shell:
+  ```bash
+  set -a; source .env; set +a
+  ```
