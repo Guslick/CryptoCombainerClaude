@@ -19,6 +19,20 @@ JVM_OPTS="-Xmx512m -Xms256m"
 LOG_DIR="$APP_DIR/logs"
 mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/app-$(date +%Y%m%d).log"
+export LOG_DIR
+
+# Автозагрузка переменных из .env (если файл существует)
+if [ -f "$APP_DIR/.env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source "$APP_DIR/.env"
+    set +a
+fi
+
+export APP_MODE="${APP_MODE:-BOTH}"
+export API_PORT="${API_PORT:-8080}"
+export MINI_APP_URL="${MINI_APP_URL:-http://localhost:${API_PORT}/miniapp}"
+export USE_XVFB="${USE_XVFB:-false}"
 
 # Проверка наличия JAR файла
 if [ ! -f "$JAR_FILE" ]; then
@@ -37,20 +51,19 @@ cd "$APP_DIR" || exit 1
 echo "Starting CryptoTrader at $(date)" >> "$LOG_FILE"
 echo "Working directory: $(pwd)" >> "$LOG_FILE"
 
-# Запуск с виртуальным дисплеем (для JavaFX)
-# Xvfb создает виртуальный X сервер для headless режима
-export DISPLAY=:99
-
-# Проверяем, запущен ли Xvfb
-if ! pgrep -x "Xvfb" > /dev/null; then
-    echo "Starting Xvfb virtual display..." >> "$LOG_FILE"
-    Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
-    sleep 2
+# Виртуальный дисплей нужен только для legacy JavaFX screenshot rendering
+if [ "$USE_XVFB" = "true" ]; then
+    export DISPLAY=:99
+    if ! pgrep -x "Xvfb" > /dev/null; then
+        echo "Starting Xvfb virtual display..." >> "$LOG_FILE"
+        Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
+        sleep 2
+    fi
 fi
 
 # Запуск приложения
 echo "Launching Java application..." >> "$LOG_FILE"
-$JAVA_CMD $JVM_OPTS -jar "$JAR_FILE" >> "$LOG_FILE" 2>&1
+$JAVA_CMD $JVM_OPTS -DLOG_DIR="$LOG_DIR" -DAPP_MODE="$APP_MODE" -DAPI_PORT="$API_PORT" -DMINI_APP_URL="$MINI_APP_URL" -jar "$JAR_FILE" >> "$LOG_FILE" 2>&1
 
 # При завершении
 EXIT_CODE=$?
