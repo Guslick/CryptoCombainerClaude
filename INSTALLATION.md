@@ -354,3 +354,16 @@ Now chart visualization is available in browser via Mini App, sourced from lates
    ss -ltnp | grep 8080
    ```
 5. For packaged JAR deploys, Mini App HTML is served from classpath resource (`miniapp/index.html`) and does not require `src/main/resources` to exist on disk.
+
+## IntelliJ IDEA quick run for Mini App only
+
+If you run from IDEA and get `ERR_CONNECTION_CLOSED`, start API without bot first:
+
+1. Run configuration environment:
+   - `APP_MODE=API`
+   - `API_PORT=8080`
+2. Start `ExecPack.App`.
+3. Open `http://localhost:8080/miniapp`.
+
+Notes:
+- In `BOTH` mode, BOT startup is now skipped automatically when `TELEGRAM_BOT_TOKEN` is missing, so API remains available.

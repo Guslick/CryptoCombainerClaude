@@ -3,6 +3,11 @@ package ton.dariushkmetsyak.Config;
 public final class RuntimeConfig {
     private RuntimeConfig() {}
 
+    public static boolean has(String key) {
+        String value = get(key, null);
+        return value != null && !value.isBlank();
+    }
+
     public static String getRequired(String key) {
         String value = get(key, null);
         if (value == null || value.isBlank()) {

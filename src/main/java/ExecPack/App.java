@@ -18,6 +18,7 @@ public class App {
         CoinsList.loadCoinsWithMarketDataFormJsonFile(new File("coins"));
 
         String appMode = RuntimeConfig.get("APP_MODE", "BOTH").toUpperCase();
+        System.out.println("Starting app with APP_MODE=" + appMode);
 
         if ("API".equals(appMode) || "BOTH".equals(appMode)) {
             TradingSessionManager manager = new TradingSessionManager();
@@ -25,7 +26,16 @@ public class App {
         }
 
         if ("BOT".equals(appMode) || "BOTH".equals(appMode)) {
-            new MenuHandler().start();
+            if (RuntimeConfig.has("TELEGRAM_BOT_TOKEN")) {
+                try {
+                    new MenuHandler().start();
+                } catch (Exception e) {
+                    System.err.println("Failed to start Telegram bot part. API stays available.");
+                    e.printStackTrace();
+                }
+            } else {
+                System.err.println("TELEGRAM_BOT_TOKEN is missing. Skipping BOT startup, API mode remains available.");
+            }
         }
 
         if ("API".equals(appMode)) {
