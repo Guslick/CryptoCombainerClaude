@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CryptoTrader Mini App</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 16px; background: #111827; color: #e5e7eb; }
+    .grid { display:grid; grid-template-columns: 1fr; gap: 12px; }
+    .card { background:#1f2937; border-radius:10px; padding:12px; }
+    input { width:100%; margin:4px 0 8px 0; padding:8px; border-radius:6px; border:1px solid #374151; background:#0b1220; color:#e5e7eb; }
+    button { margin-right:8px; margin-top:6px; padding:8px 12px; border-radius:8px; border:0; cursor:pointer; }
+    .ok{background:#16a34a;color:#fff}.warn{background:#ea580c;color:#fff}.info{background:#2563eb;color:#fff}
+    canvas { background: #fff; border-radius: 8px; }
+    pre { white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+<h2>CryptoTrader Mini App</h2>
+<div class="grid">
+  <div class="card">
+    <h3>Управление</h3>
+    <label>Coin</label><input id="coin" value="Bitcoin">
+    <label>TradingSum</label><input id="sum" type="number" value="50">
+    <button class="ok" onclick="startTest()">Start Test</button>
+    <button class="warn" onclick="stopTrading()">Stop</button>
+    <button class="info" onclick="loadStatus()">Status</button>
+    <pre id="out"></pre>
+  </div>
+
+  <div class="card">
+    <h3>График в браузере (из сохраненного состояния)</h3>
+    <canvas id="priceChart" height="120"></canvas>
+    <button class="info" onclick="loadChartData()">Обновить график</button>
+  </div>
+</div>
+
+<script>
+const tg = window.Telegram?.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+const BASE = location.origin;
+
+let chart;
+function ensureChart() {
+  if (chart) return chart;
+  const ctx = document.getElementById('priceChart').getContext('2d');
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: { labels: [], datasets: [{ label: 'Price', data: [], borderColor: '#2563eb', borderWidth: 1, pointRadius: 0 }] },
+    options: {
+      responsive: true,
+      animation: false,
+      scales: {
+        x: { ticks: { maxTicksLimit: 10, color:'#111827' } },
+        y: { ticks: { color:'#111827' } }
+      }
+    }
+  });
+  return chart;
+}
+
+async function loadStatus(){
+  const r=await fetch(`${BASE}/api/status`);
+  document.getElementById('out').textContent = await r.text();
+}
+
+async function startTest(){
+  const payload={
+    coin:document.getElementById('coin').value,
+    tradingSum:Number(document.getElementById('sum').value),
+    buyGap:3,profitGap:2,lossGap:3,updateTimeout:15,
+    chatId:Number(tg?.initDataUnsafe?.user?.id||0)
+  };
+  const r=await fetch(`${BASE}/api/trade/start-test`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  document.getElementById('out').textContent = await r.text();
+}
+
+async function stopTrading(){
+  const r=await fetch(`${BASE}/api/trade/stop`,{method:'POST'});
+  document.getElementById('out').textContent = await r.text();
+}
+
+async function loadChartData(){
+  const r = await fetch(`${BASE}/api/chart/latest`);
+  const state = await r.json();
+
+  if (!state || !state.priceHistory || Object.keys(state.priceHistory).length === 0) {
+    document.getElementById('out').textContent = 'Нет данных графика (priceHistory пуста)';
+    return;
+  }
+
+  const entries = Object.entries(state.priceHistory)
+    .map(([ts, price]) => ({ ts: Number(ts), price: Number(price) }))
+    .sort((a,b) => a.ts - b.ts);
+
+  const labels = entries.map(x => new Date(x.ts).toLocaleTimeString());
+  const prices = entries.map(x => x.price);
+
+  const c = ensureChart();
+  c.data.labels = labels;
+  c.data.datasets[0].data = prices;
+  c.update();
+}
+
+setInterval(loadChartData, 10000);
+loadStatus();
+loadChartData();
+</script>
+</body>
+</html>

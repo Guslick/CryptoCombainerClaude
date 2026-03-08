@@ -290,3 +290,80 @@ sudo systemctl status cryptotrader.service && \
 echo "--- Recent Logs ---" && \
 tail -20 /opt/cryptotrader/logs/app-$(date +%Y%m%d).log
 ```
+
+## New runtime variables for Telegram Mini App mode
+
+- `TELEGRAM_BOT_TOKEN` (required)
+- `BINANCE_MAIN_API_KEY` (required for real Binance trading)
+- `BINANCE_MAIN_PRIVATE_KEY` (required for real Binance trading)
+- `BINANCE_TEST_API_KEY` (required for Binance test trading)
+- `BINANCE_TEST_PRIVATE_KEY` (required for Binance test trading)
+- `APP_MODE` = `BOT` | `API` | `BOTH` (default `BOTH`)
+- `API_PORT` (default `8080`)
+- `MINI_APP_URL` (default `http://localhost:8080/miniapp`)
+
+Example:
+
+```bash
+export TELEGRAM_BOT_TOKEN=xxx
+export BINANCE_MAIN_API_KEY=xxx
+export BINANCE_MAIN_PRIVATE_KEY=xxx
+export BINANCE_TEST_API_KEY=xxx
+export BINANCE_TEST_PRIVATE_KEY=xxx
+export APP_MODE=BOTH
+export API_PORT=8080
+export MINI_APP_URL=https://your-domain/miniapp
+```
+
+## Browser chart rendering (Mini App)
+
+Now chart visualization is available in browser via Mini App, sourced from latest `trading_states/*.json` state snapshots.
+
+- API endpoint: `GET /api/chart/latest`
+- Mini App chart auto-refreshes every 10 seconds.
+- `USE_XVFB=false` by default (legacy JavaFX screenshots can be enabled with `USE_XVFB=true`).
+
+## Environment helper scripts
+
+- Create/edit env template and validate:
+  ```bash
+  ./scripts/setup-env.sh .env        # create/check only (no editor)
+  ./scripts/setup-env.sh .env --edit # open editor explicitly
+  ```
+- Check env presence only:
+  ```bash
+  ./scripts/check-env.sh .env
+  ```
+- Apply env in current shell:
+  ```bash
+  set -a; source .env; set +a
+  ```
+
+## Mini App troubleshooting (`ERR_TIMED_OUT` on the same PC)
+
+1. Ensure API is started (not only bot):
+   - `APP_MODE=BOTH` or `APP_MODE=API`.
+2. Ensure URL points to local host when Telegram Desktop and app run on the same machine:
+   - `MINI_APP_URL=http://localhost:8080/miniapp`.
+3. Verify server health locally:
+   ```bash
+   curl http://127.0.0.1:8080/health
+   ```
+4. Verify listener:
+   ```bash
+   ss -ltnp | grep 8080
+   ```
+5. For packaged JAR deploys, Mini App HTML is served from classpath resource (`miniapp/index.html`) and does not require `src/main/resources` to exist on disk.
+
+## IntelliJ IDEA quick run for Mini App only
+
+If you run from IDEA and get `ERR_CONNECTION_CLOSED`, start API without bot first:
+
+1. Run configuration environment:
+   - `APP_MODE=API`
+   - `API_PORT=8080`
+2. Start `ExecPack.App`.
+3. Open `http://localhost:8080/miniapp`.
+
+Notes:
+- In `BOTH` mode, BOT startup is now skipped automatically when `TELEGRAM_BOT_TOKEN` is missing, so API remains available.
