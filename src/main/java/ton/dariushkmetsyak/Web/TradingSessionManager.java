@@ -7,15 +7,11 @@ import ton.dariushkmetsyak.TradingApi.ApiService.Exceptions.NoSuchSymbolExceptio
 import ton.dariushkmetsyak.Config.AppConfig;
 import ton.dariushkmetsyak.GeckoApiService.geckoEntities.Coin;
 import ton.dariushkmetsyak.GeckoApiService.geckoEntities.CoinsList;
-import ton.dariushkmetsyak.Persistence.StateManager;
-import ton.dariushkmetsyak.Persistence.TradingState;
 import ton.dariushkmetsyak.Strategies.ReversalPointsStrategy.ResearchingStrategy.ReversalPointStrategyBackTester;
 import ton.dariushkmetsyak.Strategies.ReversalPointsStrategy.ResearchingStrategy.ReversalPointsStrategyTrader;
 import ton.dariushkmetsyak.Telegram.ImageAndMessageSender;
 import ton.dariushkmetsyak.TradingApi.ApiService.Account;
 import ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder;
-import ton.dariushkmetsyak.TradingApi.ApiService.TesterAccount;
-import ton.dariushkmetsyak.Util.Prices;
 
 import java.io.IOException;
 import java.util.*;
@@ -37,7 +33,7 @@ public class TradingSessionManager {
         public final SessionType type;
         public final String coinName;
         public final Map<String, Object> params;
-        public volatile String status; // RUNNING, STOPPED, ERROR
+        public volatile String status;
         public volatile String lastMessage;
         public volatile long startedAt;
         public Thread thread;
@@ -75,6 +71,22 @@ public class TradingSessionManager {
         return instance;
     }
 
+    /**
+     * Вспомогательный метод: устанавливает итоговый статус после завершения startTrading().
+     * startTrading() не бросает InterruptedException — она перехватывает его внутри
+     * и восстанавливает флаг прерывания через Thread.currentThread().interrupt().
+     * Поэтому проверяем флаг вместо catch(InterruptedException).
+     */
+    private static void setFinalStatus(SessionInfo info) {
+        if (Thread.currentThread().isInterrupted()) {
+            info.status = "STOPPED";
+            info.lastMessage = "Остановлено пользователем";
+        } else {
+            info.status = "STOPPED";
+            info.lastMessage = "Торговля завершена";
+        }
+    }
+
     /** Запустить тестовую торговлю (виртуальный аккаунт) */
     public SessionInfo startTesterTrading(String coinName, double startAssets, double tradingSum,
                                           double buyGap, double sellWithProfitGap,
@@ -101,12 +113,7 @@ public class TradingSessionManager {
                 new ReversalPointsStrategyTrader(account, coin, tradingSum,
                         buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chatId)
                         .startTrading();
-                info.status = "STOPPED";
-                info.lastMessage = "Торговля завершена";
-            } catch (InterruptedException e) {
-                info.status = "STOPPED";
-                info.lastMessage = "Остановлено пользователем";
-                Thread.currentThread().interrupt();
+                setFinalStatus(info);
             } catch (Exception e) {
                 info.status = "ERROR";
                 info.lastMessage = "Ошибка: " + e.getMessage();
@@ -139,7 +146,7 @@ public class TradingSessionManager {
             try {
                 AppConfig cfg = AppConfig.getInstance();
                 char[] apiKey = cfg.getBinanceApiKey().toCharArray();
-                char[] privKeyPath = cfg.getBinancePrivateKeyPath().toCharArray();
+                char[] privKeyPath = cfg.resolvePrivateKeyPath(cfg.getBinancePrivateKeyPath()).toCharArray();
                 Coin coin = CoinsList.getCoinByName(coinName);
                 Account account = AccountBuilder.createNewBinance(apiKey, privKeyPath,
                         AccountBuilder.BINANCE_BASE_URL.MAINNET);
@@ -147,12 +154,7 @@ public class TradingSessionManager {
                 new ReversalPointsStrategyTrader(account, coin, tradingSum,
                         buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chatId)
                         .startTrading();
-                info.status = "STOPPED";
-                info.lastMessage = "Торговля завершена";
-            } catch (InterruptedException e) {
-                info.status = "STOPPED";
-                info.lastMessage = "Остановлено пользователем";
-                Thread.currentThread().interrupt();
+                setFinalStatus(info);
             } catch (Exception e) {
                 info.status = "ERROR";
                 info.lastMessage = "Ошибка: " + e.getMessage();
@@ -184,7 +186,7 @@ public class TradingSessionManager {
             try {
                 AppConfig cfg = AppConfig.getInstance();
                 char[] apiKey = cfg.getBinanceTestApiKey().toCharArray();
-                char[] privKeyPath = cfg.getBinanceTestPrivateKeyPath().toCharArray();
+                char[] privKeyPath = cfg.resolvePrivateKeyPath(cfg.getBinanceTestPrivateKeyPath()).toCharArray();
                 Coin coin = CoinsList.getCoinByName(coinName);
                 Account account = AccountBuilder.createNewBinance(apiKey, privKeyPath,
                         AccountBuilder.BINANCE_BASE_URL.TESTNET);
@@ -192,12 +194,7 @@ public class TradingSessionManager {
                 new ReversalPointsStrategyTrader(account, coin, tradingSum,
                         buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chatId)
                         .startTrading();
-                info.status = "STOPPED";
-                info.lastMessage = "Торговля завершена";
-            } catch (InterruptedException e) {
-                info.status = "STOPPED";
-                info.lastMessage = "Остановлено пользователем";
-                Thread.currentThread().interrupt();
+                setFinalStatus(info);
             } catch (Exception e) {
                 info.status = "ERROR";
                 info.lastMessage = "Ошибка: " + e.getMessage();
@@ -279,14 +276,15 @@ public class TradingSessionManager {
                 info.status = "DONE";
                 info.lastMessage = String.format("Готово! Прибыль: %.2f USD (%.2f%%)",
                         result.getProfitInUsd(), result.getPercentageProfit());
-            } catch (InterruptedException e) {
-                info.status = "STOPPED";
-                info.lastMessage = "Прервано";
-                Thread.currentThread().interrupt();
             } catch (Exception e) {
-                info.status = "ERROR";
-                info.lastMessage = "Ошибка: " + e.getMessage();
-                log.error("Backtest error", e);
+                if (Thread.currentThread().isInterrupted()) {
+                    info.status = "STOPPED";
+                    info.lastMessage = "Прервано";
+                } else {
+                    info.status = "ERROR";
+                    info.lastMessage = "Ошибка: " + e.getMessage();
+                    log.error("Backtest error", e);
+                }
             }
         });
         t.setDaemon(true);
