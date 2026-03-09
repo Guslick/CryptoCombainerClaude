@@ -1,0 +1,360 @@
+package ton.dariushkmetsyak.Web;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
+import com.sun.net.httpserver.HttpServer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import ton.dariushkmetsyak.Config.AppConfig;
+import ton.dariushkmetsyak.GeckoApiService.GeckoRequests;
+import ton.dariushkmetsyak.GeckoApiService.geckoEntities.Coin;
+import ton.dariushkmetsyak.GeckoApiService.geckoEntities.CoinsList;
+import ton.dariushkmetsyak.TradingApi.ApiService.Account;
+
+import java.io.*;
+import java.net.*;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+import java.util.stream.Collectors;
+
+/**
+ * Встроенный HTTP-сервер для Telegram MiniApp.
+ * Запускается на настраиваемом порту (по умолчанию 8080).
+ */
+public class MiniAppServer {
+    private static final Logger log = LoggerFactory.getLogger(MiniAppServer.class);
+    private static final ObjectMapper mapper = new ObjectMapper();
+
+    private HttpServer server;
+    private final int port;
+
+    public MiniAppServer() {
+        this.port = AppConfig.getInstance().getWebServerPort();
+    }
+
+    public void start() throws IOException {
+        server = HttpServer.create(new InetSocketAddress(port), 0);
+
+        // Static files
+        server.createContext("/", new StaticFileHandler());
+
+        // API routes
+        server.createContext("/api/health", exchange -> handleJson(exchange, () -> {
+            Map<String, Object> r = new LinkedHashMap<>();
+            r.put("status", "ok");
+            r.put("time", System.currentTimeMillis());
+            r.put("coinsLoaded", CoinsList.getCoins().size());
+            return r;
+        }));
+
+        server.createContext("/api/coins", exchange -> {
+            if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            String query = getQueryParam(exchange.getRequestURI().getQuery(), "q");
+            handleJson(exchange, () -> searchCoins(query));
+        });
+
+        server.createContext("/api/price", exchange -> {
+            if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            String coinId = getPathParam(exchange.getRequestURI().getPath(), "/api/price/");
+            handleJson(exchange, () -> {
+                try {
+                    Coin coin = CoinsList.getCoinByName(coinId);
+                    double price = Account.getCurrentPrice(coin);
+                    Map<String, Object> r = new LinkedHashMap<>();
+                    r.put("coinId", coinId);
+                    r.put("coinName", coin.getName());
+                    r.put("symbol", coin.getSymbol());
+                    r.put("price", price);
+                    r.put("timestamp", System.currentTimeMillis());
+                    return r;
+                } catch (Exception e) {
+                    return errorMap("Монета не найдена: " + coinId);
+                }
+            });
+        });
+
+        server.createContext("/api/chart", exchange -> {
+            if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            String path = exchange.getRequestURI().getPath();
+            String queryStr = exchange.getRequestURI().getQuery();
+            String coinId = path.replaceFirst("/api/chart/?", "").replaceAll("/.*", "");
+            String interval = getQueryParam(queryStr, "interval");
+            if (interval == null) interval = "1d";
+            final String finalInterval = interval;
+            handleJson(exchange, () -> getChartData(coinId, finalInterval));
+        });
+
+        server.createContext("/api/trading/sessions", exchange -> {
+            if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            handleJson(exchange, () -> TradingSessionManager.getInstance().getAllSessions());
+        });
+
+        server.createContext("/api/trading/start", exchange -> {
+            if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            handleJson(exchange, () -> startTradingFromRequest(exchange));
+        });
+
+        server.createContext("/api/trading/stop", exchange -> {
+            if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            handleJson(exchange, () -> {
+                Map<String, Object> body = parseBody(exchange);
+                String sessionId = (String) body.get("sessionId");
+                if (sessionId == null) {
+                    TradingSessionManager.getInstance().stopAllSessions();
+                    return Map.of("stopped", true, "message", "Все сессии остановлены");
+                }
+                boolean ok = TradingSessionManager.getInstance().stopSession(sessionId);
+                return Map.of("stopped", ok, "sessionId", sessionId);
+            });
+        });
+
+        server.createContext("/api/backtest/start", exchange -> {
+            if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            handleJson(exchange, () -> startBacktestFromRequest(exchange));
+        });
+
+        server.createContext("/api/backtest/result", exchange -> {
+            if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            handleJson(exchange, () -> {
+                Map<String, Object> result = TradingSessionManager.getInstance().getLastBacktestResult();
+                return result != null ? result : Map.of("ready", false, "message", "Результатов нет");
+            });
+        });
+
+        server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
+        server.start();
+        log.info("🚀 MiniApp сервер запущен на порту {}", port);
+        log.info("   URL: http://localhost:{}", port);
+    }
+
+    public void stop() {
+        if (server != null) {
+            server.stop(0);
+            log.info("MiniApp сервер остановлен");
+        }
+    }
+
+    // ---- Handlers ----
+
+    private Map<String, Object> startTradingFromRequest(HttpExchange exchange) throws Exception {
+        Map<String, Object> body = parseBody(exchange);
+        String type = (String) body.getOrDefault("type", "tester");
+        String coinName = (String) body.getOrDefault("coin", "bitcoin");
+        double tradingSum = toDouble(body.get("tradingSum"), 100.0);
+        double startAssets = toDouble(body.get("startAssets"), 150.0);
+        double buyGap = toDouble(body.get("buyGap"), 3.5);
+        double sellWithProfitGap = toDouble(body.get("sellWithProfitGap"), 2.0);
+        double sellWithLossGap = toDouble(body.get("sellWithLossGap"), 8.0);
+        int updateTimeout = toInt(body.get("updateTimeout"), 30);
+        long chatId = toLong(body.get("chatId"), AppConfig.getInstance().getDefaultChatId());
+
+        TradingSessionManager mgr = TradingSessionManager.getInstance();
+        TradingSessionManager.SessionInfo info;
+
+        switch (type.toLowerCase()) {
+            case "binance":
+            case "binance_real":
+                info = mgr.startBinanceTrading(coinName, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chatId);
+                break;
+            case "binance_test":
+                info = mgr.startBinanceTestTrading(coinName, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chatId);
+                break;
+            default: // tester
+                info = mgr.startTesterTrading(coinName, startAssets, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chatId);
+        }
+        return info.toMap();
+    }
+
+    private Map<String, Object> startBacktestFromRequest(HttpExchange exchange) throws Exception {
+        Map<String, Object> body = parseBody(exchange);
+        String coinName = (String) body.getOrDefault("coin", "bitcoin");
+        double tradingSum = toDouble(body.get("tradingSum"), 100.0);
+        double buyGap = toDouble(body.get("buyGap"), 3.5);
+        double sellWithProfitGap = toDouble(body.get("sellWithProfitGap"), 2.0);
+        double sellWithLossGap = toDouble(body.get("sellWithLossGap"), 8.0);
+        String chartType = (String) body.getOrDefault("chartType", "1d");
+        TradingSessionManager.SessionInfo info = TradingSessionManager.getInstance()
+                .startBacktest(coinName, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, chartType);
+        return info.toMap();
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> searchCoins(String query) {
+        List<Coin> coins = CoinsList.getCoins();
+        String q = query == null ? "" : query.toLowerCase().trim();
+        return coins.stream()
+                .filter(c -> q.isEmpty() ||
+                        (c.getName() != null && c.getName().toLowerCase().contains(q)) ||
+                        (c.getSymbol() != null && c.getSymbol().toLowerCase().startsWith(q)))
+                .limit(20)
+                .map(c -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("id", c.getId());
+                    m.put("name", c.getName());
+                    m.put("symbol", c.getSymbol() != null ? c.getSymbol().toUpperCase() : "");
+                    m.put("rank", c.getMarket_cap_rank());
+                    return m;
+                })
+                .collect(Collectors.toList());
+    }
+
+    private Map<String, Object> getChartData(String coinId, String interval) {
+        try {
+            Coin coin = CoinsList.getCoinByName(coinId);
+            String geckoInterval;
+            int days;
+            switch (interval) {
+                case "7d": days = 7; geckoInterval = "daily"; break;
+                case "30d": days = 30; geckoInterval = "daily"; break;
+                case "90d": days = 90; geckoInterval = "daily"; break;
+                case "1y": days = 365; geckoInterval = "daily"; break;
+                default: days = 1; geckoInterval = ""; break; // 5-min
+            }
+
+            String json = GeckoRequests.getMarketChartByDays(coin.getId(), days);
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("coinId", coinId);
+            result.put("coinName", coin.getName());
+            result.put("interval", interval);
+            result.put("data", parseChartJson(json));
+            return result;
+        } catch (Exception e) {
+            log.error("Chart data error for {}: {}", coinId, e.getMessage());
+            return errorMap("Ошибка получения данных: " + e.getMessage());
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<double[]> parseChartJson(String json) throws Exception {
+        Map<String, Object> parsed = mapper.readValue(json, Map.class);
+        List<List<Number>> prices = (List<List<Number>>) parsed.get("prices");
+        List<double[]> result = new ArrayList<>();
+        if (prices != null) {
+            for (List<Number> point : prices) {
+                result.add(new double[]{point.get(0).doubleValue(), point.get(1).doubleValue()});
+            }
+        }
+        return result;
+    }
+
+    // ---- Utils ----
+
+    @FunctionalInterface
+    interface JsonSupplier { Object get() throws Exception; }
+
+    private void handleJson(HttpExchange exchange, JsonSupplier supplier) throws IOException {
+        addCorsHeaders(exchange);
+        if ("OPTIONS".equals(exchange.getRequestMethod())) {
+            exchange.sendResponseHeaders(204, -1);
+            return;
+        }
+        try {
+            Object result = supplier.get();
+            byte[] bytes = mapper.writeValueAsBytes(result);
+            exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) { os.write(bytes); }
+        } catch (Exception e) {
+            log.error("API error", e);
+            byte[] err = mapper.writeValueAsBytes(errorMap(e.getMessage()));
+            exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
+            exchange.sendResponseHeaders(500, err.length);
+            try (OutputStream os = exchange.getResponseBody()) { os.write(err); }
+        }
+    }
+
+    private void addCorsHeaders(HttpExchange exchange) {
+        exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
+        exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        exchange.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type");
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> parseBody(HttpExchange exchange) throws IOException {
+        try (InputStream is = exchange.getRequestBody()) {
+            String body = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+            if (body.isBlank()) return new HashMap<>();
+            return mapper.readValue(body, Map.class);
+        }
+    }
+
+    private String getQueryParam(String query, String key) {
+        if (query == null) return null;
+        for (String part : query.split("&")) {
+            String[] kv = part.split("=", 2);
+            if (kv.length == 2 && kv[0].equals(key)) {
+                try { return URLDecoder.decode(kv[1], "UTF-8"); } catch (Exception e) { return kv[1]; }
+            }
+        }
+        return null;
+    }
+
+    private String getPathParam(String path, String prefix) {
+        if (path == null || !path.startsWith(prefix)) return "";
+        return path.substring(prefix.length()).replaceAll("/.*", "");
+    }
+
+    private Map<String, Object> errorMap(String msg) {
+        return Map.of("error", msg != null ? msg : "Неизвестная ошибка");
+    }
+
+    private double toDouble(Object val, double def) {
+        if (val == null) return def;
+        try { return Double.parseDouble(val.toString()); } catch (Exception e) { return def; }
+    }
+
+    private int toInt(Object val, int def) {
+        if (val == null) return def;
+        try { return Integer.parseInt(val.toString()); } catch (Exception e) { return def; }
+    }
+
+    private long toLong(Object val, long def) {
+        if (val == null) return def;
+        try { return Long.parseLong(val.toString()); } catch (Exception e) { return def; }
+    }
+
+    // ---- Static File Handler ----
+
+    private static class StaticFileHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            String path = exchange.getRequestURI().getPath();
+            if (path == null || path.equals("/") || path.equals("/index.html")) {
+                path = "/static/index.html";
+            } else {
+                path = "/static" + path;
+            }
+            addCors(exchange);
+            try (InputStream is = MiniAppServer.class.getResourceAsStream(path)) {
+                if (is == null) {
+                    byte[] msg = "404 Not Found".getBytes();
+                    exchange.sendResponseHeaders(404, msg.length);
+                    exchange.getResponseBody().write(msg);
+                    exchange.getResponseBody().close();
+                    return;
+                }
+                byte[] bytes = is.readAllBytes();
+                String ct = getContentType(path);
+                exchange.getResponseHeaders().set("Content-Type", ct);
+                exchange.sendResponseHeaders(200, bytes.length);
+                try (OutputStream os = exchange.getResponseBody()) { os.write(bytes); }
+            }
+        }
+
+        private void addCors(HttpExchange e) {
+            e.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
+        }
+
+        private String getContentType(String path) {
+            if (path.endsWith(".html")) return "text/html; charset=UTF-8";
+            if (path.endsWith(".css")) return "text/css; charset=UTF-8";
+            if (path.endsWith(".js")) return "application/javascript; charset=UTF-8";
+            if (path.endsWith(".png")) return "image/png";
+            if (path.endsWith(".jpg")) return "image/jpeg";
+            if (path.endsWith(".svg")) return "image/svg+xml";
+            if (path.endsWith(".ico")) return "image/x-icon";
+            return "application/octet-stream";
+        }
+    }
+}

@@ -1,0 +1,27 @@
+# =============================================
+# CryptoCombainer — Пример конфигурации
+# Скопируйте этот файл как config.properties
+# и заполните свои значения
+# =============================================
+
+# === Telegram Bot ===
+telegram.bot.token=7420980540:AAENPop_SY3bBVHl8kNxT97Mxazxthvk8Jo
+telegram.default.chat.id=-1002453915115
+telegram.bot.enabled=true
+
+# === CoinGecko API ===
+gecko.api.key=CG-cbW7FEWxc6mZiUAxSY3VDCd9
+
+# === Binance (реальная торговля) ===
+binance.api.key=YOUR_BINANCE_API_KEY
+binance.private.key.path=/path/to/Ed_PV.pem
+
+# === Binance Testnet (тестовая торговля) ===
+binance.test.api.key=YOUR_BINANCE_TEST_API_KEY
+binance.test.private.key.path=/path/to/test-prv-key.pem
+
+# === Web Server (MiniApp backend) ===
+web.server.enabled=true
+web.server.port=8080
+# Используйте 0.0.0.0 для доступа со всех интерфейсов
+web.server.host=0.0.0.0

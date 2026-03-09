@@ -124,6 +124,27 @@ public static String getCoinMonthlyData(String coinId, YearMonth yearMonth) {   
     }
         return response.body();
     }
+
+    /**
+     * Получить данные графика за N дней.
+     * При days=1 возвращает 5-минутные интервалы, при >1 — часовые или дневные.
+     */
+    public static String getMarketChartByDays(String coinId, int days) {
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("https://api.coingecko.com/api/v3/coins/"
+                        + coinId + "/market_chart?vs_currency=usd&days=" + days))
+                .header("accept", "application/json")
+                .header("x-cg-demo-api-key", apiKey)
+                .method("GET", HttpRequest.BodyPublishers.noBody())
+                .build();
+        HttpResponse<String> response;
+        try {
+            response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+        } catch (IOException | InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+        return response.body();
+    }
 }
 
 

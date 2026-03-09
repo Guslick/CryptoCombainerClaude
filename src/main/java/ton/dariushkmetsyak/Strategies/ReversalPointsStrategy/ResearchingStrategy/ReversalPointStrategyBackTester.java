@@ -77,6 +77,11 @@ public class ReversalPointStrategyBackTester {
             return profitInUsd;
         }
 
+        public double getBuyGap() { return buyGap; }
+        public double getSellWithProfit() { return sellWithProfitGap; }
+        public double getSellWithLossGap() { return sellWithLossGap; }
+        public double getPercentageProfit() { return percentageProfit; }
+
         double profitInUsd;
         double percentageProfit;
 

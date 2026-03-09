@@ -22,11 +22,12 @@ import ton.dariushkmetsyak.TradingApi.ApiService.Account;
 import ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder;
 import ton.dariushkmetsyak.Persistence.StateManager;
 import ton.dariushkmetsyak.Persistence.TradingState;
+import ton.dariushkmetsyak.Config.AppConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 
-import javax.sound.midi.Soundbank;
+
 import java.io.File;
 import java.io.IOException;
 import java.util.*;
@@ -36,7 +37,7 @@ import java.util.stream.Stream;
 
 public class MenuHandler extends TelegramLongPollingBot {
     private static final Logger log = LoggerFactory.getLogger(MenuHandler.class);
-    private static final String BOT_TOKEN = "7420980540:AAENPop_SY3bBVHl8kNxT97Mxazxthvk8Jo";
+    private static final String BOT_TOKEN = AppConfig.getInstance().getBotToken();
   //  final private static String chatId = "-1002382149738";
     ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
     Thread processThread;
@@ -616,8 +617,8 @@ private void conducting_real_time_research (Update update, long chatId, String m
         Coin coin;
         double buyGap, sellWithProfitGap, sellWithLossGap, startAssets, tradingSum;
         int updateTimeout;
-        char[] TEST_Ed25519_PRIVATE_KEY = "/home/kmieciaki/Рабочий стол//test-prv-key.pem".toCharArray();
-        char[] TEST_Ed25519_API_KEY = "dLlBZX4SsOwXuDioeLWfOFCldwqgwGrIGhGEZdIUWtBCSKsTvqXyl0eYm6lepcAr".toCharArray();
+        char[] TEST_Ed25519_PRIVATE_KEY = AppConfig.getInstance().getBinanceTestPrivateKeyPath().toCharArray();
+        char[] TEST_Ed25519_API_KEY = AppConfig.getInstance().getBinanceTestApiKey().toCharArray();
 
         Account testBinanceAccount = null;
         try {
@@ -728,8 +729,8 @@ private void conducting_real_time_research (Update update, long chatId, String m
         Coin coin;
         double buyGap, sellWithProfitGap, sellWithLossGap, startAssets, tradingSum;
         int updateTimeout;
-        final  char[] Ed25519_PRIVATE_KEY = "/home/kmieciaki/Рабочий стол//Ed PV.pem".toCharArray();
-        final  char[] Ed25519_API_KEY = "cPhdnHOtrzMU2fxBnY8zG68H1ZujKCs8oZCn1YBNLPqh98F0aaD2PfWl9HwpXKCo".toCharArray();
+        final  char[] Ed25519_PRIVATE_KEY = AppConfig.getInstance().getBinancePrivateKeyPath().toCharArray();
+        final  char[] Ed25519_API_KEY = AppConfig.getInstance().getBinanceApiKey().toCharArray();
 
         Account BinanceAccount = null;
         try {
@@ -918,8 +919,8 @@ private void conducting_real_time_research (Update update, long chatId, String m
             
             Coin coin = CoinsList.getCoinByName(state.getCoinName());
             
-            final char[] Ed25519_PRIVATE_KEY = "/home/kmieciaki/Рабочий стол//Ed PV.pem".toCharArray();
-            final char[] Ed25519_API_KEY = "cPhdnHOtrzMU2fxBnY8zG68H1ZujKCs8oZCn1YBNLPqh98F0aaD2PfWl9HwpXKCo".toCharArray();
+            final char[] Ed25519_PRIVATE_KEY = AppConfig.getInstance().getBinancePrivateKeyPath().toCharArray();
+            final char[] Ed25519_API_KEY = AppConfig.getInstance().getBinanceApiKey().toCharArray();
             
             // Создание аккаунта с retry
             Account binanceAccount;
@@ -1006,8 +1007,8 @@ private void conducting_real_time_research (Update update, long chatId, String m
             
             Coin coin = CoinsList.getCoinByName(state.getCoinName());
             
-            char[] TEST_Ed25519_PRIVATE_KEY = "/home/kmieciaki/Рабочий стол//test-prv-key.pem".toCharArray();
-            char[] TEST_Ed25519_API_KEY = "dLlBZX4SsOwXuDioeLWfOFCldwqgwGrIGhGEZdIUWtBCSKsTvqXyl0eYm6lepcAr".toCharArray();
+            char[] TEST_Ed25519_PRIVATE_KEY = AppConfig.getInstance().getBinanceTestPrivateKeyPath().toCharArray();
+            char[] TEST_Ed25519_API_KEY = AppConfig.getInstance().getBinanceTestApiKey().toCharArray();
             
             // Создание тестового аккаунта с retry
             Account testBinanceAccount;
