@@ -28,7 +28,6 @@ public class AppConfig {
     }
 
     private void loadFromFile() {
-        // Try to load from current directory first
         File f = new File(CONFIG_FILE);
         if (f.exists()) {
             try (InputStream is = new FileInputStream(f)) {
@@ -39,7 +38,6 @@ public class AppConfig {
                 log.warn("Не удалось загрузить {}: {}", CONFIG_FILE, e.getMessage());
             }
         }
-        // Try classpath
         try (InputStream is = getClass().getClassLoader().getResourceAsStream(CONFIG_FILE)) {
             if (is != null) {
                 props.load(is);
@@ -91,6 +89,54 @@ public class AppConfig {
 
     public String getBinanceTestPrivateKeyPath() {
         return get("binance.test.private.key.path", "");
+    }
+
+    /**
+     * Принимает значение из конфига и возвращает путь к PEM-файлу.
+     *
+     * Поддерживает два формата в config.properties:
+     *
+     * Формат 1 — путь к файлу (старый):
+     *   binance.private.key.path=/home/user/Ed_PV.pem
+     *
+     * Формат 2 — содержимое ключа напрямую (новый):
+     *   binance.private.key.path=-----BEGIN PRIVATE KEY-----\nqwerty123...\n-----END PRIVATE KEY-----
+     *   или просто base64-тело без заголовков:
+     *   binance.private.key.path=qwerty123...
+     *
+     * Если значение не является путём к существующему файлу —
+     * содержимое записывается во временный файл и удаляется при завершении JVM.
+     */
+    public String resolvePrivateKeyPath(String configValue) {
+        if (configValue == null || configValue.isBlank()) return configValue;
+
+        // Если это путь к существующему файлу — используем как есть
+        File asFile = new File(configValue);
+        if (asFile.exists() && asFile.isFile()) {
+            return configValue;
+        }
+
+        // Иначе — считаем, что это содержимое ключа
+        try {
+            // Заменяем литеральные \n (как пишут в .properties) на реальные переносы строк
+            String content = configValue.replace("\\n", "\n");
+
+            // Если нет PEM-заголовков — добавляем стандартные
+            if (!content.contains("-----BEGIN")) {
+                content = "-----BEGIN PRIVATE KEY-----\n"
+                        + content.trim() + "\n"
+                        + "-----END PRIVATE KEY-----\n";
+            }
+
+            java.nio.file.Path tmp = java.nio.file.Files.createTempFile("binance_pk_", ".pem");
+            java.nio.file.Files.writeString(tmp, content);
+            tmp.toFile().deleteOnExit();
+            log.debug("PEM-ключ записан во временный файл: {}", tmp);
+            return tmp.toString();
+        } catch (IOException e) {
+            log.error("Не удалось записать PEM-ключ во временный файл: {}", e.getMessage());
+            return configValue;
+        }
     }
 
     public long getDefaultChatId() {

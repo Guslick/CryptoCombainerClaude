@@ -617,7 +617,7 @@ private void conducting_real_time_research (Update update, long chatId, String m
         Coin coin;
         double buyGap, sellWithProfitGap, sellWithLossGap, startAssets, tradingSum;
         int updateTimeout;
-        char[] TEST_Ed25519_PRIVATE_KEY = AppConfig.getInstance().getBinanceTestPrivateKeyPath().toCharArray();
+        char[] TEST_Ed25519_PRIVATE_KEY = AppConfig.getInstance().resolvePrivateKeyPath(AppConfig.getInstance().getBinanceTestPrivateKeyPath()).toCharArray();
         char[] TEST_Ed25519_API_KEY = AppConfig.getInstance().getBinanceTestApiKey().toCharArray();
 
         Account testBinanceAccount = null;
@@ -729,7 +729,7 @@ private void conducting_real_time_research (Update update, long chatId, String m
         Coin coin;
         double buyGap, sellWithProfitGap, sellWithLossGap, startAssets, tradingSum;
         int updateTimeout;
-        final  char[] Ed25519_PRIVATE_KEY = AppConfig.getInstance().getBinancePrivateKeyPath().toCharArray();
+        final  char[] Ed25519_PRIVATE_KEY = AppConfig.getInstance().resolvePrivateKeyPath(AppConfig.getInstance().getBinancePrivateKeyPath()).toCharArray();
         final  char[] Ed25519_API_KEY = AppConfig.getInstance().getBinanceApiKey().toCharArray();
 
         Account BinanceAccount = null;
@@ -919,7 +919,7 @@ private void conducting_real_time_research (Update update, long chatId, String m
             
             Coin coin = CoinsList.getCoinByName(state.getCoinName());
             
-            final char[] Ed25519_PRIVATE_KEY = AppConfig.getInstance().getBinancePrivateKeyPath().toCharArray();
+            final char[] Ed25519_PRIVATE_KEY = AppConfig.getInstance().resolvePrivateKeyPath(AppConfig.getInstance().getBinancePrivateKeyPath()).toCharArray();
             final char[] Ed25519_API_KEY = AppConfig.getInstance().getBinanceApiKey().toCharArray();
             
             // Создание аккаунта с retry
@@ -1007,7 +1007,7 @@ private void conducting_real_time_research (Update update, long chatId, String m
             
             Coin coin = CoinsList.getCoinByName(state.getCoinName());
             
-            char[] TEST_Ed25519_PRIVATE_KEY = AppConfig.getInstance().getBinanceTestPrivateKeyPath().toCharArray();
+            char[] TEST_Ed25519_PRIVATE_KEY = AppConfig.getInstance().resolvePrivateKeyPath(AppConfig.getInstance().getBinanceTestPrivateKeyPath()).toCharArray();
             char[] TEST_Ed25519_API_KEY = AppConfig.getInstance().getBinanceTestApiKey().toCharArray();
             
             // Создание тестового аккаунта с retry
