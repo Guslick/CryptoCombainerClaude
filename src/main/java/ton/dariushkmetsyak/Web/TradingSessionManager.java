@@ -109,7 +109,7 @@ public class TradingSessionManager {
                 assets.put(Coin.createCoin("Tether"), startAssets);
                 assets.put(coin, 0d);
                 Account account = AccountBuilder.createNewTester(assets);
-                ImageAndMessageSender.setChatId(chatId);
+                try { ImageAndMessageSender.setChatId(chatId); } catch (Exception ignored) {}
                 new ReversalPointsStrategyTrader(account, coin, tradingSum,
                         buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chatId)
                         .startTrading();
@@ -150,7 +150,7 @@ public class TradingSessionManager {
                 Coin coin = CoinsList.getCoinByName(coinName);
                 Account account = AccountBuilder.createNewBinance(apiKey, privKeyPath,
                         AccountBuilder.BINANCE_BASE_URL.MAINNET);
-                ImageAndMessageSender.setChatId(chatId);
+                try { ImageAndMessageSender.setChatId(chatId); } catch (Exception ignored) {}
                 new ReversalPointsStrategyTrader(account, coin, tradingSum,
                         buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chatId)
                         .startTrading();
@@ -190,7 +190,7 @@ public class TradingSessionManager {
                 Coin coin = CoinsList.getCoinByName(coinName);
                 Account account = AccountBuilder.createNewBinance(apiKey, privKeyPath,
                         AccountBuilder.BINANCE_BASE_URL.TESTNET);
-                ImageAndMessageSender.setChatId(chatId);
+                try { ImageAndMessageSender.setChatId(chatId); } catch (Exception ignored) {}
                 new ReversalPointsStrategyTrader(account, coin, tradingSum,
                         buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chatId)
                         .startTrading();

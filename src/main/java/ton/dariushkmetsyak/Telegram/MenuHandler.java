@@ -291,18 +291,35 @@ public class MenuHandler extends TelegramLongPollingBot {
     }
 
     public void start() {
-    try{
-        CoinsList.loadCoinsWithMarketDataFormJsonFile(new File("coins"));
-        TelegramBotsApi botsApi = new TelegramBotsApi(DefaultBotSession.class);
-        botsApi.registerBot(new MenuHandler());
-        System.out.println("Бот запущен!");
-    } catch(
-    Exception e)
-
-    {
-        e.printStackTrace();
+        try {
+            CoinsList.loadCoinsWithMarketDataFormJsonFile(new File("coins"));
+        } catch (Exception e) {
+            log.warn("Не удалось загрузить список монет: {}", e.getMessage());
+        }
+        // Retry-логика для [409] — старый экземпляр не успел освободить соединение
+        int maxAttempts = 5;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                TelegramBotsApi botsApi = new TelegramBotsApi(DefaultBotSession.class);
+                botsApi.registerBot(new MenuHandler());
+                System.out.println("Бот запущен!");
+                log.info("Telegram бот зарегистрирован (попытка {})", attempt);
+                return;
+            } catch (TelegramApiException e) {
+                if (e.getMessage() != null && e.getMessage().contains("409")) {
+                    log.warn("Бот уже запущен [409], жду 10 сек перед попыткой {}/{}", attempt, maxAttempts);
+                    try { Thread.sleep(10_000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); return; }
+                } else {
+                    log.error("Ошибка запуска бота: {}", e.getMessage(), e);
+                    return;
+                }
+            } catch (Exception e) {
+                log.error("Ошибка запуска бота: {}", e.getMessage(), e);
+                return;
+            }
+        }
+        log.error("Не удалось запустить бота после {} попыток", maxAttempts);
     }
-}
     public void setMenu (long chatId, String text) {
 
 
