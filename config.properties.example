@@ -1,7 +1,11 @@
 # =============================================
 # CryptoCombainer — Пример конфигурации
-# Скопируйте этот файл как config.properties
-# и заполните свои значения
+# Скопируйте как config.properties и заполните
+# =============================================
+# Приоритет значений:
+#   1. -DKEY=value (JVM system property)
+#   2. export KEY=value (env variable)
+#   3. config.properties (этот файл)
 # =============================================
 
 # === Telegram Bot ===
@@ -15,25 +19,17 @@ gecko.api.key=CG-cbW7FEWxc6mZiUAxSY3VDCd9
 # === Binance (реальная торговля) ===
 binance.api.key=YOUR_BINANCE_API_KEY
 
-# Приватный ключ Ed25519 — два варианта на выбор:
+# Вариант 1 — путь к .pem файлу:
+# binance.private.key.path=/opt/cryptotrader/Ed_PV.pem
 
-# Вариант 1 — путь к .pem файлу (как раньше):
-# binance.private.key.path=/home/user/Ed_PV.pem
+# Вариант 2 — содержимое ключа напрямую (без файла):
+# binance.private.key.path=-----BEGIN PRIVATE KEY-----\nBASE64_KEY_CONTENT_HERE\n-----END PRIVATE KEY-----
 
-# Вариант 2 — вставить содержимое ключа прямо сюда.
-# Переносы строк заменяются на \n.
-# Если ключ с заголовками:
-# binance.private.key.path=-----BEGIN PRIVATE KEY-----\nqwerty123ABCdef...\n-----END PRIVATE KEY-----
-# Если только тело ключа (base64 без заголовков) — заголовки добавятся автоматически:
-# binance.private.key.path=qwerty123ABCdef...
-binance.private.key.path=/home/user/Ed_PV.pem
+# === Binance Testnet ===
+binance.test.api.key=YOUR_TEST_API_KEY
+binance.test.private.key.path=/opt/cryptotrader/test-prv-key.pem
 
-# === Binance Testnet (тестовая торговля) ===
-binance.test.api.key=YOUR_BINANCE_TEST_API_KEY
-# Те же два варианта, что и выше:
-binance.test.private.key.path=/home/user/test-prv-key.pem
-
-# === Web Server (MiniApp backend) ===
+# === Web Server (MiniApp) ===
 web.server.enabled=true
 web.server.port=8080
 web.server.host=0.0.0.0
