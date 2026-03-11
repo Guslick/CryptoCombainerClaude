@@ -87,7 +87,14 @@ public class MiniAppServer {
 
         server.createContext("/api/trading/sessions", exchange -> {
             if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
-            handleJson(exchange, () -> TradingSessionManager.getInstance().getAllSessions());
+            String path = exchange.getRequestURI().getPath();
+            // /api/trading/sessions/{id} → session detail with events
+            if (path.matches("/api/trading/sessions/[^/]+")) {
+                String sessionId = path.substring("/api/trading/sessions/".length());
+                handleJson(exchange, () -> TradingSessionManager.getInstance().getSessionDetail(sessionId));
+            } else {
+                handleJson(exchange, () -> TradingSessionManager.getInstance().getAllSessions());
+            }
         });
 
         server.createContext("/api/trading/start", exchange -> {
@@ -147,21 +154,29 @@ public class MiniAppServer {
         double sellWithProfitGap = toDouble(body.get("sellWithProfitGap"), 2.0);
         double sellWithLossGap = toDouble(body.get("sellWithLossGap"), 8.0);
         int updateTimeout = toInt(body.get("updateTimeout"), 30);
+        int chartRefreshInterval = toInt(body.get("chartRefreshInterval"), 60);
         long chatId = toLong(body.get("chatId"), AppConfig.getInstance().getDefaultChatId());
 
         TradingSessionManager mgr = TradingSessionManager.getInstance();
-        TradingSessionManager.SessionInfo info;
 
+        // Enforce 1 active session limit
+        if (mgr.hasActiveSession()) {
+            Map<String, Object> err = new LinkedHashMap<>();
+            err.put("error", "Уже есть активная сессия. Остановите её перед запуском новой.");
+            return err;
+        }
+
+        TradingSessionManager.SessionInfo info;
         switch (type.toLowerCase()) {
             case "binance":
             case "binance_real":
-                info = mgr.startBinanceTrading(coinName, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chatId);
+                info = mgr.startBinanceTrading(coinName, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chartRefreshInterval, chatId);
                 break;
             case "binance_test":
-                info = mgr.startBinanceTestTrading(coinName, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chatId);
+                info = mgr.startBinanceTestTrading(coinName, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chartRefreshInterval, chatId);
                 break;
             default: // tester
-                info = mgr.startTesterTrading(coinName, startAssets, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chatId);
+                info = mgr.startTesterTrading(coinName, startAssets, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chartRefreshInterval, chatId);
         }
         return info.toMap();
     }

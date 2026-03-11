@@ -2,6 +2,7 @@ package ton.dariushkmetsyak.Telegram;
 
 import org.json.JSONObject;
 import ton.dariushkmetsyak.Config.AppConfig;
+import ton.dariushkmetsyak.Web.TradingSessionManager;
 
 import java.io.*;
 import java.net.HttpURLConnection;
@@ -10,12 +11,11 @@ import java.nio.charset.StandardCharsets;
 
 /**
  * Утилита для отправки сообщений и фото в Telegram.
- * Токен берётся из AppConfig (config.properties или env-переменная TELEGRAM_BOT_TOKEN).
- * Если токен не задан — все методы тихо ничего не делают (не крашат торговые потоки).
+ * Токен берётся из AppConfig. Если не задан — методы молча возвращают 0.
+ * Все отправляемые сообщения параллельно логируются в активную торговую сессию.
  */
 public class ImageAndMessageSender {
 
-    // Токен загружается из конфига при первом обращении, не в static-инициализаторе
     private static volatile String BOT_TOKEN = null;
     private static String chatId;
 
@@ -26,7 +26,6 @@ public class ImageAndMessageSender {
         return BOT_TOKEN;
     }
 
-    /** Возвращает false если токен не задан — тогда отправка пропускается без краша */
     private static boolean isConfigured() {
         String token = getToken();
         return token != null && !token.isBlank() && !token.equals("YOUR_BOT_TOKEN_HERE");
@@ -111,12 +110,14 @@ public class ImageAndMessageSender {
             }
             deleteConnection.getResponseCode();
         } catch (IOException e) {
-            // Не критично — просто логируем
             System.err.println("Ошибка удаления сообщения: " + e.getMessage());
         }
     }
 
     public static int sendTelegramMessage(String message) {
+        // Always log to session (even if Telegram isn't configured)
+        try { TradingSessionManager.logEventFromCurrentThread(message); } catch (Exception ignored) {}
+
         if (!isConfigured() || chatId == null) return 0;
         try {
             String urlString = "https://api.telegram.org/bot" + getToken() + "/sendMessage";
