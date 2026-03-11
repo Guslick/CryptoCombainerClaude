@@ -314,6 +314,9 @@
         </div>
       </div>
       <div id="tradeAlert" style="display:none"></div>
+      <div id="activeSessionBanner" class="alert alert-warn" style="display:none;">
+        ⚠️ Уже есть активная сессия. <a href="#" onclick="showPage('sessions');return false;" style="color:inherit;font-weight:bold;">Перейти к сессиям →</a>
+      </div>
       <div class="btn-row">
         <button class="btn btn-success" onclick="startTrading()" id="startTradeBtn">▶ ЗАПУСТИТЬ</button>
         <button class="btn btn-danger" onclick="stopAllTrading()" style="flex:0.5">■ СТОП</button>
@@ -365,6 +368,9 @@
         </div>
       </div>
       <div id="resAlert" style="display:none"></div>
+      <div id="activeSessionBannerRes" class="alert alert-warn" style="display:none;">
+        ⚠️ Уже есть активная сессия. <a href="#" onclick="showPage('sessions');return false;" style="color:inherit;font-weight:bold;">Перейти к сессиям →</a>
+      </div>
       <button class="btn btn-primary" onclick="startResearch()">🔬 ЗАПУСТИТЬ ИССЛЕДОВАНИЕ</button>
     </div>
 
@@ -422,7 +428,7 @@
     <!-- SESSIONS -->
     <div class="page" id="page-sessions">
       <div class="card">
-        <div class="card-title">🎮 СЕССИИ <button class="btn btn-secondary btn-sm" onclick="loadSessions()" style="margin-left:auto;">🔄</button></div>
+        <div class="card-title">🎮 СЕССИИ <span id="activeSessionCount" style="font-size:10px;color:var(--muted);font-weight:400;"></span><button class="btn btn-secondary btn-sm" onclick="loadSessions()" style="margin-left:auto;">🔄</button></div>
         <div id="sessionsList"><div class="empty-state"><span class="icon">🎮</span>Нет сессий</div></div>
       </div>
       <button class="btn btn-danger" onclick="stopAllTrading()">■ ОСТАНОВИТЬ ВСЕ</button>
@@ -508,6 +514,7 @@ function showPage(pageId) {
   if (pageId === 'chart') initChart();
   if (pageId === 'sessions') { loadSessions(); startSessionsRefresh(); }
   else stopSessionsRefresh();
+  if (pageId === 'trade' || pageId === 'research') checkActiveSessionBanner();
 }
 
 // ============================================================
@@ -543,10 +550,15 @@ function makeSuggestions(coins, containerId, inputId, onSelect) {
   container.innerHTML = '';
   if (!coins.length) { container.classList.remove('show'); return; }
 
-  // Position the fixed dropdown under the input
+  // Position the fixed dropdown under the input (mobile-safe with visualViewport)
   const rect = input ? input.getBoundingClientRect() : null;
   if (rect) {
-    container.style.top = (rect.bottom + 4) + 'px';
+    const vv = window.visualViewport;
+    const scrollY = vv ? window.scrollY : 0;
+    const top = rect.bottom + 4;
+    // Clamp so the dropdown doesn't go off-screen (e.g. when keyboard is open)
+    const maxTop = (vv ? vv.height : window.innerHeight) - 240;
+    container.style.top = Math.min(top, maxTop) + 'px';
     container.style.left = '12px';
     container.style.right = '12px';
   }
@@ -565,7 +577,7 @@ function makeSuggestions(coins, containerId, inputId, onSelect) {
 
 // Dashboard search
 async function handleDashSearch(val) {
-  if (val.length < 2) { document.getElementById('dashSuggestions')?.classList.remove('show'); return; }
+  if (val.length < 1) { document.getElementById('dashSuggestions')?.classList.remove('show'); return; }
   debounceSearch(async v => {
     const coins = await fetchCoins(v);
     makeSuggestions(coins, 'dashSuggestions', 'dashSearch', c => {
@@ -874,19 +886,35 @@ async function loadSessions() {
     const r = await fetch(`${API_BASE}/api/trading/sessions`);
     const sessions = await r.json();
     if (!sessions.length) { list.innerHTML='<div class="empty-state"><span class="icon">🎮</span>Нет сессий</div>'; return; }
-    list.innerHTML = sessions.map(s => `
+    list.innerHTML = sessions.map(s => {
+      const p = s.params||{};
+      const typeIcon = {TESTER:'🧪',BINANCE_TEST:'🔬',BINANCE_REAL:'💰',RESEARCH:'🔬',BACKTEST:'📊'}[s.type]||'⚡';
+      const paramSummary = [
+        p.tradingSum ? `💵 ${p.tradingSum} USDT` : null,
+        p.buyGap ? `📥 ${p.buyGap}%` : null,
+        p.sellWithProfitGap ? `📈 ${p.sellWithProfitGap}%` : null,
+        p.sellWithLossGap ? `📉 ${p.sellWithLossGap}%` : null,
+      ].filter(Boolean).join(' · ');
+      const statusColor = {RUNNING:'var(--green)',STOPPED:'var(--muted)',ERROR:'var(--red)',DONE:'var(--yellow)'}[s.status]||'var(--muted)';
+      return `
       <div class="session-item" onclick="openDrawer('${s.id}')">
         <div class="session-item-header">
           <div class="session-dot ${s.status}"></div>
           <div class="session-info">
-            <div class="session-name">${s.coinName} <span class="chip">${s.type}</span></div>
-            <div class="session-msg">${s.lastMessage||s.status}</div>
-            <div class="session-time">▶ ${fmtDateTime(s.startedAt)}${s.endedAt?'  ⏹ '+fmtDateTime(s.endedAt):''}</div>
+            <div class="session-name">${typeIcon} ${s.coinName} <span class="chip">${s.type}</span></div>
+            <div class="session-msg" style="color:${statusColor}">${s.lastMessage||s.status}</div>
+            ${paramSummary ? `<div class="session-msg" style="color:var(--muted);font-size:10px;">${paramSummary}</div>` : ''}
+            <div class="session-time">▶ ${fmtDateTime(s.startedAt)}${s.endedAt?'  ⏹ '+fmtDateTime(s.endedAt):' <span style=\'color:var(--green)\'>● живая</span>'}</div>
           </div>
-          ${s.status==='RUNNING'?`<button class="btn btn-danger btn-sm" onclick="event.stopPropagation();stopSession('${s.id}')">■</button>`:''}
+          ${s.status==='RUNNING'?`<button class="btn btn-danger btn-sm" onclick="event.stopPropagation();stopSession('${s.id}')">■ СТОП</button>`:''}
         </div>
+        <div style="font-size:10px;color:var(--muted);margin-top:5px;padding-top:5px;border-top:1px solid var(--border);">👆 Нажми для деталей, графика и лога</div>
       </div>
-    `).join('');
+    `;}).join('');
+    // Update active count badge
+    const running = sessions.filter(s=>s.status==='RUNNING').length;
+    const badge = document.getElementById('activeSessionCount');
+    if (badge) badge.textContent = running > 0 ? `· ${running} активна` : `· ${sessions.length} всего`;
   } catch { list.innerHTML='<div class="alert alert-error">❌ Ошибка загрузки</div>'; }
 }
 
@@ -942,7 +970,7 @@ function renderDrawer(sess) {
     ? '<div style="color:var(--muted);font-size:11px;padding:8px;">Событий пока нет</div>'
     : [...events].reverse().map(e => `
         <div class="event-item ${e.type}">
-          <span class="event-time">${fmtTime(e.timestamp)}</span>
+          <span class="event-time">${fmtDateTime(e.timestamp)}</span>
           <span class="event-type-tag ${e.type}">${e.type}</span>
           <span class="event-msg">${escHtml(e.message||'')}</span>
         </div>
@@ -1046,7 +1074,7 @@ function initSessionChart(coinName, events, refreshSec) {
 
 async function loadSessionChartData(coinName, events, refreshSec) {
   try {
-    const r = await fetch(`${API_BASE}/api/chart/${encodeURIComponent(coinName)}?interval=1d`);
+    const r = await fetch(`${API_BASE}/api/chart/${encodeURIComponent(coinName)}?interval=7d`);
     const json = await r.json();
     if (json.error || !sessionLineSeries) return;
     const data = dedupeChartData(json.data||[]);
@@ -1165,6 +1193,23 @@ function showAlert(id,type,msg) {
 function showToast(msg) {
   const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'),2500);
+}
+
+// ============================================================
+// ACTIVE SESSION BANNER
+// ============================================================
+async function checkActiveSessionBanner() {
+  try {
+    const r = await fetch(`${API_BASE}/api/trading/sessions`);
+    const sessions = await r.json();
+    const hasActive = sessions.some(s => s.status === 'RUNNING');
+    const b1 = document.getElementById('activeSessionBanner');
+    const b2 = document.getElementById('activeSessionBannerRes');
+    if (b1) b1.style.display = hasActive ? 'flex' : 'none';
+    if (b2) b2.style.display = hasActive ? 'flex' : 'none';
+    const startBtn = document.getElementById('startTradeBtn');
+    if (startBtn) startBtn.disabled = hasActive;
+  } catch {}
 }
 
 // ============================================================
