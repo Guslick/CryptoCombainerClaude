@@ -83,7 +83,7 @@
   .btn-row{display:flex;gap:8px}
   .btn-row .btn{flex:1}
 
-  #chartContainer,#sessionChartContainer{width:100%;height:260px;background:var(--bg3);border-radius:var(--radius-sm);overflow:hidden;position:relative}
+  #chartContainer{width:100%;height:260px;background:var(--bg3);border-radius:var(--radius-sm);overflow:hidden;position:relative}
   .chart-toolbar{display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap}
   .interval-btn{padding:4px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--muted);font-family:var(--font-head);font-size:10px;cursor:pointer;transition:all 0.2s}
   .interval-btn.active{background:rgba(0,229,255,0.15);border-color:var(--accent);color:var(--accent)}
@@ -129,48 +129,44 @@
   .session-msg{font-size:11px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .session-time{font-size:10px;color:var(--muted);margin-top:3px}
 
-  /* ---- SESSION CARD ---- */
+  /* ─── SESSION CARD (mobile-first) ─────────────────────────── */
   .session-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:10px;overflow:hidden;transition:border-color .2s}
-  .session-card:hover{border-color:rgba(0,229,255,0.4)}
-  /* Header: dot | meta | actions stacked vertically on right */
-  .sc-header{display:flex;gap:10px;padding:12px;cursor:pointer;align-items:flex-start}
-  .sc-dot-wrap{padding-top:3px;flex-shrink:0}
-  .sc-meta{flex:1;min-width:0}
-  .sc-name{font-family:var(--font-head);font-size:12px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-  .sc-msg{font-size:11px;color:var(--muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .sc-time{font-size:10px;color:var(--muted);margin-top:3px}
-  .sc-balance{font-size:10px;color:var(--accent);margin-top:3px;font-family:var(--font-head)}
-  .sc-actions{display:flex;flex-direction:column;gap:5px;flex-shrink:0;align-items:flex-end}
+  .session-card:hover{border-color:rgba(0,229,255,0.35)}
+  /* Top row: dot + info block (full width, stacked) */
+  .session-card-header{display:flex;gap:10px;padding:12px 12px 8px;cursor:pointer;align-items:flex-start}
+  .session-card-body{flex:1;min-width:0}
+  .session-name{font-family:var(--font-head);font-size:11px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:6px;flex-wrap:wrap;line-height:1.5}
+  .session-msg{font-size:11px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .session-time{font-size:10px;color:var(--muted);margin-top:2px;white-space:normal;word-break:break-all}
+  .session-balance{font-size:10px;color:var(--accent);margin-top:3px;font-family:var(--font-head)}
+  /* Actions: full-width row below body */
+  .session-card-actions{display:flex;flex-wrap:wrap;gap:5px;padding:0 12px 10px}
+  .session-card-actions .btn{flex:0 0 auto;min-width:80px}
   /* Target prices */
-  .sc-targets{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;padding:7px 12px;background:rgba(0,0,0,0.25);border-top:1px solid rgba(255,255,255,0.05);font-size:11px}
+  .target-prices{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;padding:7px 12px;background:rgba(0,0,0,0.25);border-top:1px solid rgba(255,255,255,0.05);font-size:11px}
   .tp-label{color:var(--muted);white-space:nowrap}
   .tp-val{color:var(--text);font-weight:600;font-family:var(--font-head)}
   .tp-val.green{color:var(--green)}
   .tp-val.red{color:var(--red)}
   /* Inline chart */
-  .sc-chart-wrap{border-top:1px solid rgba(255,255,255,0.05);position:relative}
-  .sc-chart-toolbar{display:flex;align-items:center;justify-content:space-between;padding:5px 8px 0}
-  .sc-chart-label{font-size:9px;color:var(--muted)}
-  .sc-chart-expand{background:none;border:1px solid var(--border);color:var(--muted);border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;transition:color .2s,border-color .2s}
-  .sc-chart-expand:hover{color:var(--accent);border-color:var(--accent)}
-  .sc-chart-container{width:100%;transition:height 0.25s ease}
+  .inline-chart-wrap{border-top:1px solid rgba(255,255,255,0.05)}
+  .inline-chart-toolbar{display:flex;align-items:center;justify-content:space-between;padding:4px 8px}
+  .inline-chart-label{font-size:9px;color:var(--muted)}
+  .inline-chart-inner{width:100%;overflow:hidden}
+  .chart-expand-btn{background:none;border:1px solid var(--border);color:var(--muted);border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;transition:color .2s,border-color .2s;line-height:1.3}
+  .chart-expand-btn:hover,.chart-expand-btn:active{color:var(--accent);border-color:var(--accent)}
   /* Fullscreen chart overlay */
   #chartFullscreen{display:none;position:fixed;inset:0;z-index:2000;background:var(--bg);flex-direction:column}
   #chartFullscreen.open{display:flex}
   #chartFullscreen-header{flex-shrink:0;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;background:var(--bg2);border-bottom:1px solid var(--border)}
   #chartFullscreen-title{font-family:var(--font-head);font-size:12px;color:var(--accent)}
   #chartFullscreen-container{flex:1;min-height:0}
-  /* Drawer collapsible sections with scroll */
-  .coll-section{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-sm)}
-  .coll-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;cursor:pointer;user-select:none}
-  .coll-title{font-family:var(--font-head);font-size:11px;color:var(--accent)}
-  .coll-arrow{font-size:11px;color:var(--muted);transition:transform 0.2s}
-  .coll-arrow.open{transform:rotate(180deg)}
-  .coll-body{display:none;padding:0 14px 12px;flex-direction:column;gap:8px;overflow-y:auto}
+  /* Drawer collapsible panels */
+  .coll-body{display:none;padding:0 14px 12px;flex-direction:column;gap:8px}
   .coll-body.open{display:flex}
-  .coll-body.scrollable{max-height:240px}
+  .coll-body.scrollable{overflow-y:auto;max-height:260px}
   .coll-body::-webkit-scrollbar{width:3px}
-  .coll-body::-webkit-scrollbar-thumb{background:var(--border)}
+  .coll-body::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
 
   /* ---- SESSION DETAIL DRAWER ---- */
   #sessionDrawer{position:fixed;bottom:0;left:0;right:0;top:0;z-index:1000;display:none;flex-direction:column;background:var(--bg);overflow:hidden}
@@ -205,6 +201,9 @@
   .logs-toggle-arrow.open{transform:rotate(180deg)}
   .logs-body{display:none;flex-direction:column;gap:6px}
   .logs-body.open{display:flex}
+  .logs-body.scrollable{overflow-y:auto;max-height:260px}
+  .logs-body.scrollable::-webkit-scrollbar{width:3px}
+  .logs-body.scrollable::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
   .logs-textarea{background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--muted);font-family:monospace;font-size:10px;padding:10px;height:160px;resize:none;overflow-y:auto;width:100%;outline:none;line-height:1.5}
   .logs-actions{display:flex;gap:6px}
 
@@ -508,8 +507,6 @@ let chart = null, lineSeries = null;
 let sessionsRefreshTimer = null;
 let drawerRefreshTimer = null;
 let currentDrawerSession = null;
-let sessionChart = null, sessionLineSeries = null;
-let sessionChartCountdown = 0, sessionChartCountdownTimer = null;
 
 const tg = window.Telegram?.WebApp;
 if (tg) { tg.ready(); tg.expand(); }
@@ -934,8 +931,9 @@ function showBacktestResult(result) {
 // ============================================================
 
 // State tracking to avoid rebuilding DOM unnecessarily
-let _sessionsData = {};    // id -> session data snapshot
-let _inlineChartFsId = null; // session id shown fullscreen
+let _sessionsData = {};       // id -> session data snapshot
+let _inlineChartFsId = null;  // session id shown fullscreen
+let _chartCollapsed = {};     // id -> bool, whether inline chart is collapsed
 
 async function loadSessions() {
   const list = document.getElementById('sessionsList');
@@ -1067,27 +1065,36 @@ function buildSessionCard(s) {
   const tpHtml = buildTargetPricesHtml(s);
   const actionsHtml = buildActionsHtml(s);
 
+  // Chart is shown only for running sessions; collapsed state persists via _chartCollapsed
+  const isChartCollapsed = _chartCollapsed[s.id] || false;
+  const chartHtml = isRunning ? `
+      <div class="inline-chart-wrap" id="cwrap-${s.id}">
+        <div class="inline-chart-toolbar">
+          <span class="inline-chart-label">📈 График • авто-обновление</span>
+          <div style="display:flex;gap:4px;">
+            <button class="chart-expand-btn" onclick="event.stopPropagation();openFullscreenChart('${s.id}','${escHtml(s.coinName)}')" title="На весь экран">⛶</button>
+            <button class="chart-expand-btn" id="coll-btn-${s.id}" onclick="event.stopPropagation();toggleInlineChart('${s.id}')" title="${isChartCollapsed ? 'Развернуть' : 'Свернуть'}">${isChartCollapsed ? '▼' : '▲'}</button>
+          </div>
+        </div>
+        <div id="chart-wrap-inner-${s.id}" style="display:${isChartCollapsed ? 'none' : 'block'};">
+          <div id="ichart-${s.id}" class="inline-chart-inner" style="height:160px;width:100%;min-width:0;"></div>
+        </div>
+      </div>` : '';
+
   return `
     <div class="session-card" id="scard-${s.id}">
       <div class="session-card-header" onclick="openDrawer('${s.id}')">
-        <div class="session-dot ${s.status}" style="margin-top:3px;flex-shrink:0;"></div>
-        <div class="session-card-body">
+        <div class="session-dot ${s.status}" style="margin-top:4px;flex-shrink:0;width:10px;height:10px;"></div>
+        <div class="session-card-body" style="flex:1;min-width:0;">
           <div class="session-name">${escHtml(s.coinName)} <span class="chip">${s.type}</span>${stoppedUnexpected}</div>
           <div class="session-msg">${escHtml(s.lastMessage || s.status)}</div>
           <div class="session-time">▶ ${fmtDateTime(s.startedAt)}${s.endedAt ? '  ⏹ ' + fmtDateTime(s.endedAt) : ''}</div>
           <div class="session-balance">💼 ${balText}</div>
-          <div class="session-card-actions" onclick="event.stopPropagation();">${actionsHtml}</div>
         </div>
       </div>
+      <div class="session-card-actions" onclick="event.stopPropagation();">${actionsHtml}</div>
       ${tpHtml}
-      ${isRunning ? `
-      <div class="inline-chart-wrap" id="cwrap-${s.id}">
-        <div style="position:relative;">
-          <div id="ichart-${s.id}" class="inline-chart-inner" style="height:160px;width:100%;"></div>
-          <button class="chart-expand-btn" onclick="event.stopPropagation();openFullscreenChart('${s.id}','${escHtml(s.coinName)}')" title="Развернуть">⛶</button>
-        </div>
-        <div style="font-size:9px;color:var(--muted);text-align:center;padding:2px 0 6px;">График • авто-обновление</div>
-      </div>` : ''}
+      ${chartHtml}
     </div>`;
 }
 
@@ -1096,7 +1103,32 @@ function buildSessionCard(s) {
 // ============================================================
 const inlineCharts = {};
 
+function toggleInlineChart(sessionId) {
+  _chartCollapsed[sessionId] = !_chartCollapsed[sessionId];
+  const inner = document.getElementById('chart-wrap-inner-' + sessionId);
+  const btn = document.getElementById('coll-btn-' + sessionId);
+  if (inner) inner.style.display = _chartCollapsed[sessionId] ? 'none' : 'block';
+  if (btn) btn.textContent = _chartCollapsed[sessionId] ? '▼' : '▲';
+  if (!_chartCollapsed[sessionId]) {
+    // Re-init or resize chart when making visible
+    const sess = _sessionsData[sessionId];
+    if (sess) {
+      const entry = inlineCharts[sessionId];
+      if (entry) {
+        const c = document.getElementById('ichart-' + sessionId);
+        if (c && c.clientWidth > 0) entry.chart.applyOptions({ width: c.clientWidth });
+        loadInlineChartData(sess);
+      } else {
+        setTimeout(() => initInlineChart(sess), 80);
+      }
+    }
+  }
+}
+
 function initInlineChart(sess) {
+  // Skip if chart panel is collapsed
+  if (_chartCollapsed[sess.id]) return;
+
   const container = document.getElementById(`ichart-${sess.id}`);
   if (!container) return;
 
@@ -1106,15 +1138,16 @@ function initInlineChart(sess) {
     return;
   }
 
-  // Wait for container to have real dimensions
-  if (container.clientWidth === 0) {
+  // Use parent width or window width as fallback — never 0
+  const w = container.getBoundingClientRect().width || container.clientWidth || (window.innerWidth - 32);
+  if (w < 10) {
     setTimeout(() => initInlineChart(sess), 150);
     return;
   }
 
   const ch = LightweightCharts.createChart(container, {
-    width: container.clientWidth,
-    height: container.clientHeight || 160,
+    width: w,
+    height: 160,
     layout: { background: { type: 'solid', color: '#0a0e1a' }, textColor: '#6878a8' },
     grid: { vertLines: { color: 'rgba(42,53,96,0.25)' }, horzLines: { color: 'rgba(42,53,96,0.25)' } },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
@@ -1324,8 +1357,6 @@ function closeDrawer() {
   document.getElementById('sessionDrawer').classList.remove('open');
   currentDrawerSession = null;
   if (drawerRefreshTimer) { clearInterval(drawerRefreshTimer); drawerRefreshTimer = null; }
-  stopSessionChartRefresh();
-  if (sessionChart) { try { sessionChart.remove(); } catch(e) {} sessionChart = null; sessionLineSeries = null; }
 }
 
 async function fetchSessionDetail(id) {
@@ -1414,7 +1445,6 @@ function renderDrawer(sess, isFirstRender = false, scrollOpts = {}) {
 
   const events = sess.events || [];
   const params = sess.params || {};
-  const chartRefreshSec = parseInt(params.chartRefreshSec || 60, 10);
   const telegramSec = parseInt(params.telegramUpdateSec || 30, 10);
   const isRunning = sess.status === 'RUNNING';
 
@@ -1437,14 +1467,7 @@ function renderDrawer(sess, isFirstRender = false, scrollOpts = {}) {
       ${!isRunning ? `<button class="btn btn-sm" style="background:rgba(255,23,68,0.15);color:var(--red);border:1px solid rgba(255,23,68,0.3);" onclick="deleteSession('${sess.id}')">🗑 УДАЛИТЬ</button>` : ''}
     </div>`;
 
-  // -- CHART --
-  const chartHtml = `
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
-      <span style="font-size:10px;color:var(--muted);">🔄 обновление: <span id="chartCountdown" style="color:var(--accent);font-family:var(--font-head);">${chartRefreshSec}с</span></span>
-      <span style="font-size:10px;color:var(--muted);">📨 telegram: ${telegramSec}с</span>
-      <button class="btn btn-secondary btn-sm" onclick="forceDrawerChartRefresh()">↺</button>
-    </div>
-    <div id="sessionChartContainer" style="height:220px;width:100%;background:var(--bg3);border-radius:var(--radius-sm);overflow:hidden;"></div>`;
+  // -- CHART (removed from drawer — lives in session card) --
 
   // -- PARAMS --
   const paramLabels = {
@@ -1506,130 +1529,28 @@ function renderDrawer(sess, isFirstRender = false, scrollOpts = {}) {
   const content = document.getElementById('drawerContent');
   content.innerHTML =
     makeCollapsible('📊 СТАТУС', statusHtml, 'status', true) +
-    makeCollapsible('📈 ГРАФИК ' + sess.coinName.toUpperCase(), chartHtml, 'chart', true) +
     makeCollapsible('⚙️ ПАРАМЕТРЫ', paramsBodyHtml, 'params', false, true) +
-    makeCollapsible(`📋 СОБЫТИЯ (${events.length})`, `<div class="event-list">${eventsHtml}</div>`, 'events', true, true) +
-    makeCollapsible('📄 ЛОГИ', logsBodyHtml, 'logs', false);
+    makeCollapsible(`📋 СОБЫТИЯ (${events.length})`, `<div class="event-list" id="evt-list-inner">${eventsHtml}</div>`, 'events', true, true) +
+    makeCollapsible('📄 ЛОГИ И ЭКСПОРТ', logsBodyHtml, 'logs', false, true);
 
   // Restore scroll
   if (!isFirstRender) content.scrollTop = _drawerState.scroll;
 
   // Scroll to events/logs if new data
   if (scrollOpts.scrollToEvents) {
-    const evSec = document.getElementById('sec-events');
-    if (evSec && _drawerState.open.has('events')) {
-      setTimeout(() => evSec.scrollTop = evSec.scrollHeight, 50);
-    }
+    setTimeout(() => {
+      const evSec = document.getElementById('sec-events');
+      if (evSec && _drawerState.open.has('events')) evSec.scrollTop = evSec.scrollHeight;
+      const logSec = document.getElementById('sec-logs');
+      if (logSec && _drawerState.open.has('logs')) logSec.scrollTop = logSec.scrollHeight;
+    }, 60);
   }
 
-  // Init/update drawer chart
+  // Scroll logs to bottom
   setTimeout(() => {
-    initSessionChart(sess.coinName, events, chartRefreshSec);
-    // Scroll logs to bottom
     const logsTa = document.getElementById('logsText');
     if (logsTa) logsTa.scrollTop = logsTa.scrollHeight;
   }, 80);
-}
-
-// ---- Session chart in drawer ----
-function initSessionChart(coinName, events, refreshSec) {
-  const container = document.getElementById('sessionChartContainer');
-  if (!container) return;
-  if (sessionChart) {
-    // Just update data, don't recreate
-    updateDrawerChartData(coinName, events);
-    return;
-  }
-  if (container.clientWidth === 0) { setTimeout(() => initSessionChart(coinName, events, refreshSec), 100); return; }
-
-  sessionChart = LightweightCharts.createChart(container, {
-    width: container.clientWidth, height: container.clientHeight || 220,
-    layout: { background: { type: 'solid', color: '#0f1428' }, textColor: '#6878a8' },
-    grid: { vertLines: { color: 'rgba(42,53,96,0.3)' }, horzLines: { color: 'rgba(42,53,96,0.3)' } },
-    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-    rightPriceScale: { borderColor: '#2a3560', visible: true, minimumWidth: 60 },
-    timeScale: { borderColor: '#2a3560', timeVisible: true },
-    handleScroll: true, handleScale: true,
-  });
-  sessionLineSeries = sessionChart.addLineSeries({ color: '#00e5ff', lineWidth: 2,
-    priceFormat: { type: 'price', precision: 4, minMove: 0.0001 } });
-
-  new ResizeObserver(() => {
-    if (sessionChart && container.clientWidth > 0)
-      sessionChart.applyOptions({ width: container.clientWidth, height: container.clientHeight || 220 });
-  }).observe(container);
-
-  updateDrawerChartData(coinName, events);
-  startSessionChartRefresh(coinName, events, refreshSec);
-}
-
-async function updateDrawerChartData(coinName, events) {
-  if (!sessionLineSeries || !currentDrawerSession) return;
-  try {
-    const r = await fetch(`${API_BASE}/api/chart/${encodeURIComponent(coinName)}?interval=1d`);
-    const json = await r.json();
-    if (json.error || !json.data) return;
-    const data = dedupeChartData(json.data);
-    sessionLineSeries.setData(data);
-
-    (window._drawerPriceLines || []).forEach(pl => { try { sessionLineSeries.removePriceLine(pl); } catch(e) {} });
-    window._drawerPriceLines = [];
-
-    const sr = await fetch(`${API_BASE}/api/trading/sessions/${currentDrawerSession}`).catch(() => null);
-    const live = sr?.ok ? await sr.json() : null;
-    if (live) {
-      if (live.maxPrice) window._drawerPriceLines.push(sessionLineSeries.createPriceLine({ price: live.maxPrice, color: '#7c4dff', lineWidth: 1, lineStyle: 2, title: 'Макс.' }));
-      if (!live.isTrading && live.buyTargetPrice) window._drawerPriceLines.push(sessionLineSeries.createPriceLine({ price: live.buyTargetPrice, color: '#00e676', lineWidth: 1, lineStyle: 1, title: 'Покупка' }));
-      if (live.isTrading && live.boughtAtPrice) window._drawerPriceLines.push(sessionLineSeries.createPriceLine({ price: live.boughtAtPrice, color: '#00e5ff', lineWidth: 1, lineStyle: 0, title: 'Куплено' }));
-      if (live.isTrading && live.sellProfitPrice) window._drawerPriceLines.push(sessionLineSeries.createPriceLine({ price: live.sellProfitPrice, color: '#00e676', lineWidth: 1, lineStyle: 1, title: 'Продажа+' }));
-      if (live.isTrading && live.sellLossPrice) window._drawerPriceLines.push(sessionLineSeries.createPriceLine({ price: live.sellLossPrice, color: '#ff1744', lineWidth: 1, lineStyle: 1, title: 'Продажа-' }));
-
-      const allEvents = live.events || events || [];
-      if (allEvents.length) {
-        const times = data.map(d => d.time);
-        const minT = Math.min(...times), maxT = Math.max(...times);
-        const markers = allEvents
-          .filter(e => e.type === 'BUY' || e.type === 'SELL')
-          .map(e => ({ time: Math.floor(e.timestamp / 1000), position: e.type === 'BUY' ? 'belowBar' : 'aboveBar', color: e.type === 'BUY' ? '#00e676' : '#ff1744', shape: e.type === 'BUY' ? 'arrowUp' : 'arrowDown', text: e.type }))
-          .filter(m => m.time >= minT && m.time <= maxT);
-        if (markers.length) sessionLineSeries.setMarkers(markers);
-      }
-    }
-    sessionChart?.timeScale().fitContent();
-  } catch(e) { console.error('Drawer chart error', e); }
-}
-
-function forceDrawerChartRefresh() {
-  if (currentDrawerSession) {
-    const s = _sessionsData[currentDrawerSession] || { id: currentDrawerSession, coinName: document.getElementById('drawerTitle')?.textContent?.split('·')[0]?.trim() || '' };
-    updateDrawerChartData(s.coinName, []);
-    sessionChartCountdown = parseInt((_sessionsData[currentDrawerSession]?.params?.chartRefreshSec) || 60, 10);
-  }
-}
-
-function startSessionChartRefresh(coinName, events, refreshSec) {
-  stopSessionChartRefresh();
-  sessionChartCountdown = refreshSec;
-  updateCountdownDisplay();
-  sessionChartCountdownTimer = setInterval(async () => {
-    sessionChartCountdown--;
-    updateCountdownDisplay();
-    if (sessionChartCountdown <= 0) {
-      sessionChartCountdown = refreshSec;
-      updateDrawerChartData(coinName, events);
-    }
-  }, 1000);
-}
-function stopSessionChartRefresh() {
-  if (sessionChartCountdownTimer) { clearInterval(sessionChartCountdownTimer); sessionChartCountdownTimer = null; }
-}
-function updateCountdownDisplay() {
-  const el = document.getElementById('chartCountdown');
-  if (el) el.textContent = sessionChartCountdown + 'с';
-}
-function loadSessionChart(sessionId, coinName, refreshSec) {
-  updateDrawerChartData(coinName, []);
-  sessionChartCountdown = refreshSec;
 }
 
 function toggleLogs() { toggleSection('logs'); }
