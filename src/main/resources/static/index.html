@@ -129,17 +129,48 @@
   .session-msg{font-size:11px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .session-time{font-size:10px;color:var(--muted);margin-top:3px}
 
-  /* ---- SESSION CARD (new) ---- */
-  .session-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px;overflow:hidden;transition:border-color .2s}
-  .session-card:hover{border-color:var(--accent)}
-  .session-card-header{display:flex;align-items:flex-start;gap:10px;padding:12px;cursor:pointer}
-  .session-balance{font-size:10px;color:var(--accent);margin-top:3px;font-family:var(--font-head)}
-  .target-prices{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;padding:8px 12px;background:rgba(0,0,0,0.2);border-top:1px solid var(--border);font-size:11px}
-  .tp-label{color:var(--muted)}
+  /* ---- SESSION CARD ---- */
+  .session-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:10px;overflow:hidden;transition:border-color .2s}
+  .session-card:hover{border-color:rgba(0,229,255,0.4)}
+  /* Header: dot | meta | actions stacked vertically on right */
+  .sc-header{display:flex;gap:10px;padding:12px;cursor:pointer;align-items:flex-start}
+  .sc-dot-wrap{padding-top:3px;flex-shrink:0}
+  .sc-meta{flex:1;min-width:0}
+  .sc-name{font-family:var(--font-head);font-size:12px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .sc-msg{font-size:11px;color:var(--muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sc-time{font-size:10px;color:var(--muted);margin-top:3px}
+  .sc-balance{font-size:10px;color:var(--accent);margin-top:3px;font-family:var(--font-head)}
+  .sc-actions{display:flex;flex-direction:column;gap:5px;flex-shrink:0;align-items:flex-end}
+  /* Target prices */
+  .sc-targets{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;padding:7px 12px;background:rgba(0,0,0,0.25);border-top:1px solid rgba(255,255,255,0.05);font-size:11px}
+  .tp-label{color:var(--muted);white-space:nowrap}
   .tp-val{color:var(--text);font-weight:600;font-family:var(--font-head)}
   .tp-val.green{color:var(--green)}
   .tp-val.red{color:var(--red)}
-  .inline-chart-wrap{padding:8px 8px 4px;border-top:1px solid var(--border)}
+  /* Inline chart */
+  .sc-chart-wrap{border-top:1px solid rgba(255,255,255,0.05);position:relative}
+  .sc-chart-toolbar{display:flex;align-items:center;justify-content:space-between;padding:5px 8px 0}
+  .sc-chart-label{font-size:9px;color:var(--muted)}
+  .sc-chart-expand{background:none;border:1px solid var(--border);color:var(--muted);border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;transition:color .2s,border-color .2s}
+  .sc-chart-expand:hover{color:var(--accent);border-color:var(--accent)}
+  .sc-chart-container{width:100%;transition:height 0.25s ease}
+  /* Fullscreen chart overlay */
+  #chartFullscreen{display:none;position:fixed;inset:0;z-index:2000;background:var(--bg);flex-direction:column}
+  #chartFullscreen.open{display:flex}
+  #chartFullscreen-header{flex-shrink:0;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;background:var(--bg2);border-bottom:1px solid var(--border)}
+  #chartFullscreen-title{font-family:var(--font-head);font-size:12px;color:var(--accent)}
+  #chartFullscreen-container{flex:1;min-height:0}
+  /* Drawer collapsible sections with scroll */
+  .coll-section{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-sm)}
+  .coll-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;cursor:pointer;user-select:none}
+  .coll-title{font-family:var(--font-head);font-size:11px;color:var(--accent)}
+  .coll-arrow{font-size:11px;color:var(--muted);transition:transform 0.2s}
+  .coll-arrow.open{transform:rotate(180deg)}
+  .coll-body{display:none;padding:0 14px 12px;flex-direction:column;gap:8px;overflow-y:auto}
+  .coll-body.open{display:flex}
+  .coll-body.scrollable{max-height:240px}
+  .coll-body::-webkit-scrollbar{width:3px}
+  .coll-body::-webkit-scrollbar-thumb{background:var(--border)}
 
   /* ---- SESSION DETAIL DRAWER ---- */
   #sessionDrawer{position:fixed;bottom:0;left:0;right:0;top:0;z-index:1000;display:none;flex-direction:column;background:var(--bg);overflow:hidden}
@@ -456,6 +487,15 @@
     <button class="drawer-close" onclick="closeDrawer()">✕ ЗАКРЫТЬ</button>
   </div>
   <div class="drawer-content" id="drawerContent"></div>
+</div>
+
+<!-- FULLSCREEN CHART OVERLAY -->
+<div id="chartFullscreen">
+  <div id="chartFullscreen-header">
+    <span id="chartFullscreen-title">ГРАФИК</span>
+    <button class="drawer-close" onclick="closeFullscreenChart()">✕ СВЕРНУТЬ</button>
+  </div>
+  <div id="chartFullscreen-container"></div>
 </div>
 
 <div id="toast"></div>
@@ -892,89 +932,206 @@ function showBacktestResult(result) {
 // ============================================================
 // SESSIONS LIST
 // ============================================================
+
+// State tracking to avoid rebuilding DOM unnecessarily
+let _sessionsData = {};    // id -> session data snapshot
+let _inlineChartFsId = null; // session id shown fullscreen
+
 async function loadSessions() {
   const list = document.getElementById('sessionsList');
   try {
     const r = await fetch(`${API_BASE}/api/trading/sessions`);
     const sessions = await r.json();
-    if (!sessions.length) { list.innerHTML='<div class="empty-state"><span class="icon">🎮</span>Нет сессий</div>'; return; }
-    list.innerHTML = sessions.map(s => buildSessionCard(s)).join('');
-    // Initialize charts for running sessions
-    sessions.filter(s => s.status==='RUNNING').forEach(s => {
-      setTimeout(() => initInlineChart(s), 200);
-    });
-  } catch(e) { list.innerHTML='<div class="alert alert-error">❌ Ошибка загрузки</div>'; }
+    if (!Array.isArray(sessions) || !sessions.length) {
+      list.innerHTML = '<div class="empty-state"><span class="icon">🎮</span>Нет сессий</div>';
+      _sessionsData = {};
+      return;
+    }
+
+    // First load: build full HTML
+    const existingIds = new Set(Object.keys(_sessionsData));
+    const newIds = new Set(sessions.map(s => s.id));
+
+    // Check if set of sessions changed (add/remove)
+    const setsMatch = existingIds.size === newIds.size && [...newIds].every(id => existingIds.has(id));
+
+    if (!setsMatch) {
+      // Rebuild entirely
+      list.innerHTML = sessions.map(s => buildSessionCard(s)).join('');
+      sessions.forEach(s => { _sessionsData[s.id] = s; });
+      // Init charts after DOM is painted
+      sessions.filter(s => s.status === 'RUNNING').forEach(s => {
+        requestAnimationFrame(() => requestAnimationFrame(() => initInlineChart(s)));
+      });
+    } else {
+      // Patch existing cards without destroying chart containers
+      sessions.forEach(s => {
+        const prev = _sessionsData[s.id];
+        _sessionsData[s.id] = s;
+        patchSessionCard(s, prev);
+        // Refresh chart data if running
+        if (s.status === 'RUNNING') {
+          const entry = inlineCharts[s.id];
+          if (entry) loadInlineChartData(s);
+          else requestAnimationFrame(() => requestAnimationFrame(() => initInlineChart(s)));
+        }
+      });
+    }
+  } catch(e) {
+    console.error('loadSessions error', e);
+    list.innerHTML = '<div class="alert alert-error">❌ Ошибка загрузки</div>';
+  }
+}
+
+/** Update only text/status parts of card without touching chart div */
+function patchSessionCard(s, prev) {
+  const card = document.getElementById(`scard-${s.id}`);
+  if (!card) return;
+
+  // Update status dot
+  const dot = card.querySelector('.session-dot');
+  if (dot) dot.className = `session-dot ${s.status}`;
+
+  // Update text fields
+  const nameEl = card.querySelector('.session-name');
+  if (nameEl) {
+    const stoppedUnexpected = s.stoppedUnexpectedly
+      ? '<span class="chip" style="background:rgba(255,234,0,0.15);color:var(--yellow);">⚡ ПРЕРВАНО</span>' : '';
+    nameEl.innerHTML = `${escHtml(s.coinName)} <span class="chip">${s.type}</span>${stoppedUnexpected}`;
+  }
+
+  const msgEl = card.querySelector('.session-msg');
+  if (msgEl) msgEl.textContent = s.lastMessage || s.status;
+
+  const timeEl = card.querySelector('.session-time');
+  if (timeEl) timeEl.textContent = `▶ ${fmtDateTime(s.startedAt)}${s.endedAt ? '  ⏹ ' + fmtDateTime(s.endedAt) : ''}`;
+
+  const balEl = card.querySelector('.session-balance');
+  if (balEl) {
+    const balCoin = s.coinBalance > 0 ? `${fmtNum(s.coinBalance)} ${s.coinName}` : '';
+    const balUsdt = s.usdtBalance > 0 ? `${fmtNum(s.usdtBalance)} USDT` : '';
+    balEl.textContent = '💼 ' + ([balCoin, balUsdt].filter(Boolean).join(', ') || '—');
+  }
+
+  // Update target prices
+  const tpEl = card.querySelector('.target-prices');
+  const newTpHtml = buildTargetPricesHtml(s);
+  if (tpEl) {
+    if (newTpHtml) tpEl.outerHTML = newTpHtml;
+    else tpEl.remove();
+  } else if (newTpHtml) {
+    // Insert before inline-chart-wrap or at end
+    const chartWrap = card.querySelector('.inline-chart-wrap');
+    if (chartWrap) chartWrap.insertAdjacentHTML('beforebegin', newTpHtml);
+    else card.insertAdjacentHTML('beforeend', newTpHtml);
+  }
+
+  // Update action buttons
+  const actionsEl = card.querySelector('.session-card-actions');
+  if (actionsEl) actionsEl.innerHTML = buildActionsHtml(s);
+}
+
+function buildTargetPricesHtml(s) {
+  if (s.status !== 'RUNNING') return '';
+  if (!s.isTrading) {
+    if (!s.maxPrice && !s.buyTargetPrice) return '';
+    return `<div class="target-prices">
+      <span class="tp-label">🔭 Макс. цена:</span><span class="tp-val">${s.maxPrice ? '$' + formatPrice(s.maxPrice) : '—'}</span>
+      <span class="tp-label">🎯 Цена покупки:</span><span class="tp-val green">${s.buyTargetPrice ? '$' + formatPrice(s.buyTargetPrice) : '—'}</span>
+    </div>`;
+  } else {
+    return `<div class="target-prices">
+      <span class="tp-label">💰 Куплено за:</span><span class="tp-val">${s.boughtAtPrice ? '$' + formatPrice(s.boughtAtPrice) : '—'}</span>
+      <span class="tp-label">📈 Продажа+:</span><span class="tp-val green">${s.sellProfitPrice ? '$' + formatPrice(s.sellProfitPrice) : '—'}</span>
+      <span class="tp-label">📉 Продажа-:</span><span class="tp-val red">${s.sellLossPrice ? '$' + formatPrice(s.sellLossPrice) : '—'}</span>
+    </div>`;
+  }
+}
+
+function buildActionsHtml(s) {
+  const isRunning = s.status === 'RUNNING';
+  const isStopped = !isRunning;
+  return `
+    ${isRunning ? `<button class="btn btn-danger btn-sm" onclick="event.stopPropagation();stopSession('${s.id}')">■ Стоп</button>` : ''}
+    ${isStopped && s.type !== 'BACKTEST' ? `<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();resumeSession('${s.id}')">▶ Возобновить</button>` : ''}
+    ${isStopped ? `<button class="btn btn-sm" style="background:rgba(255,23,68,0.15);color:var(--red);border:1px solid rgba(255,23,68,0.3);" onclick="event.stopPropagation();deleteSession('${s.id}')">🗑</button>` : ''}`;
 }
 
 function buildSessionCard(s) {
   const isRunning = s.status === 'RUNNING';
-  const isStopped = !isRunning;
   const balCoin = s.coinBalance > 0 ? `${fmtNum(s.coinBalance)} ${s.coinName}` : '';
   const balUsdt = s.usdtBalance > 0 ? `${fmtNum(s.usdtBalance)} USDT` : '';
   const balText = [balCoin, balUsdt].filter(Boolean).join(', ') || '—';
-
-  // Target prices block
-  let targetHtml = '';
-  if (isRunning) {
-    if (!s.isTrading) {
-      targetHtml = `
-        <div class="target-prices">
-          <span class="tp-label">🔭 Макс. цена:</span><span class="tp-val">${s.maxPrice ? '$'+formatPrice(s.maxPrice) : '—'}</span>
-          <span class="tp-label">🎯 Цена покупки:</span><span class="tp-val green">${s.buyTargetPrice ? '$'+formatPrice(s.buyTargetPrice) : '—'}</span>
-        </div>`;
-    } else {
-      targetHtml = `
-        <div class="target-prices">
-          <span class="tp-label">💰 Куплено за:</span><span class="tp-val">${s.boughtAtPrice ? '$'+formatPrice(s.boughtAtPrice) : '—'}</span>
-          <span class="tp-label">📈 Продажа+:</span><span class="tp-val green">${s.sellProfitPrice ? '$'+formatPrice(s.sellProfitPrice) : '—'}</span>
-          <span class="tp-label">📉 Продажа-:</span><span class="tp-val red">${s.sellLossPrice ? '$'+formatPrice(s.sellLossPrice) : '—'}</span>
-        </div>`;
-    }
-  }
-
-  const stoppedUnexpected = s.stoppedUnexpectedly ? '<span class="chip" style="background:rgba(255,234,0,0.15);color:var(--yellow);">⚡ ПРЕРВАНО</span>' : '';
+  const stoppedUnexpected = s.stoppedUnexpectedly
+    ? '<span class="chip" style="background:rgba(255,234,0,0.15);color:var(--yellow);">⚡ ПРЕРВАНО</span>' : '';
+  const tpHtml = buildTargetPricesHtml(s);
+  const actionsHtml = buildActionsHtml(s);
 
   return `
     <div class="session-card" id="scard-${s.id}">
       <div class="session-card-header" onclick="openDrawer('${s.id}')">
-        <div class="session-dot ${s.status}"></div>
-        <div class="session-info" style="flex:1;min-width:0;">
-          <div class="session-name">${s.coinName} <span class="chip">${s.type}</span>${stoppedUnexpected}</div>
-          <div class="session-msg">${escHtml(s.lastMessage||s.status)}</div>
-          <div class="session-time">▶ ${fmtDateTime(s.startedAt)}${s.endedAt ? '  ⏹ '+fmtDateTime(s.endedAt) : ''}</div>
+        <div class="session-dot ${s.status}" style="margin-top:3px;flex-shrink:0;"></div>
+        <div class="session-card-body">
+          <div class="session-name">${escHtml(s.coinName)} <span class="chip">${s.type}</span>${stoppedUnexpected}</div>
+          <div class="session-msg">${escHtml(s.lastMessage || s.status)}</div>
+          <div class="session-time">▶ ${fmtDateTime(s.startedAt)}${s.endedAt ? '  ⏹ ' + fmtDateTime(s.endedAt) : ''}</div>
           <div class="session-balance">💼 ${balText}</div>
+          <div class="session-card-actions" onclick="event.stopPropagation();">${actionsHtml}</div>
         </div>
-        <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;">
-          ${isRunning ? `<button class="btn btn-danger btn-sm" onclick="event.stopPropagation();stopSession('${s.id}')">■ Стоп</button>` : ''}
-          ${isStopped && s.type!=='BACKTEST' ? `<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();resumeSession('${s.id}')">▶ Возобновить</button>` : ''}
-          ${isStopped ? `<button class="btn btn-sm" style="background:rgba(255,23,68,0.15);color:var(--red);border:1px solid rgba(255,23,68,0.3);" onclick="event.stopPropagation();deleteSession('${s.id}')">🗑</button>` : ''}
-        </div>
-        <div style="font-size:10px;color:var(--muted);margin-top:5px;padding-top:5px;border-top:1px solid var(--border);">👆 Нажми для деталей, графика и лога</div>
       </div>
-      ${targetHtml}
-      ${isRunning ? `<div class="inline-chart-wrap"><div id="ichart-${s.id}" style="height:160px;width:100%;"></div><div style="font-size:9px;color:var(--muted);text-align:center;margin-top:2px;">График • авто-обновление</div></div>` : ''}
+      ${tpHtml}
+      ${isRunning ? `
+      <div class="inline-chart-wrap" id="cwrap-${s.id}">
+        <div style="position:relative;">
+          <div id="ichart-${s.id}" class="inline-chart-inner" style="height:160px;width:100%;"></div>
+          <button class="chart-expand-btn" onclick="event.stopPropagation();openFullscreenChart('${s.id}','${escHtml(s.coinName)}')" title="Развернуть">⛶</button>
+        </div>
+        <div style="font-size:9px;color:var(--muted);text-align:center;padding:2px 0 6px;">График • авто-обновление</div>
+      </div>` : ''}
     </div>`;
 }
 
-// Inline chart instances map
+// ============================================================
+// INLINE CHART (in session card)
+// ============================================================
 const inlineCharts = {};
 
 function initInlineChart(sess) {
   const container = document.getElementById(`ichart-${sess.id}`);
-  if (!container || inlineCharts[sess.id]) return;
+  if (!container) return;
+
+  // Already initialized — just refresh data
+  if (inlineCharts[sess.id]) {
+    loadInlineChartData(sess);
+    return;
+  }
+
+  // Wait for container to have real dimensions
+  if (container.clientWidth === 0) {
+    setTimeout(() => initInlineChart(sess), 150);
+    return;
+  }
+
   const ch = LightweightCharts.createChart(container, {
-    width: container.clientWidth, height: 160,
-    layout: { background:{type:'solid',color:'#0f1428'}, textColor:'#6878a8' },
-    grid: { vertLines:{color:'rgba(42,53,96,0.3)'}, horzLines:{color:'rgba(42,53,96,0.3)'} },
+    width: container.clientWidth,
+    height: container.clientHeight || 160,
+    layout: { background: { type: 'solid', color: '#0a0e1a' }, textColor: '#6878a8' },
+    grid: { vertLines: { color: 'rgba(42,53,96,0.25)' }, horzLines: { color: 'rgba(42,53,96,0.25)' } },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-    rightPriceScale: { borderColor:'#2a3560', visible: true },
-    timeScale: { borderColor:'#2a3560', timeVisible:true },
-    handleScroll: true, handleScale: true,
+    rightPriceScale: { borderColor: '#2a3560', visible: true, minimumWidth: 60 },
+    timeScale: { borderColor: '#2a3560', timeVisible: true, fixLeftEdge: false },
+    handleScroll: { mouseWheel: false, pressedMouseMove: true, horzTouchDrag: true },
+    handleScale: { mouseWheel: false, pinch: true },
   });
-  const ls = ch.addLineSeries({color:'#00e5ff', lineWidth:2,
-    priceFormat:{type:'price',precision:4,minMove:0.0001}});
-  new ResizeObserver(() => { ch.applyOptions({width:container.clientWidth}); }).observe(container);
-  inlineCharts[sess.id] = {chart:ch, line:ls};
+  const ls = ch.addLineSeries({ color: '#00e5ff', lineWidth: 2,
+    priceFormat: { type: 'price', precision: 4, minMove: 0.0001 } });
+
+  const ro = new ResizeObserver(() => {
+    if (container.clientWidth > 0) ch.applyOptions({ width: container.clientWidth });
+  });
+  ro.observe(container);
+
+  inlineCharts[sess.id] = { chart: ch, line: ls, ro };
   loadInlineChartData(sess);
 }
 
@@ -986,231 +1143,359 @@ async function loadInlineChartData(sess) {
     const json = await r.json();
     if (json.error || !json.data) return;
     const data = dedupeChartData(json.data);
+    if (!data.length) return;
+
     entry.line.setData(data);
 
-    // Price lines
-    const existing = entry.lines || [];
-    existing.forEach(pl => { try { entry.chart.removePriceLine(pl); } catch(e){} });
+    // Remove old price lines
+    (entry.lines || []).forEach(pl => { try { entry.line.removePriceLine(pl); } catch(e) {} });
     entry.lines = [];
 
-    if (sess.maxPrice) {
-      entry.lines.push(entry.line.createPriceLine({price:sess.maxPrice, color:'#7c4dff', lineWidth:1, lineStyle:2, title:'Макс'}));
-    }
-    if (!sess.isTrading && sess.buyTargetPrice) {
-      entry.lines.push(entry.line.createPriceLine({price:sess.buyTargetPrice, color:'#00e676', lineWidth:1, lineStyle:1, title:'Покупка'}));
-    }
-    if (sess.isTrading && sess.sellProfitPrice) {
-      entry.lines.push(entry.line.createPriceLine({price:sess.sellProfitPrice, color:'#00e676', lineWidth:1, lineStyle:1, title:'Продажа+'}));
-    }
-    if (sess.isTrading && sess.sellLossPrice) {
-      entry.lines.push(entry.line.createPriceLine({price:sess.sellLossPrice, color:'#ff1744', lineWidth:1, lineStyle:1, title:'Продажа-'}));
-    }
+    // Fetch fresh session for live prices
+    const sr = await fetch(`${API_BASE}/api/trading/sessions/${sess.id}`).catch(() => null);
+    const live = sr?.ok ? await sr.json() : sess;
+
+    if (live.maxPrice) entry.lines.push(entry.line.createPriceLine({ price: live.maxPrice, color: '#7c4dff', lineWidth: 1, lineStyle: 2, title: 'Макс' }));
+    if (!live.isTrading && live.buyTargetPrice) entry.lines.push(entry.line.createPriceLine({ price: live.buyTargetPrice, color: '#00e676', lineWidth: 1, lineStyle: 1, title: 'Покупка' }));
+    if (live.isTrading && live.boughtAtPrice) entry.lines.push(entry.line.createPriceLine({ price: live.boughtAtPrice, color: '#00e5ff', lineWidth: 1, lineStyle: 0, title: 'Куплено' }));
+    if (live.isTrading && live.sellProfitPrice) entry.lines.push(entry.line.createPriceLine({ price: live.sellProfitPrice, color: '#00e676', lineWidth: 1, lineStyle: 1, title: 'Продажа+' }));
+    if (live.isTrading && live.sellLossPrice) entry.lines.push(entry.line.createPriceLine({ price: live.sellLossPrice, color: '#ff1744', lineWidth: 1, lineStyle: 1, title: 'Продажа-' }));
 
     // BUY/SELL markers from events
-    const events = sess.events || [];
-    const markers = events.filter(e=>e.type==='BUY'||e.type==='SELL').map(e=>({
-      time: Math.floor(e.timestamp/1000),
-      position: e.type==='BUY'?'belowBar':'aboveBar',
-      color: e.type==='BUY'?'#00e676':'#ff1744',
-      shape: e.type==='BUY'?'arrowUp':'arrowDown',
-      text: e.type,
-    })).filter(m=>{ const times=data.map(d=>d.time); return times.length && m.time>=Math.min(...times)&&m.time<=Math.max(...times); });
-    if (markers.length) entry.line.setMarkers(markers);
+    if (live.events?.length) {
+      const times = data.map(d => d.time);
+      const minT = Math.min(...times), maxT = Math.max(...times);
+      const markers = live.events
+        .filter(e => e.type === 'BUY' || e.type === 'SELL')
+        .map(e => ({ time: Math.floor(e.timestamp / 1000), position: e.type === 'BUY' ? 'belowBar' : 'aboveBar', color: e.type === 'BUY' ? '#00e676' : '#ff1744', shape: e.type === 'BUY' ? 'arrowUp' : 'arrowDown', text: e.type }))
+        .filter(m => m.time >= minT && m.time <= maxT);
+      if (markers.length) entry.line.setMarkers(markers);
+    }
 
     entry.chart.timeScale().fitContent();
-  } catch(e) { console.error('inline chart error', e); }
+  } catch(e) { console.error('Inline chart error', e); }
 }
 
+// ============================================================
+// FULLSCREEN INLINE CHART
+// ============================================================
+let _fsChart = null, _fsLine = null, _fsSessionId = null;
+
+function openFullscreenChart(sessionId, coinName) {
+  _fsSessionId = sessionId;
+  const overlay = document.getElementById('chartFullscreen');
+  const container = document.getElementById('chartFullscreen-container');
+  document.getElementById('chartFullscreen-title').textContent = `📈 ${coinName.toUpperCase()}`;
+  overlay.classList.add('open');
+
+  // Destroy old
+  if (_fsChart) { try { _fsChart.remove(); } catch(e) {} _fsChart = null; _fsLine = null; }
+
+  requestAnimationFrame(() => {
+    _fsChart = LightweightCharts.createChart(container, {
+      width: container.clientWidth, height: container.clientHeight,
+      layout: { background: { type: 'solid', color: '#0a0e1a' }, textColor: '#8899cc' },
+      grid: { vertLines: { color: 'rgba(42,53,96,0.3)' }, horzLines: { color: 'rgba(42,53,96,0.3)' } },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      rightPriceScale: { borderColor: '#2a3560', visible: true },
+      timeScale: { borderColor: '#2a3560', timeVisible: true },
+      handleScroll: true, handleScale: true,
+    });
+    _fsLine = _fsChart.addLineSeries({ color: '#00e5ff', lineWidth: 2,
+      priceFormat: { type: 'price', precision: 4, minMove: 0.0001 } });
+    new ResizeObserver(() => {
+      if (_fsChart) _fsChart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+    }).observe(container);
+
+    // Load same data as inline chart
+    const sess = _sessionsData[sessionId] || { id: sessionId, coinName };
+    loadInlineChartDataInto(sess, _fsLine, _fsChart);
+  });
+}
+
+async function loadInlineChartDataInto(sess, lineSeries, chart) {
+  try {
+    const r = await fetch(`${API_BASE}/api/chart/${encodeURIComponent(sess.coinName)}?interval=1d`);
+    const json = await r.json();
+    if (json.error || !json.data) return;
+    const data = dedupeChartData(json.data);
+    lineSeries.setData(data);
+
+    const sr = await fetch(`${API_BASE}/api/trading/sessions/${sess.id}`).catch(() => null);
+    const live = sr?.ok ? await sr.json() : sess;
+
+    if (live.maxPrice) lineSeries.createPriceLine({ price: live.maxPrice, color: '#7c4dff', lineWidth: 1, lineStyle: 2, title: 'Макс' });
+    if (!live.isTrading && live.buyTargetPrice) lineSeries.createPriceLine({ price: live.buyTargetPrice, color: '#00e676', lineWidth: 1, lineStyle: 1, title: 'Покупка' });
+    if (live.isTrading && live.boughtAtPrice) lineSeries.createPriceLine({ price: live.boughtAtPrice, color: '#00e5ff', lineWidth: 1, lineStyle: 0, title: 'Куплено' });
+    if (live.isTrading && live.sellProfitPrice) lineSeries.createPriceLine({ price: live.sellProfitPrice, color: '#00e676', lineWidth: 1, lineStyle: 1, title: 'Продажа+' });
+    if (live.isTrading && live.sellLossPrice) lineSeries.createPriceLine({ price: live.sellLossPrice, color: '#ff1744', lineWidth: 1, lineStyle: 1, title: 'Продажа-' });
+
+    if (live.events?.length) {
+      const times = data.map(d => d.time);
+      const minT = Math.min(...times), maxT = Math.max(...times);
+      const markers = live.events
+        .filter(e => e.type === 'BUY' || e.type === 'SELL')
+        .map(e => ({ time: Math.floor(e.timestamp / 1000), position: e.type === 'BUY' ? 'belowBar' : 'aboveBar', color: e.type === 'BUY' ? '#00e676' : '#ff1744', shape: e.type === 'BUY' ? 'arrowUp' : 'arrowDown', text: e.type }))
+        .filter(m => m.time >= minT && m.time <= maxT);
+      if (markers.length) lineSeries.setMarkers(markers);
+    }
+    chart.timeScale().fitContent();
+  } catch(e) { console.error('FS chart error', e); }
+}
+
+function closeFullscreenChart() {
+  document.getElementById('chartFullscreen').classList.remove('open');
+  if (_fsChart) { try { _fsChart.remove(); } catch(e) {} _fsChart = null; _fsLine = null; }
+  _fsSessionId = null;
+}
+
+// ============================================================
+// SESSION ACTIONS
+// ============================================================
 async function stopSession(id) {
-  await fetch(`${API_BASE}/api/trading/stop`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:id})});
+  await fetch(`${API_BASE}/api/trading/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: id }) });
   showToast('⏹ Сессия остановлена');
+  delete _sessionsData[id];
   loadSessions();
-  if (currentDrawerSession===id) refreshDrawer();
+  if (currentDrawerSession === id) refreshDrawer();
 }
 
 async function resumeSession(id) {
-  const r = await fetch(`${API_BASE}/api/trading/resume`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:id})});
+  const r = await fetch(`${API_BASE}/api/trading/resume`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: id }) });
   const data = await r.json();
-  if (data.error) { showToast('❌ '+data.error); return; }
+  if (data.error) { showToast('❌ ' + data.error); return; }
   showToast('▶ Сессия возобновлена!');
+  delete _sessionsData[id];
   loadSessions();
 }
 
 async function deleteSession(id) {
   if (!confirm('Удалить сессию и все её данные?')) return;
-  const r = await fetch(`${API_BASE}/api/trading/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:id})});
+  const r = await fetch(`${API_BASE}/api/trading/delete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: id }) });
   const data = await r.json();
-  if (data.deleted) { showToast('🗑 Сессия удалена'); loadSessions(); if(currentDrawerSession===id) closeDrawer(); }
-  else showToast('❌ '+(data.error||'Ошибка'));
+  if (data.deleted) {
+    showToast('🗑 Сессия удалена');
+    delete _sessionsData[id];
+    // Cleanup inline chart
+    if (inlineCharts[id]) {
+      try { inlineCharts[id].chart.remove(); } catch(e) {}
+      delete inlineCharts[id];
+    }
+    loadSessions();
+    if (currentDrawerSession === id) closeDrawer();
+  } else {
+    showToast('❌ ' + (data.error || 'Ошибка'));
+  }
 }
 
 function startSessionsRefresh() {
   stopSessionsRefresh();
-  sessionsRefreshTimer = setInterval(async () => {
-    const r = await fetch(`${API_BASE}/api/trading/sessions`).catch(()=>null);
-    if (!r||!r.ok) return;
-    const sessions = await r.json();
-    sessions.forEach(s => {
-      // Update inline chart for running sessions
-      const entry = inlineCharts[s.id];
-      if (s.status==='RUNNING' && entry) loadInlineChartData(s);
-      // Update balance/message display without full re-render
-      const card = document.getElementById(`scard-${s.id}`);
-      if (!card) { loadSessions(); return; } // new session appeared
-    });
-    // Full refresh every 10s or if statuses changed
-    if (!window._lastSessionCount || window._lastSessionCount !== sessions.length) {
-      window._lastSessionCount = sessions.length;
-      loadSessions();
-    }
-  }, 5000);
+  sessionsRefreshTimer = setInterval(loadSessions, 8000);
 }
-function stopSessionsRefresh() { if(sessionsRefreshTimer){clearInterval(sessionsRefreshTimer);sessionsRefreshTimer=null;} }
+function stopSessionsRefresh() {
+  if (sessionsRefreshTimer) { clearInterval(sessionsRefreshTimer); sessionsRefreshTimer = null; }
+}
 
 // ============================================================
 // SESSION DETAIL DRAWER
 // ============================================================
+
+// Track drawer UI state: which sections are open, scroll position
+let _drawerState = { open: new Set(['status', 'chart', 'events']), scroll: 0 };
+let _lastEventCount = 0;
+let _lastLogCount = 0;
+
 async function openDrawer(sessionId) {
   currentDrawerSession = sessionId;
+  _drawerState = { open: new Set(['status', 'chart', 'events']), scroll: 0 };
+  _lastEventCount = 0;
+  _lastLogCount = 0;
   document.getElementById('sessionDrawer').classList.add('open');
   document.getElementById('drawerContent').innerHTML = '<div class="empty-state"><div class="spinner" style="margin:0 auto 12px"></div>Загрузка...</div>';
-  await refreshDrawer();
-  if (drawerRefreshTimer) clearInterval(drawerRefreshTimer);
-  drawerRefreshTimer = setInterval(refreshDrawer, 5000);
+  const sess = await fetchSessionDetail(sessionId);
+  if (sess) {
+    _lastEventCount = (sess.events || []).length;
+    renderDrawer(sess, true);
+  }
+  scheduleDrawerRefresh(sess);
 }
 
 function closeDrawer() {
   document.getElementById('sessionDrawer').classList.remove('open');
   currentDrawerSession = null;
-  if (drawerRefreshTimer) { clearInterval(drawerRefreshTimer); drawerRefreshTimer=null; }
+  if (drawerRefreshTimer) { clearInterval(drawerRefreshTimer); drawerRefreshTimer = null; }
   stopSessionChartRefresh();
+  if (sessionChart) { try { sessionChart.remove(); } catch(e) {} sessionChart = null; sessionLineSeries = null; }
+}
+
+async function fetchSessionDetail(id) {
+  try {
+    const r = await fetch(`${API_BASE}/api/trading/sessions/${id}`);
+    const d = await r.json();
+    return d.error ? null : d;
+  } catch(e) { return null; }
+}
+
+function scheduleDrawerRefresh(sess) {
+  if (drawerRefreshTimer) clearInterval(drawerRefreshTimer);
+  // Use telegramUpdateSec if available, otherwise 30s
+  const intervalSec = parseInt((sess?.params?.telegramUpdateSec) || 30, 10);
+  const intervalMs = Math.max(intervalSec, 5) * 1000;
+  drawerRefreshTimer = setInterval(refreshDrawer, intervalMs);
 }
 
 async function refreshDrawer() {
   if (!currentDrawerSession) return;
-  try {
-    const r = await fetch(`${API_BASE}/api/trading/sessions/${currentDrawerSession}`);
-    const sess = await r.json();
-    if (sess.error) return;
-    renderDrawer(sess);
-  } catch(e) { console.error('Drawer refresh error', e); }
+  const sess = await fetchSessionDetail(currentDrawerSession);
+  if (!sess) return;
+
+  const newEventCount = (sess.events || []).length;
+  const newLogCount = newEventCount; // logs = events
+
+  const eventsChanged = newEventCount !== _lastEventCount;
+  const statusChanged = sess.status !== (_sessionsData[currentDrawerSession]?.status);
+
+  _lastEventCount = newEventCount;
+  _lastLogCount = newLogCount;
+
+  // Reschedule if telegramUpdateSec changed
+  scheduleDrawerRefresh(sess);
+
+  renderDrawer(sess, false, { scrollToEvents: eventsChanged, scrollToLogs: eventsChanged });
 }
 
-function makeCollapsible(titleHtml, bodyHtml, id, openByDefault=false) {
-  const openClass = openByDefault ? ' open' : '';
-  const arrowClass = openByDefault ? ' open' : '';
+function saveDrawerState() {
+  const content = document.getElementById('drawerContent');
+  if (!content) return;
+  _drawerState.scroll = content.scrollTop;
+  // Save which sections are open
+  ['status', 'chart', 'params', 'events', 'logs'].forEach(id => {
+    const el = document.getElementById('sec-' + id);
+    if (el) {
+      if (el.classList.contains('open')) _drawerState.open.add(id);
+      else _drawerState.open.delete(id);
+    }
+  });
+}
+
+function makeCollapsible(titleHtml, bodyHtml, id, openByDefault = false, scrollable = false) {
+  // _drawerState.open tracks which sections are open.
+  // On first render openByDefault applies, after that user state is preserved.
+  // We treat absence from set as "closed" (user explicitly closed or never opened).
+  // On fresh open (_drawerState reset), only default-open ones are in the set.
+  const isOpen = _drawerState.open.has(id);
+  const openClass = isOpen ? ' open' : '';
+  const arrowClass = isOpen ? ' open' : '';
+  const scrollClass = scrollable ? ' scrollable' : '';
   return `
     <div class="card">
       <div class="logs-toggle" onclick="toggleSection('${id}')">
         <span class="logs-toggle-title">${titleHtml}</span>
         <span class="logs-toggle-arrow${arrowClass}" id="arr-${id}">▼</span>
       </div>
-      <div class="logs-body${openClass}" id="sec-${id}">${bodyHtml}</div>
+      <div class="logs-body${openClass}${scrollClass}" id="sec-${id}">${bodyHtml}</div>
     </div>`;
 }
 
 function toggleSection(id) {
-  const body = document.getElementById('sec-'+id);
-  const arrow = document.getElementById('arr-'+id);
+  const body = document.getElementById('sec-' + id);
+  const arrow = document.getElementById('arr-' + id);
   if (!body) return;
   body.classList.toggle('open');
-  arrow?.classList.toggle('open', body.classList.contains('open'));
+  const isOpen = body.classList.contains('open');
+  arrow?.classList.toggle('open', isOpen);
+  if (isOpen) _drawerState.open.add(id);
+  else _drawerState.open.delete(id);
 }
 
-function renderDrawer(sess) {
+function renderDrawer(sess, isFirstRender = false, scrollOpts = {}) {
+  saveDrawerState();
   document.getElementById('drawerTitle').textContent = `${sess.coinName} · ${sess.type}`;
+
   const events = sess.events || [];
   const params = sess.params || {};
-  const chartRefreshSec = params.chartRefreshSec || 60;
+  const chartRefreshSec = parseInt(params.chartRefreshSec || 60, 10);
+  const telegramSec = parseInt(params.telegramUpdateSec || 30, 10);
   const isRunning = sess.status === 'RUNNING';
 
-  // -- STATUS SECTION --
+  // -- STATUS --
   const statusHtml = `
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-      <div class="session-dot ${sess.status}" style="width:12px;height:12px;"></div>
-      <span style="font-family:var(--font-head);font-size:12px;color:var(--text);">${sess.status}</span>
-      <span style="font-size:11px;color:var(--muted);">▶ ${fmtDateTime(sess.startedAt)}</span>
-      ${sess.endedAt ? `<span style="font-size:11px;color:var(--muted);">⏹ ${fmtDateTime(sess.endedAt)}</span>` : ''}
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <div class="session-dot ${sess.status}" style="width:12px;height:12px;flex-shrink:0;"></div>
+      <span style="font-family:var(--font-head);font-size:11px;color:var(--text);">${sess.status}</span>
+      <span style="font-size:10px;color:var(--muted);">▶ ${fmtDateTime(sess.startedAt)}</span>
+      ${sess.endedAt ? `<span style="font-size:10px;color:var(--muted);">⏹ ${fmtDateTime(sess.endedAt)}</span>` : ''}
     </div>
-    <div style="margin-top:8px;font-size:12px;">
-      💼 <b>Баланс:</b>
-      ${sess.coinBalance > 0 ? `${fmtNum(sess.coinBalance)} ${sess.coinName}` : ''}
+    <div style="margin-top:6px;font-size:11px;">
+      💼 ${sess.coinBalance > 0 ? `${fmtNum(sess.coinBalance)} ${sess.coinName}` : ''}
       ${sess.usdtBalance > 0 ? `${fmtNum(sess.usdtBalance)} USDT` : ''}
       ${!sess.coinBalance && !sess.usdtBalance ? '—' : ''}
     </div>
     <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
       ${isRunning ? `<button class="btn btn-danger btn-sm" onclick="stopSession('${sess.id}')">■ СТОП</button>` : ''}
-      ${!isRunning && sess.type!=='BACKTEST' ? `<button class="btn btn-secondary btn-sm" onclick="resumeSession('${sess.id}')">▶ ВОЗОБНОВИТЬ</button>` : ''}
+      ${!isRunning && sess.type !== 'BACKTEST' ? `<button class="btn btn-secondary btn-sm" onclick="resumeSession('${sess.id}')">▶ ВОЗОБНОВИТЬ</button>` : ''}
       ${!isRunning ? `<button class="btn btn-sm" style="background:rgba(255,23,68,0.15);color:var(--red);border:1px solid rgba(255,23,68,0.3);" onclick="deleteSession('${sess.id}')">🗑 УДАЛИТЬ</button>` : ''}
     </div>`;
 
-  // -- CHART SECTION --
+  // -- CHART --
   const chartHtml = `
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
-      <span class="refresh-badge">🔄 <span class="refresh-countdown" id="chartCountdown">${chartRefreshSec}с</span></span>
-      <button class="btn btn-secondary btn-sm" onclick="loadSessionChart('${sess.id}','${sess.coinName}',${chartRefreshSec})">↺ Обновить</button>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
+      <span style="font-size:10px;color:var(--muted);">🔄 обновление: <span id="chartCountdown" style="color:var(--accent);font-family:var(--font-head);">${chartRefreshSec}с</span></span>
+      <span style="font-size:10px;color:var(--muted);">📨 telegram: ${telegramSec}с</span>
+      <button class="btn btn-secondary btn-sm" onclick="forceDrawerChartRefresh()">↺</button>
     </div>
-    <div id="sessionChartContainer" style="height:240px;width:100%;background:var(--bg3);border-radius:var(--radius-sm);overflow:hidden;"></div>
-    <div style="font-size:10px;color:var(--muted);text-align:center;margin-top:4px;">Авто-обновление каждые ${chartRefreshSec}с</div>`;
+    <div id="sessionChartContainer" style="height:220px;width:100%;background:var(--bg3);border-radius:var(--radius-sm);overflow:hidden;"></div>`;
 
-  // -- PARAMS SECTION --
+  // -- PARAMS --
   const paramLabels = {
-    tradingSum:'Сумма сделки (USDT)', startAssets:'Старт. сумма (USDT)',
-    buyGap:'Коэф. покупки (%)', sellWithProfitGap:'Коэф. продажи+ (%)',
-    sellWithLossGap:'Коэф. продажи- (%)',
-    telegramUpdateSec:'Telegram уведомл. (с)', chartRefreshSec:'Обновл. графика (с)'
+    tradingSum: 'Сумма сделки (USDT)', startAssets: 'Старт. сумма (USDT)',
+    buyGap: 'Коэф. покупки (%)', sellWithProfitGap: 'Коэф. продажи+ (%)',
+    sellWithLossGap: 'Коэф. продажи- (%)',
+    telegramUpdateSec: 'Telegram уведомл. (с)', chartRefreshSec: 'Обновл. графика (с)'
   };
-  const tradingParams = ['tradingSum','startAssets','telegramUpdateSec','chartRefreshSec'];
-  const strategyParams = ['buyGap','sellWithProfitGap','sellWithLossGap'];
+  const strategyParams = ['buyGap', 'sellWithProfitGap', 'sellWithLossGap'];
+  const tradingParams = ['tradingSum', 'startAssets', 'telegramUpdateSec', 'chartRefreshSec'];
+  const paramGrid = keys => keys.filter(k => params[k] != null).map(k =>
+    `<div class="param-item"><div class="param-key">${paramLabels[k] || k}</div><div class="param-val">${params[k]}</div></div>`
+  ).join('');
 
-  const paramGrid = (keys) => keys.filter(k=>params[k]!=null).map(k=>`
-    <div class="param-item">
-      <div class="param-key">${paramLabels[k]||k}</div>
-      <div class="param-val">${params[k]}</div>
-    </div>`).join('');
-
-  // Target prices
   let targetHtml = '';
   if (sess.isTrading && sess.boughtAtPrice) {
-    targetHtml = `
-      <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
-        <div style="font-family:var(--font-head);font-size:10px;color:var(--accent);margin-bottom:6px;">🎯 ЦЕЛЕВЫЕ ЦЕНЫ</div>
-        <div class="params-grid">
-          <div class="param-item" style="border-color:rgba(0,229,255,0.3)"><div class="param-key">КУПЛЕНО ЗА</div><div class="param-val" style="color:var(--accent)">$${formatPrice(sess.boughtAtPrice)}</div></div>
-          <div class="param-item" style="border-color:rgba(0,230,118,0.3)"><div class="param-key">ПРОДАЖА + (ПРИБЫЛЬ)</div><div class="param-val" style="color:var(--green)">${sess.sellProfitPrice?'$'+formatPrice(sess.sellProfitPrice):'—'}</div></div>
-          <div class="param-item" style="border-color:rgba(255,23,68,0.3)"><div class="param-key">ПРОДАЖА - (УБЫТОК)</div><div class="param-val" style="color:var(--red)">${sess.sellLossPrice?'$'+formatPrice(sess.sellLossPrice):'—'}</div></div>
-        </div>
-      </div>`;
+    targetHtml = `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);">
+      <div style="font-family:var(--font-head);font-size:9px;color:var(--accent);margin-bottom:5px;">🎯 ЦЕЛЕВЫЕ ЦЕНЫ</div>
+      <div class="params-grid">
+        <div class="param-item" style="border-color:rgba(0,229,255,0.3)"><div class="param-key">КУПЛЕНО ЗА</div><div class="param-val" style="color:var(--accent)">$${formatPrice(sess.boughtAtPrice)}</div></div>
+        <div class="param-item" style="border-color:rgba(0,230,118,0.3)"><div class="param-key">ПРОДАЖА +</div><div class="param-val" style="color:var(--green)">${sess.sellProfitPrice ? '$' + formatPrice(sess.sellProfitPrice) : '—'}</div></div>
+        <div class="param-item" style="border-color:rgba(255,23,68,0.3)"><div class="param-key">ПРОДАЖА -</div><div class="param-val" style="color:var(--red)">${sess.sellLossPrice ? '$' + formatPrice(sess.sellLossPrice) : '—'}</div></div>
+      </div></div>`;
   } else if (!sess.isTrading && (sess.maxPrice || sess.buyTargetPrice)) {
-    targetHtml = `
-      <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
-        <div style="font-family:var(--font-head);font-size:10px;color:var(--accent);margin-bottom:6px;">🎯 ЦЕЛЕВЫЕ ЦЕНЫ</div>
-        <div class="params-grid">
-          <div class="param-item" style="border-color:rgba(124,77,255,0.3)"><div class="param-key">МАКС. ЦЕНА ВОЛНЫ</div><div class="param-val" style="color:#a78bfa">${sess.maxPrice?'$'+formatPrice(sess.maxPrice):'—'}</div></div>
-          <div class="param-item" style="border-color:rgba(0,230,118,0.3)"><div class="param-key">ЦЕНА ПОКУПКИ</div><div class="param-val" style="color:var(--green)">${sess.buyTargetPrice?'$'+formatPrice(sess.buyTargetPrice):'—'}</div></div>
-        </div>
-      </div>`;
+    targetHtml = `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);">
+      <div style="font-family:var(--font-head);font-size:9px;color:var(--accent);margin-bottom:5px;">🎯 ЦЕЛЕВЫЕ ЦЕНЫ</div>
+      <div class="params-grid">
+        <div class="param-item" style="border-color:rgba(124,77,255,0.3)"><div class="param-key">МАКС. ВОЛНЫ</div><div class="param-val" style="color:#a78bfa">${sess.maxPrice ? '$' + formatPrice(sess.maxPrice) : '—'}</div></div>
+        <div class="param-item" style="border-color:rgba(0,230,118,0.3)"><div class="param-key">ЦЕНА ПОКУПКИ</div><div class="param-val" style="color:var(--green)">${sess.buyTargetPrice ? '$' + formatPrice(sess.buyTargetPrice) : '—'}</div></div>
+      </div></div>`;
   }
 
   const paramsBodyHtml = `
-    <div style="margin-bottom:6px;font-family:var(--font-head);font-size:10px;color:var(--muted);">НАСТРОЙКИ СТРАТЕГИИ</div>
+    <div style="font-family:var(--font-head);font-size:9px;color:var(--muted);margin-bottom:5px;">СТРАТЕГИЯ</div>
     <div class="params-grid">${paramGrid(strategyParams)}</div>
-    <div style="margin:10px 0 6px;font-family:var(--font-head);font-size:10px;color:var(--muted);">ОБЩИЕ ПАРАМЕТРЫ</div>
+    <div style="font-family:var(--font-head);font-size:9px;color:var(--muted);margin:8px 0 5px;">НАСТРОЙКИ</div>
     <div class="params-grid">${paramGrid(tradingParams)}</div>
     ${targetHtml}`;
 
-  // -- EVENTS SECTION --
+  // -- EVENTS --
   const eventsHtml = events.length === 0
-    ? '<div style="color:var(--muted);font-size:11px;padding:8px;">Событий пока нет</div>'
-    : [...events].reverse().map(e=>`
+    ? '<div style="color:var(--muted);font-size:11px;padding:8px 0;">Событий пока нет</div>'
+    : [...events].reverse().map(e => `
         <div class="event-item ${e.type}">
           <span class="event-time">${fmtDateTime(e.timestamp)}</span>
           <span class="event-type-tag ${e.type}">${e.type}</span>
-          <span class="event-msg">${escHtml(e.message||'')}</span>
+          <span class="event-msg">${escHtml(e.message || '')}</span>
         </div>`).join('');
 
-  // -- LOGS SECTION --
-  const logsText = events.map(e=>`[${fmtDateTime(e.timestamp)}] [${e.type}] ${e.message||''}`).join('\n');
+  // -- LOGS --
+  const logsText = events.map(e => `[${fmtDateTime(e.timestamp)}] [${e.type}] ${e.message || ''}`).join('\n');
   const logsBodyHtml = `
     <textarea class="logs-textarea" id="logsText" readonly>${escHtml(logsText)}</textarea>
     <div class="logs-actions">
@@ -1218,77 +1503,108 @@ function renderDrawer(sess) {
       <button class="btn btn-secondary btn-sm" onclick="copyLogs()">📋 Копировать</button>
     </div>`;
 
-  document.getElementById('drawerContent').innerHTML =
-    makeCollapsible('📊 СТАТУС И УПРАВЛЕНИЕ', statusHtml, 'status', true) +
-    makeCollapsible(`📈 ГРАФИК ${sess.coinName.toUpperCase()}`, chartHtml, 'chart', true) +
-    makeCollapsible('⚙️ ПАРАМЕТРЫ СЕССИИ', paramsBodyHtml, 'params', false) +
-    makeCollapsible(`📋 СОБЫТИЯ (${events.length})`, `<div class="event-list">${eventsHtml}</div>`, 'events', true) +
-    makeCollapsible('📄 ЛОГИ И ЭКСПОРТ', logsBodyHtml, 'logs', false);
+  const content = document.getElementById('drawerContent');
+  content.innerHTML =
+    makeCollapsible('📊 СТАТУС', statusHtml, 'status', true) +
+    makeCollapsible('📈 ГРАФИК ' + sess.coinName.toUpperCase(), chartHtml, 'chart', true) +
+    makeCollapsible('⚙️ ПАРАМЕТРЫ', paramsBodyHtml, 'params', false, true) +
+    makeCollapsible(`📋 СОБЫТИЯ (${events.length})`, `<div class="event-list">${eventsHtml}</div>`, 'events', true, true) +
+    makeCollapsible('📄 ЛОГИ', logsBodyHtml, 'logs', false);
 
-  setTimeout(() => initSessionChart(sess.coinName, events, chartRefreshSec), 100);
+  // Restore scroll
+  if (!isFirstRender) content.scrollTop = _drawerState.scroll;
+
+  // Scroll to events/logs if new data
+  if (scrollOpts.scrollToEvents) {
+    const evSec = document.getElementById('sec-events');
+    if (evSec && _drawerState.open.has('events')) {
+      setTimeout(() => evSec.scrollTop = evSec.scrollHeight, 50);
+    }
+  }
+
+  // Init/update drawer chart
+  setTimeout(() => {
+    initSessionChart(sess.coinName, events, chartRefreshSec);
+    // Scroll logs to bottom
+    const logsTa = document.getElementById('logsText');
+    if (logsTa) logsTa.scrollTop = logsTa.scrollHeight;
+  }, 80);
 }
 
 // ---- Session chart in drawer ----
 function initSessionChart(coinName, events, refreshSec) {
   const container = document.getElementById('sessionChartContainer');
   if (!container) return;
-  if (sessionChart) { try { sessionChart.remove(); } catch(e){} sessionChart=null; sessionLineSeries=null; }
+  if (sessionChart) {
+    // Just update data, don't recreate
+    updateDrawerChartData(coinName, events);
+    return;
+  }
+  if (container.clientWidth === 0) { setTimeout(() => initSessionChart(coinName, events, refreshSec), 100); return; }
+
   sessionChart = LightweightCharts.createChart(container, {
-    width: container.clientWidth, height: 240,
-    layout: { background:{type:'solid',color:'#151c38'}, textColor:'#6878a8' },
-    grid: { vertLines:{color:'rgba(42,53,96,0.3)'}, horzLines:{color:'rgba(42,53,96,0.3)'} },
-    crosshair: { mode:LightweightCharts.CrosshairMode.Normal, vertLine:{color:'#00e5ff',labelBackgroundColor:'#1a2240'}, horzLine:{color:'#00e5ff',labelBackgroundColor:'#1a2240'} },
-    rightPriceScale: { borderColor:'#2a3560', visible:true },
-    timeScale: { borderColor:'#2a3560', timeVisible:true },
-    handleScroll:true, handleScale:true,
+    width: container.clientWidth, height: container.clientHeight || 220,
+    layout: { background: { type: 'solid', color: '#0f1428' }, textColor: '#6878a8' },
+    grid: { vertLines: { color: 'rgba(42,53,96,0.3)' }, horzLines: { color: 'rgba(42,53,96,0.3)' } },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    rightPriceScale: { borderColor: '#2a3560', visible: true, minimumWidth: 60 },
+    timeScale: { borderColor: '#2a3560', timeVisible: true },
+    handleScroll: true, handleScale: true,
   });
-  sessionLineSeries = sessionChart.addLineSeries({color:'#00e5ff',lineWidth:2,priceFormat:{type:'price',precision:4,minMove:0.0001}});
-  new ResizeObserver(()=>{ if(sessionChart) sessionChart.applyOptions({width:container.clientWidth}); }).observe(container);
-  loadSessionChartData(coinName, events, refreshSec, currentDrawerSession);
+  sessionLineSeries = sessionChart.addLineSeries({ color: '#00e5ff', lineWidth: 2,
+    priceFormat: { type: 'price', precision: 4, minMove: 0.0001 } });
+
+  new ResizeObserver(() => {
+    if (sessionChart && container.clientWidth > 0)
+      sessionChart.applyOptions({ width: container.clientWidth, height: container.clientHeight || 220 });
+  }).observe(container);
+
+  updateDrawerChartData(coinName, events);
   startSessionChartRefresh(coinName, events, refreshSec);
 }
 
-async function loadSessionChartData(coinName, events, refreshSec, sessionId) {
-  if (!sessionLineSeries) return;
+async function updateDrawerChartData(coinName, events) {
+  if (!sessionLineSeries || !currentDrawerSession) return;
   try {
-    const r = await fetch(`${API_BASE}/api/chart/${encodeURIComponent(coinName)}?interval=7d`);
+    const r = await fetch(`${API_BASE}/api/chart/${encodeURIComponent(coinName)}?interval=1d`);
     const json = await r.json();
-    if (json.error) return;
-    const data = dedupeChartData(json.data||[]);
+    if (json.error || !json.data) return;
+    const data = dedupeChartData(json.data);
     sessionLineSeries.setData(data);
 
-    // Remove old price lines
-    if (window._drawerPriceLines) {
-      window._drawerPriceLines.forEach(pl => { try { sessionLineSeries.removePriceLine(pl); } catch(e){} });
-    }
+    (window._drawerPriceLines || []).forEach(pl => { try { sessionLineSeries.removePriceLine(pl); } catch(e) {} });
     window._drawerPriceLines = [];
 
-    // Fetch fresh session detail for live prices
-    let sess = null;
-    if (sessionId) {
-      const sr = await fetch(`${API_BASE}/api/trading/sessions/${sessionId}`).catch(()=>null);
-      if (sr?.ok) sess = await sr.json();
-    }
+    const sr = await fetch(`${API_BASE}/api/trading/sessions/${currentDrawerSession}`).catch(() => null);
+    const live = sr?.ok ? await sr.json() : null;
+    if (live) {
+      if (live.maxPrice) window._drawerPriceLines.push(sessionLineSeries.createPriceLine({ price: live.maxPrice, color: '#7c4dff', lineWidth: 1, lineStyle: 2, title: 'Макс.' }));
+      if (!live.isTrading && live.buyTargetPrice) window._drawerPriceLines.push(sessionLineSeries.createPriceLine({ price: live.buyTargetPrice, color: '#00e676', lineWidth: 1, lineStyle: 1, title: 'Покупка' }));
+      if (live.isTrading && live.boughtAtPrice) window._drawerPriceLines.push(sessionLineSeries.createPriceLine({ price: live.boughtAtPrice, color: '#00e5ff', lineWidth: 1, lineStyle: 0, title: 'Куплено' }));
+      if (live.isTrading && live.sellProfitPrice) window._drawerPriceLines.push(sessionLineSeries.createPriceLine({ price: live.sellProfitPrice, color: '#00e676', lineWidth: 1, lineStyle: 1, title: 'Продажа+' }));
+      if (live.isTrading && live.sellLossPrice) window._drawerPriceLines.push(sessionLineSeries.createPriceLine({ price: live.sellLossPrice, color: '#ff1744', lineWidth: 1, lineStyle: 1, title: 'Продажа-' }));
 
-    if (sess) {
-      if (sess.maxPrice) window._drawerPriceLines.push(sessionLineSeries.createPriceLine({price:sess.maxPrice,color:'#7c4dff',lineWidth:1,lineStyle:2,title:'Макс.'}));
-      if (!sess.isTrading && sess.buyTargetPrice) window._drawerPriceLines.push(sessionLineSeries.createPriceLine({price:sess.buyTargetPrice,color:'#00e676',lineWidth:1,lineStyle:1,title:'Покупка'}));
-      if (sess.isTrading && sess.boughtAtPrice) window._drawerPriceLines.push(sessionLineSeries.createPriceLine({price:sess.boughtAtPrice,color:'#00e5ff',lineWidth:1,lineStyle:0,title:'Куплено'}));
-      if (sess.isTrading && sess.sellProfitPrice) window._drawerPriceLines.push(sessionLineSeries.createPriceLine({price:sess.sellProfitPrice,color:'#00e676',lineWidth:1,lineStyle:1,title:'Продажа+'}));
-      if (sess.isTrading && sess.sellLossPrice) window._drawerPriceLines.push(sessionLineSeries.createPriceLine({price:sess.sellLossPrice,color:'#ff1744',lineWidth:1,lineStyle:1,title:'Продажа-'}));
+      const allEvents = live.events || events || [];
+      if (allEvents.length) {
+        const times = data.map(d => d.time);
+        const minT = Math.min(...times), maxT = Math.max(...times);
+        const markers = allEvents
+          .filter(e => e.type === 'BUY' || e.type === 'SELL')
+          .map(e => ({ time: Math.floor(e.timestamp / 1000), position: e.type === 'BUY' ? 'belowBar' : 'aboveBar', color: e.type === 'BUY' ? '#00e676' : '#ff1744', shape: e.type === 'BUY' ? 'arrowUp' : 'arrowDown', text: e.type }))
+          .filter(m => m.time >= minT && m.time <= maxT);
+        if (markers.length) sessionLineSeries.setMarkers(markers);
+      }
     }
+    sessionChart?.timeScale().fitContent();
+  } catch(e) { console.error('Drawer chart error', e); }
+}
 
-    // BUY/SELL markers
-    const markers = (events||[]).filter(e=>e.type==='BUY'||e.type==='SELL').map(e=>({
-      time: Math.floor(e.timestamp/1000),
-      position: e.type==='BUY'?'belowBar':'aboveBar',
-      color: e.type==='BUY'?'#00e676':'#ff1744',
-      shape: e.type==='BUY'?'arrowUp':'arrowDown',
-      text: e.type,
-    })).filter(m=>{ const times=data.map(d=>d.time); return times.length&&m.time>=Math.min(...times)&&m.time<=Math.max(...times); });
-    if (markers.length) sessionLineSeries.setMarkers(markers);
-    if (sessionChart) sessionChart.timeScale().fitContent();
-  } catch(e) { console.error('Session chart error', e); }
+function forceDrawerChartRefresh() {
+  if (currentDrawerSession) {
+    const s = _sessionsData[currentDrawerSession] || { id: currentDrawerSession, coinName: document.getElementById('drawerTitle')?.textContent?.split('·')[0]?.trim() || '' };
+    updateDrawerChartData(s.coinName, []);
+    sessionChartCountdown = parseInt((_sessionsData[currentDrawerSession]?.params?.chartRefreshSec) || 60, 10);
+  }
 }
 
 function startSessionChartRefresh(coinName, events, refreshSec) {
@@ -1300,38 +1616,26 @@ function startSessionChartRefresh(coinName, events, refreshSec) {
     updateCountdownDisplay();
     if (sessionChartCountdown <= 0) {
       sessionChartCountdown = refreshSec;
-      if (currentDrawerSession) {
-        const r = await fetch(`${API_BASE}/api/trading/sessions/${currentDrawerSession}`).catch(()=>null);
-        if (r?.ok) {
-          const sess = await r.json();
-          loadSessionChartData(sess.coinName, sess.events||[], refreshSec, currentDrawerSession);
-        }
-      }
+      updateDrawerChartData(coinName, events);
     }
   }, 1000);
 }
-function stopSessionChartRefresh() { if(sessionChartCountdownTimer){clearInterval(sessionChartCountdownTimer);sessionChartCountdownTimer=null;} }
-function updateCountdownDisplay() { const el=document.getElementById('chartCountdown'); if(el) el.textContent=sessionChartCountdown+'с'; }
+function stopSessionChartRefresh() {
+  if (sessionChartCountdownTimer) { clearInterval(sessionChartCountdownTimer); sessionChartCountdownTimer = null; }
+}
+function updateCountdownDisplay() {
+  const el = document.getElementById('chartCountdown');
+  if (el) el.textContent = sessionChartCountdown + 'с';
+}
 function loadSessionChart(sessionId, coinName, refreshSec) {
-  if (currentDrawerSession) {
-    fetch(`${API_BASE}/api/trading/sessions/${currentDrawerSession}`)
-      .then(r=>r.json()).then(sess => {
-        loadSessionChartData(sess.coinName, sess.events||[], refreshSec, currentDrawerSession);
-        sessionChartCountdown = refreshSec;
-      }).catch(()=>{});
-  }
+  updateDrawerChartData(coinName, []);
+  sessionChartCountdown = refreshSec;
 }
 
-function toggleLogs() {
-  const body = document.getElementById('logsBody');
-  const arrow = document.getElementById('logsArrow');
-  if (!body) return;
-  body.classList.toggle('open');
-  arrow?.classList.toggle('open', body.classList.contains('open'));
-}
+function toggleLogs() { toggleSection('logs'); }
 function exportLogs(coinName, sessionId) {
   const text = document.getElementById('logsText')?.value || '';
-  const blob = new Blob([text], {type:'text/plain'});
+  const blob = new Blob([text], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = `${coinName}_${sessionId}_log.txt`; a.click();
@@ -1339,7 +1643,7 @@ function exportLogs(coinName, sessionId) {
 }
 function copyLogs() {
   const text = document.getElementById('logsText')?.value || '';
-  navigator.clipboard?.writeText(text).then(()=>showToast('📋 Скопировано!')).catch(()=>showToast('❌ Ошибка'));
+  navigator.clipboard?.writeText(text).then(() => showToast('📋 Скопировано!')).catch(() => showToast('❌ Ошибка'));
 }
 
 // ============================================================
