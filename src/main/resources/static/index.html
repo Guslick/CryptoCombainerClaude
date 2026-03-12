@@ -969,11 +969,10 @@ async function loadSessions() {
         const prev = _sessionsData[s.id];
         _sessionsData[s.id] = s;
         patchSessionCard(s, prev);
-        // Refresh chart data if running
-        if (s.status === 'RUNNING') {
-          const entry = inlineCharts[s.id];
-          if (entry) loadInlineChartData(s);
-          else requestAnimationFrame(() => requestAnimationFrame(() => initInlineChart(s)));
+        // Chart data is refreshed by per-session timer (startChartTimer)
+        // Only init chart if it hasn't been created yet
+        if (s.status === 'RUNNING' && !inlineCharts[s.id]) {
+          requestAnimationFrame(() => requestAnimationFrame(() => initInlineChart(s)));
         }
       });
     }
@@ -1049,7 +1048,7 @@ function buildTargetPricesHtml(s) {
     </div>`;
   } else {
     return `<div class="target-prices">
-      <span class="tp-label">💰 Куплено за:</span><span class="tp-val" style="color:${PC.cur}">${s.boughtAtPrice ? '$' + formatPrice(s.boughtAtPrice) : '—'}</span>
+      <span class="tp-label">💰 Куплено за:</span><span class="tp-val" style="color:var(--muted)">${s.boughtAtPrice ? '$' + formatPrice(s.boughtAtPrice) : '—'}</span>
       <span class="tp-label">💹 Текущая:</span>${curStr}
       <span class="tp-label">📈 Продажа+:</span><span class="tp-val" style="color:${PC.buy}">${s.sellProfitPrice ? '$' + formatPrice(s.sellProfitPrice) : '—'}</span>
       <span class="tp-label">📉 Продажа−:</span><span class="tp-val" style="color:${PC.sold}">${s.sellLossPrice ? '$' + formatPrice(s.sellLossPrice) : '—'}</span>
@@ -1193,6 +1192,22 @@ async function loadInlineChartData(sess) {
 
     entry.line.setData(data);
 
+    // Extract current price from last chart data point
+    const lastPrice = data[data.length - 1]?.value;
+    if (lastPrice && _sessionsData[sess.id]) {
+      _sessionsData[sess.id].currentPrice = lastPrice;
+      // Update TP row in card with new current price
+      const tpEl = document.querySelector(`#scard-${sess.id} .target-prices`);
+      const newTpHtml = buildTargetPricesHtml(_sessionsData[sess.id]);
+      if (tpEl) {
+        if (newTpHtml) tpEl.outerHTML = newTpHtml;
+        else tpEl.remove();
+      } else if (newTpHtml) {
+        const chartWrap = document.querySelector(`#scard-${sess.id} .inline-chart-wrap`);
+        if (chartWrap) chartWrap.insertAdjacentHTML('beforebegin', newTpHtml);
+      }
+    }
+
     // Remove old price lines
     (entry.lines || []).forEach(pl => { try { entry.line.removePriceLine(pl); } catch(e) {} });
     entry.lines = [];
@@ -1200,6 +1215,12 @@ async function loadInlineChartData(sess) {
     // Fetch fresh session data
     const sr = await fetch(`${API_BASE}/api/trading/sessions/${sess.id}`).catch(() => null);
     const live = sr?.ok ? await sr.json() : sess;
+
+    // Merge live data into _sessionsData (keep currentPrice)
+    if (live && _sessionsData[sess.id]) {
+      Object.assign(_sessionsData[sess.id], live);
+      if (lastPrice) _sessionsData[sess.id].currentPrice = lastPrice;
+    }
 
     applyChartPriceLines(entry.line, entry.lines, live);
     applyChartMarkers(entry.line, data, live.events || []);
@@ -1349,8 +1370,6 @@ async function deleteSession(id) {
 }
 
 // ── Per-session chart refresh timers ───────────────────────────────────────
-// _chartTimers[id] = { interval, countdown, refreshSec }
-const _chartTimers = {};
 
 function startSessionsRefresh() {
   stopSessionsRefresh();
