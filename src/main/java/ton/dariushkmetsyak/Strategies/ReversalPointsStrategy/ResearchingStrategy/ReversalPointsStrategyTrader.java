@@ -50,142 +50,147 @@ public class ReversalPointsStrategyTrader {
     Long chatID;
     int prevMessageId = 0;
 
-    // ---- Persistence ----
+    /** True when state was successfully restored — skip init() call on first tick */
+    private boolean restoredFromState = false;
+
     private final StateManager stateManager;
+    private final String sessionId;
     private final String accountType;
     private int tickCounter = 0;
     private long lastBuyFailureNotificationAt = 0;
     private String lastBuyFailureSignature = "";
-
     private static final long BUY_FAILURE_NOTIFICATION_COOLDOWN_MS = TimeUnit.MINUTES.toMillis(5);
 
     class Reversal {
         private final double[] data;
         private final String tag;
-        Reversal(double[] data, String tag) {
-            this.data = data;
-            this.tag = tag;
-        }
+        Reversal(double[] data, String tag) { this.data = data; this.tag = tag; }
     }
 
-    // ---- Конструкторы ----
+    // ---- Constructors ----
 
     public ReversalPointsStrategyTrader(Account account, Coin coin, double tradingSum,
                                         double percentageGap, int updateTimeout, Long chatID) {
-        this(account, coin, tradingSum, percentageGap, percentageGap / 2, percentageGap, updateTimeout, chatID, null);
+        this(account, coin, tradingSum, percentageGap, percentageGap / 2, percentageGap,
+             updateTimeout, chatID, null, null);
     }
 
     public ReversalPointsStrategyTrader(Account account, Coin coin, double tradingSum,
                                         double buyGap, double sellWithProfitGap,
                                         double sellWithLossGap, int updateTimeout, Long chatID) {
-        this(account, coin, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chatID, null);
+        this(account, coin, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap,
+             updateTimeout, chatID, null, null);
     }
 
     /**
-     * Главный конструктор с возможностью восстановления из сохранённого состояния.
-     * 
-     * @param savedState Если не null - восстанавливает торговлю из этого состояния, 
-     *                   игнорируя параметры tradingSum, buyGap и т.д.
+     * Full constructor. savedState != null → restore from saved state instead of fresh start.
+     * sessionId must match the MiniApp session ID for state file naming.
      */
     public ReversalPointsStrategyTrader(Account account, Coin coin, double tradingSum,
                                         double buyGap, double sellWithProfitGap,
                                         double sellWithLossGap, int updateTimeout, Long chatID,
-                                        TradingState savedState) {
+                                        TradingState savedState, String sessionId) {
         this.account = account;
         this.coin = coin;
         this.chatID = chatID;
+        this.sessionId = sessionId != null ? sessionId : "trader_" + System.currentTimeMillis();
         this.accountType = account.getClass().getSimpleName().toUpperCase();
         this.stateManager = new StateManager();
 
-        // Если передано сохранённое состояние - восстанавливаем из него
         if (savedState != null && tryRestoreFromState(savedState)) {
-            // Параметры восстановлены из savedState
+            restoredFromState = true;
+            String tradingStatus = trading
+                ? "В торговле, куплено за $" + Prices.round(boughtFor)
+                : "Ищет точку входа (макс.волна: " + (currentMaxPrice[0] > 0 ? "$" + Prices.round(currentMaxPrice[0]) : "—") + ")";
             ImageAndMessageSender.sendTelegramMessage(
-                    "✅ Торговля восстановлена!\n" +
-                    "Монета: " + this.coin.getName() + "\n" +
-                    "Сохранено: " + new Date(savedState.getTimestamp()) + "\n" +
-                    "Сумма сделки: " + this.tradingSum + " USDT\n" +
-                    "Коэффициенты: buy=" + this.buyGap + "%, profit=" + 
-                    this.sellWithProfitGap + "%, loss=" + this.sellWithLossGap + "%\n" +
-                    "Статус: " + (trading ? "В торговле, куплено за " + Prices.round(boughtFor) : "Ищет точку входа"),
-                    chatID);
+                "✅ Состояние восстановлено!\n" +
+                "Монета: " + this.coin.getName() + "\n" +
+                "Сохранено: " + new Date(savedState.getTimestamp()) + "\n" +
+                "Статус: " + tradingStatus + "\n" +
+                "Параметры: buy=" + this.buyGap + "%, profit=" + this.sellWithProfitGap +
+                "%, loss=" + this.sellWithLossGap + "%", chatID);
+            log.info("[Trader] Restored state for session {}: isTrading={}, boughtFor={}",
+                    this.sessionId, trading, boughtFor);
         } else {
-            // Новая сессия - используем переданные параметры
+            // Fresh session
             this.tradingSum = tradingSum;
             this.buyGap = buyGap;
             this.sellWithProfitGap = sellWithProfitGap;
             this.sellWithLossGap = sellWithLossGap;
             this.updateTimeout = updateTimeout;
-            
-            {
-                double _usdtBal = 0;
-                double _coinBal = 0;
-                try { _usdtBal = account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin()); } catch(Exception ignored) {}
-                try { _coinBal = account.wallet().getAmountOfCoin(coin); } catch(Exception ignored) {}
-                ImageAndMessageSender.sendTelegramMessage(
-                    "🆕 Новая торговая сессия\nБаланс: " + ton.dariushkmetsyak.Util.Prices.round(_coinBal) + " " + coin.getSymbol() +
-                    ", " + ton.dariushkmetsyak.Util.Prices.round(_usdtBal) + " USDT", chatID);
-            }
+
+            double usdtBal = 0, coinBal = 0;
+            try { usdtBal = account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin()); } catch (Exception ignored) {}
+            try { coinBal = account.wallet().getAmountOfCoin(coin); } catch (Exception ignored) {}
+            ImageAndMessageSender.sendTelegramMessage(
+                "🆕 Новая торговая сессия\n" +
+                "Монета: " + coin.getName() + "\n" +
+                "Баланс: " + Prices.round(coinBal) + " " + coin.getSymbol() +
+                ", " + Prices.round(usdtBal) + " USDT", chatID);
         }
 
-        // Автосохранение каждые 30 секунд
+        // Register shutdown hook for JVM kill (SIGTERM / kill)
         stateManager.startAutosave();
-
-        // Сохраняем при завершении JVM
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            System.out.println("[Trader] Завершение — финальное сохранение...");
+            log.info("[Trader] JVM shutdown — final state save...");
             persistState();
             stateManager.shutdown();
         }));
     }
 
-    // ---- Persistence: восстановление ----
+    // ---- State Restore ----
 
-    /**
-     * Восстановление из переданного состояния.
-     * Возвращает true если успешно.
-     */
     private boolean tryRestoreFromState(TradingState state) {
         if (state == null) return false;
+        try {
+            this.tradingSum = state.getTradingSum();
+            this.buyGap = state.getBuyGap();
+            this.sellWithProfitGap = state.getSellWithProfitGap();
+            this.sellWithLossGap = state.getSellWithLossGap();
+            this.updateTimeout = state.getUpdateTimeout();
 
-        // Восстанавливаем ВСЕ параметры из состояния
-        this.tradingSum = state.getTradingSum();
-        this.buyGap = state.getBuyGap();
-        this.sellWithProfitGap = state.getSellWithProfitGap();
-        this.sellWithLossGap = state.getSellWithLossGap();
-        this.updateTimeout = state.getUpdateTimeout();
-        
-        // Восстанавливаем торговое состояние
-        this.trading = state.isTrading();
-        this.buyPrice = state.getBuyPrice() != null ? state.getBuyPrice() : 0;
-        this.boughtFor = state.getBoughtFor();
-        this.soldFor = state.getSoldFor();
-        this.currentMinPrice[0] = state.getCurrentMinPrice() != null
-                ? state.getCurrentMinPrice() : Double.MAX_VALUE;
-        this.currentMaxPrice[0] = state.getCurrentMaxPrice() != null
-                ? state.getCurrentMaxPrice() : 0.0;
-        this.currentMinPriceTimestamp[0] = state.getCurrentMinPriceTimestamp() != null
-                ? state.getCurrentMinPriceTimestamp() : Double.MAX_VALUE;
-        this.currentMaxPriceTimestamp[0] = state.getCurrentMaxPriceTimestamp() != null
-                ? state.getCurrentMaxPriceTimestamp() : 0.0;
+            this.trading = state.isTrading();
+            this.buyPrice = state.getBuyPrice() != null ? state.getBuyPrice() : 0;
+            this.boughtFor = state.getBoughtFor();
+            this.soldFor = state.getSoldFor();
+            this.currentMinPrice[0] = state.getCurrentMinPrice() != null
+                    ? state.getCurrentMinPrice() : Double.MAX_VALUE;
+            this.currentMaxPrice[0] = state.getCurrentMaxPrice() != null
+                    ? state.getCurrentMaxPrice() : 0.0;
+            this.currentMinPriceTimestamp[0] = state.getCurrentMinPriceTimestamp() != null
+                    ? state.getCurrentMinPriceTimestamp() : Double.MAX_VALUE;
+            this.currentMaxPriceTimestamp[0] = state.getCurrentMaxPriceTimestamp() != null
+                    ? state.getCurrentMaxPriceTimestamp() : 0.0;
 
-        if (state.getPriceHistory() != null)
-            this.prices.putAll(state.getPriceHistory());
+            if (state.getPriceHistory() != null) this.prices.putAll(state.getPriceHistory());
 
-        if (state.getReversals() != null) {
-            for (TradingState.ReversalPoint rp : state.getReversals())
+            if (state.getReversals() != null) {
+                for (TradingState.ReversalPoint rp : state.getReversals())
+                    reversalArrayList.add(new Reversal(
+                            new double[]{rp.getTimestamp(), rp.getPrice()}, rp.getTag()));
+            }
+
+            // Ensure reversalArrayList has at least one entry (required by the strategy logic)
+            if (reversalArrayList.isEmpty()) {
                 reversalArrayList.add(new Reversal(
-                        new double[]{rp.getTimestamp(), rp.getPrice()}, rp.getTag()));
-        }
+                        new double[]{(double) System.currentTimeMillis(),
+                                     currentMaxPrice[0] > 0 ? currentMaxPrice[0] : 0}, "initPoint"));
+            }
 
-        return true;
+            return true;
+        } catch (Exception e) {
+            log.error("[Trader] Failed to restore state", e);
+            return false;
+        }
     }
 
-    // ---- Persistence: сохранение ----
+    // ---- State Save ----
 
     void persistState() {
         TradingState state = new TradingState();
+        state.setSessionId(sessionId);
         state.setCoinName(coin.getName());
+        state.setAccountType(accountType);
         state.setTrading(trading);
         state.setBuyPrice(buyPrice);
         state.setBoughtFor(boughtFor);
@@ -200,9 +205,18 @@ public class ReversalPointsStrategyTrader {
         state.setSellWithLossGap(sellWithLossGap);
         state.setUpdateTimeout(updateTimeout);
         state.setChatId(chatID);
-        state.setAccountType(accountType);
 
-        // Не более 1000 последних цен
+        // Save wallet snapshot
+        TreeMap<String, Double> walletAssets = new TreeMap<>();
+        try {
+            walletAssets.put("USDT", account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin()));
+        } catch (Exception ignored) {}
+        try {
+            walletAssets.put(coin.getSymbol().toUpperCase(), account.wallet().getAmountOfCoin(coin));
+        } catch (Exception ignored) {}
+        state.setWalletAssets(walletAssets);
+
+        // Price history (cap at 1000)
         if (prices.size() > 1000) {
             TreeMap<Double, Double> recent = new TreeMap<>();
             prices.descendingMap().entrySet().stream()
@@ -212,16 +226,21 @@ public class ReversalPointsStrategyTrader {
             state.setPriceHistory(new TreeMap<>(prices));
         }
 
+        // Reversals (cap at 500)
         List<TradingState.ReversalPoint> rps = new ArrayList<>();
-        for (Reversal r : reversalArrayList)
+        List<Reversal> revCopy = new ArrayList<>(reversalArrayList);
+        int start = Math.max(0, revCopy.size() - 500);
+        for (int i = start; i < revCopy.size(); i++) {
+            Reversal r = revCopy.get(i);
             rps.add(new TradingState.ReversalPoint(r.data[0], r.data[1], r.tag));
+        }
         state.setReversals(rps);
 
         stateManager.setCurrentState(state);
         stateManager.saveState(state);
     }
 
-    // ---- Основная логика ----
+    // ---- Strategy ----
 
     public void init(double pointTimestamp, double pointPrice) {
         reversalArrayList.add(new Reversal(new double[]{pointTimestamp, pointPrice}, "initPoint"));
@@ -254,7 +273,7 @@ public class ReversalPointsStrategyTrader {
                 isSold = false;
                 currentMinPrice[0] = pointPrice;
                 currentMaxPrice[0] = pointPrice;
-                persistState(); // сохранить после продажи
+                persistState();
                 return true;
             }
             if (((buyPrice - pointPrice) / buyPrice * 100) > sellWithLossGap) {
@@ -270,13 +289,11 @@ public class ReversalPointsStrategyTrader {
                 sendPhotoToTelegram();
                 prevMessageId = 0;
                 TradingChart.clearChart();
-                ImageAndMessageSender.sendTelegramMessage(
-                        "Баланс кошелька: " + account.wallet().getAllAssets().toString());
                 trading = false;
                 isSold = false;
                 currentMinPrice[0] = pointPrice;
                 currentMaxPrice[0] = pointPrice;
-                persistState(); // сохранить после продажи
+                persistState();
                 return true;
             }
         }
@@ -309,25 +326,21 @@ public class ReversalPointsStrategyTrader {
             }
         }
 
-        // Периодическое сохранение каждые 10 тиков
+        // Persist every 5 ticks (more frequent than before)
         tickCounter++;
-        if (tickCounter % 10 == 0) persistState();
+        if (tickCounter % 5 == 0) persistState();
 
         sendPhotoToTelegram();
         return false;
     }
 
     private boolean isBuySignalReached(double currentPrice) {
-        if (currentMaxPrice[0] == null || currentMaxPrice[0] <= 0) {
-            return false;
-        }
+        if (currentMaxPrice[0] == null || currentMaxPrice[0] <= 0) return false;
         return getDropFromMaxPercent(currentPrice) > buyGap;
     }
 
     private double getDropFromMaxPercent(double currentPrice) {
-        if (currentMaxPrice[0] == null || currentMaxPrice[0] <= 0) {
-            return 0;
-        }
+        if (currentMaxPrice[0] == null || currentMaxPrice[0] <= 0) return 0;
         return 100 - (currentPrice / currentMaxPrice[0] * 100);
     }
 
@@ -335,18 +348,15 @@ public class ReversalPointsStrategyTrader {
             throws NoSuchSymbolException, InsufficientAmountOfUsdtException {
         Double buyResult = null;
         String failureReason = "";
-
         try {
             buyResult = account.trader().buy(coin, executionPrice, tradingSum / executionPrice);
-            if (buyResult == null) {
-                failureReason = "биржа не подтвердила исполнение ордера (получен null-ответ)";
-            }
+            if (buyResult == null) failureReason = "биржа не подтвердила исполнение ордера (null)";
         } catch (InsufficientAmountOfUsdtException | NoSuchSymbolException e) {
             failureReason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
             throw e;
         } catch (RuntimeException e) {
             failureReason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-            log.warn("Buy attempt failed with runtime exception", e);
+            log.warn("Buy attempt failed", e);
         }
 
         if (buyResult != null) {
@@ -356,28 +366,19 @@ public class ReversalPointsStrategyTrader {
                     new double[]{currentMaxPriceTimestamp[0], currentMaxPrice[0]}, "max"));
             buyPrice = boughtFor;
             trading = true;
-            ImageAndMessageSender.sendTelegramMessage(
-                    "Баланс кошелька: " + account.wallet().getAllAssets().toString());
             currentMaxPrice[0] = boughtFor;
-            persistState();
+            persistState(); // Immediate save on buy — most critical moment
             return;
         }
-
         notifyBuyFailure(failureReason, executionPrice);
     }
 
     private void notifyBuyFailure(String reason, double executionPrice) {
-        String normalizedReason = (reason == null || reason.isBlank())
-                ? "неизвестная причина"
-                : reason;
+        String normalizedReason = (reason == null || reason.isBlank()) ? "неизвестная причина" : reason;
         String signature = Prices.round(executionPrice) + "|" + normalizedReason;
         long now = System.currentTimeMillis();
-
         if (signature.equals(lastBuyFailureSignature)
-                && now - lastBuyFailureNotificationAt < BUY_FAILURE_NOTIFICATION_COOLDOWN_MS) {
-            return;
-        }
-
+                && now - lastBuyFailureNotificationAt < BUY_FAILURE_NOTIFICATION_COOLDOWN_MS) return;
         lastBuyFailureSignature = signature;
         lastBuyFailureNotificationAt = now;
 
@@ -388,207 +389,170 @@ public class ReversalPointsStrategyTrader {
                 "Максимум волны: " + Prices.round(currentMaxPrice[0]) + "\n" +
                 "Падение от максимума: " + String.format("%.2f", dropFromMax) + "%\n" +
                 "Порог покупки: " + buyGap + "%\n" +
-                "Баланс USDT: " + account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin()) + "\n" +
-                "Причина: " + normalizedReason + "\n" +
-                "Действие: проверьте фильтры Binance (LOT_SIZE/MIN_NOTIONAL), остаток под комиссию и статус ордера.";
-
-        log.warn("Buy signal reached but order was not executed. {}", message);
+                "Причина: " + normalizedReason;
+        log.warn("Buy signal reached but order not executed. {}", message);
         ImageAndMessageSender.sendTelegramMessage(message, chatID);
     }
 
+    // ---- Main trading loop ----
+
     public void startTrading() {
-        log.info("[Trader] Starting trading for {}", coin.getName());
-        
-        // Инициализация с retry
-        RetryPolicy initRetry = RetryPolicy.forApiCalls();
-        try {
-            initRetry.executeVoid(() -> {
-                try {
-                    this.init(System.currentTimeMillis(), Prices.round(Account.getCurrentPrice(coin)));
-                } catch (NoSuchSymbolException e) {
-                    throw new RuntimeException(e);
-                }
-            }, "Trading initialization");
-        } catch (Exception e) {
-            ErrorHandler.handleFatalError(e, "Trading Initialization",
-                "Initializing trader for " + coin.getName());
-            return; // Невозможно продолжить без инициализации
+        log.info("[Trader] Starting trading for {} (restored={})", coin.getName(), restoredFromState);
+
+        if (!restoredFromState) {
+            // Fresh start — initialise with current price
+            RetryPolicy initRetry = RetryPolicy.forApiCalls();
+            try {
+                initRetry.executeVoid(() -> {
+                    try {
+                        this.init(System.currentTimeMillis(), Prices.round(Account.getCurrentPrice(coin)));
+                    } catch (NoSuchSymbolException e) {
+                        throw new RuntimeException(e);
+                    }
+                }, "Trading initialization");
+            } catch (Exception e) {
+                ErrorHandler.handleFatalError(e, "Trading Initialization",
+                    "Initializing trader for " + coin.getName());
+                return;
+            }
+        } else {
+            // Restored — persist immediately so the state file has the latest timestamp
+            log.info("[Trader] Restored session — skipping init(), continuing from saved state");
+            persistState();
         }
-        
+
         int consecutiveErrors = 0;
-        int maxConsecutiveErrors = 10;
-        
+        final int maxConsecutiveErrors = 10;
+
         while (true) {
             try {
                 TimeUnit.SECONDS.sleep(updateTimeout);
-                
-                // Получение цены с retry
+
+                // Fetch current price with retry
                 double currentPrice;
                 try {
                     RetryPolicy priceRetry = RetryPolicy.forApiCalls();
                     currentPrice = priceRetry.execute(() -> {
-                        try {
-                            return Prices.round(Account.getCurrentPrice(coin));
-                        } catch (NoSuchSymbolException e) {
-                            throw new RuntimeException(e);
-                        }
+                        try { return Prices.round(Account.getCurrentPrice(coin)); }
+                        catch (NoSuchSymbolException e) { throw new RuntimeException(e); }
                     }, "Get current price");
                 } catch (Exception e) {
-                    ErrorHandler.handleWarning(e, "Price Fetching",
-                        "Getting price for " + coin.getName());
+                    ErrorHandler.handleWarning(e, "Price Fetching", "Getting price for " + coin.getName());
                     consecutiveErrors++;
                     if (consecutiveErrors >= maxConsecutiveErrors) {
                         ErrorHandler.handleFatalError(e, "Price Fetching",
-                            String.format("Failed to get price %d times in a row", maxConsecutiveErrors));
+                            "Failed to get price " + maxConsecutiveErrors + " times");
                         break;
                     }
-                    continue; // Пропустить этот тик
+                    continue;
                 }
-                
-                // Анализ графика и торговля
+
+                // Run strategy tick
                 this.startResearchingChart(System.currentTimeMillis(), currentPrice);
 
-                // Обновить live-состояние сессии в MiniApp
-                try {
-                    double coinBal = 0;
-                    try { coinBal = account.wallet().getAmountOfCoin(coin); } catch (Exception ignored) {}
-                    double usdtBal = 0;
-                    try { usdtBal = account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin()); } catch (Exception ignored) {}
-                    Double buyTarget = (!trading && currentMaxPrice[0] != null && currentMaxPrice[0] > 0)
-                        ? currentMaxPrice[0] * (1 - buyGap / 100.0) : null;
-                    Double profitTarget = (trading && boughtFor != null)
-                        ? boughtFor * (1 + sellWithProfitGap / 100.0) : null;
-                    Double lossTarget = (trading && boughtFor != null)
-                        ? boughtFor * (1 - sellWithLossGap / 100.0) : null;
-                    ton.dariushkmetsyak.Web.TradingSessionManager.updateLiveState(
-                        coinBal, usdtBal, trading,
-                        currentMaxPrice[0] > 0 ? currentMaxPrice[0] : null,
-                        buyTarget,
-                        boughtFor,
-                        profitTarget,
-                        lossTarget
-                    );
-                } catch (Exception ignored) {}
+                // Push live state to MiniApp (includes currentPrice)
+                pushLiveState(currentPrice);
 
-                // Сброс счётчика ошибок при успехе
                 consecutiveErrors = 0;
-                
+
             } catch (NoSuchSymbolException | InsufficientAmountOfUsdtException e) {
                 consecutiveErrors++;
-                boolean canRecover = ErrorHandler.handleError(e,
-                    "Trading Loop",
-                    "Processing trading logic for " + coin.getName(),
-                    true);
-                
-                persistState(); // Сохранить состояние при ошибке
-                
+                ErrorHandler.handleError(e, "Trading Loop",
+                    "Processing trading logic for " + coin.getName(), true);
+                persistState();
                 if (consecutiveErrors >= maxConsecutiveErrors) {
                     ErrorHandler.handleFatalError(e, "Trading Loop",
-                        String.format("Too many consecutive errors (%d)", maxConsecutiveErrors));
+                        "Too many consecutive errors (" + maxConsecutiveErrors + ")");
                     break;
                 }
-                
-                // Задержка перед следующей попыткой
-                try {
-                    TimeUnit.SECONDS.sleep(30);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    break;
+                try { TimeUnit.SECONDS.sleep(30); } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt(); break;
                 }
-                
             } catch (BinanceConnectorException e) {
                 consecutiveErrors++;
-                ErrorHandler.handleError(e,
-                    "Binance API",
-                    "API call during trading",
-                    true);
-                
+                ErrorHandler.handleError(e, "Binance API", "API call during trading", true);
                 persistState();
-                
                 if (consecutiveErrors >= maxConsecutiveErrors) {
-                    ErrorHandler.handleFatalError(e, "Binance API",
-                        "Binance API unavailable for too long");
+                    ErrorHandler.handleFatalError(e, "Binance API", "Binance API unavailable");
                     break;
                 }
-                
-                try {
-                    TimeUnit.SECONDS.sleep(60); // Длинная задержка для API проблем
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    break;
+                try { TimeUnit.SECONDS.sleep(60); } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt(); break;
                 }
-                
             } catch (NullPointerException e) {
-                log.error("[Trader] Unexpected NullPointerException", e);
-                ErrorHandler.handleError(e,
-                    "Trading Loop",
-                    "Null pointer in trading logic - possible data corruption",
-                    true);
-                
+                log.error("[Trader] Unexpected NPE", e);
+                ErrorHandler.handleError(e, "Trading Loop", "Null pointer in trading logic", true);
                 persistState();
                 consecutiveErrors++;
-                
                 if (consecutiveErrors >= 3) {
-                    ErrorHandler.handleFatalError(e, "Trading Loop",
-                        "Repeated null pointer exceptions indicate data corruption");
+                    ErrorHandler.handleFatalError(e, "Trading Loop", "Repeated NPE — data corruption");
                     break;
                 }
-                
             } catch (InterruptedException e) {
-                log.info("[Trader] Trading interrupted - shutting down gracefully");
+                log.info("[Trader] Trading interrupted — saving and shutting down");
                 persistState();
                 stateManager.shutdown();
-                
                 try {
                     ImageAndMessageSender.sendTelegramMessage(
-                        "🛑 Торговля остановлена по команде пользователя\n" +
-                        "Состояние сохранено.");
+                        "🛑 Торговля остановлена по команде пользователя\nСостояние сохранено.");
                 } catch (Exception ignored) {}
-                
                 Thread.currentThread().interrupt();
                 return;
-                
             } catch (Exception e) {
-                // Неожиданная ошибка
                 consecutiveErrors++;
-                log.error("[Trader] Unexpected error in trading loop", e);
-                
-                ErrorHandler.handleError(e,
-                    "Trading Loop",
-                    "Unexpected exception: " + e.getClass().getSimpleName(),
-                    true);
-                
+                log.error("[Trader] Unexpected error", e);
+                ErrorHandler.handleError(e, "Trading Loop",
+                    "Unexpected: " + e.getClass().getSimpleName(), true);
                 persistState();
-                
                 if (consecutiveErrors >= 5) {
-                    ErrorHandler.handleFatalError(e, "Trading Loop",
-                        "Too many unexpected errors");
+                    ErrorHandler.handleFatalError(e, "Trading Loop", "Too many unexpected errors");
                     break;
                 }
             }
         }
-        
-        // Завершение работы
+
         log.info("[Trader] Trading stopped");
         persistState();
         stateManager.shutdown();
-        
         try {
             ImageAndMessageSender.sendTelegramMessage(
-                "⛔ Торговля остановлена из-за критических ошибок\n" +
-                "Состояние сохранено. Требуется перезапуск.");
+                "⛔ Торговля остановлена из-за критических ошибок\nСостояние сохранено.");
         } catch (Exception ignored) {}
     }
 
+    /** Push all live fields to TradingSessionManager */
+    private void pushLiveState(double currentPrice) {
+        try {
+            double coinBal = 0;
+            try { coinBal = account.wallet().getAmountOfCoin(coin); } catch (Exception ignored) {}
+            double usdtBal = 0;
+            try { usdtBal = account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin()); } catch (Exception ignored) {}
+
+            Double maxPriceVal = (currentMaxPrice[0] != null && currentMaxPrice[0] > 0) ? currentMaxPrice[0] : null;
+            Double buyTarget = (!trading && maxPriceVal != null)
+                ? maxPriceVal * (1 - buyGap / 100.0) : null;
+            Double profitTarget = (trading && boughtFor != null)
+                ? boughtFor * (1 + sellWithProfitGap / 100.0) : null;
+            Double lossTarget = (trading && boughtFor != null)
+                ? boughtFor * (1 - sellWithLossGap / 100.0) : null;
+
+            ton.dariushkmetsyak.Web.TradingSessionManager.updateLiveState(
+                coinBal, usdtBal, trading, currentPrice,
+                maxPriceVal, buyTarget, boughtFor, profitTarget, lossTarget
+            );
+        } catch (Exception ignored) {}
+    }
+
+    // ---- Telegram ----
+
     public void sendPhotoToTelegram() {
         String currentPicturePath = LocalDateTime.now().toString();
-        
         try {
             TradingChart.makeScreenShot(currentPicturePath);
         } catch (Exception e) {
             log.error("Failed to create chart screenshot", e);
             ErrorHandler.handleWarning(e, "Chart Screenshot", "Creating chart image");
-            return; // Не можем отправить без картинки
+            return;
         }
 
         if (!trading) {
@@ -597,31 +561,28 @@ public class ReversalPointsStrategyTrader {
             String buySignalStatus = leftToDrop > 0
                     ? "Осталось снизиться на " + String.format("%.2f", leftToDrop) + "%"
                     : "Сигнал входа превышен на " + String.format("%.2f", Math.abs(leftToDrop)) + "%";
-
             chartScreenshotMessage =
-                    "Ищу точку входа..." + "\n" +
-                    "Текущая цена: " + Prices.round(pointPrice) + "\n" +
-                    "Максимальная цена: " + Prices.round(currentMaxPrice[0]) + "\n" +
-                    "Коэффициент покупки: " + buyGap + "%" + "\n" +
-                    buySignalStatus + "\n" +
-                    "Баланс USDT: " + account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin());
+                "Ищу точку входа...\n" +
+                "Текущая цена: " + Prices.round(pointPrice) + "\n" +
+                "Максимальная цена: " + Prices.round(currentMaxPrice[0]) + "\n" +
+                "Коэффициент покупки: " + buyGap + "%\n" +
+                buySignalStatus + "\n" +
+                "Баланс USDT: " + account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin());
         }
         if (trading && !isSold) {
             chartScreenshotMessage =
-                    "ТОРГУЕМ" + "\n" +
-                    "Цена ТЕКУЩАЯ: " + Prices.round(pointPrice) + "\n" +
-                    "Цена продажи в ПРИБЫЛЬ: " + Prices.round(boughtFor + (boughtFor / 100 * sellWithProfitGap)) + "\n" +
-                    "Цена продажи в УБЫТОК: " + Prices.round(boughtFor - (buyPrice / 100 * sellWithLossGap)) + "\n" +
-                    "Изменение цены: " + String.format("%.2f", ((pointPrice - boughtFor) / boughtFor * 100)) + "%" + "\n" +
-                    "Стоимость торгуемого актива: " + Prices.round((tradingSum / boughtFor) * pointPrice) + "\n" +
-                    "Баланс USDT: " + account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin());
+                "ТОРГУЕМ\n" +
+                "Цена ТЕКУЩАЯ: " + Prices.round(pointPrice) + "\n" +
+                "Цена продажи в ПРИБЫЛЬ: " + Prices.round(boughtFor + (boughtFor / 100 * sellWithProfitGap)) + "\n" +
+                "Цена продажи в УБЫТОК: " + Prices.round(boughtFor - (buyPrice / 100 * sellWithLossGap)) + "\n" +
+                "Изменение цены: " + String.format("%.2f", ((pointPrice - boughtFor) / boughtFor * 100)) + "%\n" +
+                "Баланс USDT: " + account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin());
         }
         if (trading && isSold) {
-            chartScreenshotMessage += "\n" +
-                    "Куплено за: " + Prices.round(boughtFor) + "\n" +
-                    "Продано за: " + Prices.round(soldFor) + "\n" +
-                    "Рост: " + String.format("%.2f", (soldFor - boughtFor) / boughtFor * 100) + "%" + "\n" +
-                    "Баланс USDT: " + account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin());
+            chartScreenshotMessage += "\nКуплено за: " + Prices.round(boughtFor) +
+                "\nПродано за: " + Prices.round(soldFor) +
+                "\nРост: " + String.format("%.2f", (soldFor - boughtFor) / boughtFor * 100) + "%" +
+                "\nБаланс USDT: " + account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin());
             boughtFor = soldFor = null;
         }
 
@@ -630,16 +591,12 @@ public class ReversalPointsStrategyTrader {
         } catch (Exception e) {
             log.error("Failed to send photo to Telegram", e);
             ErrorHandler.handleWarning(e, "Telegram Photo", "Sending chart to Telegram");
-            // Продолжаем работу даже если не удалось отправить фото
         }
-        
-        // Безопасное удаление временного файла
+
         try {
             Files.delete(Path.of(currentPicturePath));
         } catch (IOException e) {
-            log.warn("Failed to delete temporary file: {}", currentPicturePath);
-            // НЕ бросаем исключение - это не критично
-            // Файл будет удалён позже или при следующем запуске
+            log.warn("Failed to delete temp file: {}", currentPicturePath);
         }
     }
 }

@@ -2,7 +2,6 @@ package ton.dariushkmetsyak.Persistence;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import ton.dariushkmetsyak.Telegram.ImageAndMessageSender;
 
 import java.io.File;
 import java.io.IOException;
@@ -13,381 +12,139 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Менеджер для управления сохранением и восстановлением состояния торговли
- * Обеспечивает автоматическое сохранение и восстановление после сбоев
+ * Менеджер сохранения/восстановления состояния трейдера.
+ * Файл состояния именуется по sessionId: trading_states/<sessionId>.json
+ * Бэкапы: trading_states/<sessionId>.json.bak.<timestamp>
  */
 public class StateManager {
     private static final Logger log = LoggerFactory.getLogger(StateManager.class);
-    
-    private static final String DEFAULT_STATE_DIR = "trading_states";
-    private static final String STATE_FILE_EXTENSION = ".json";
-    private static final int DEFAULT_AUTOSAVE_INTERVAL_SECONDS = 30;
-    private static final int MAX_BACKUP_FILES = 10;
-    
-    private final String stateDirectory;
+
+    private static final String STATE_DIR = "trading_states";
+    private static final int DEFAULT_AUTOSAVE_SEC = 15;
+    private static final int MAX_BACKUPS = 5;
+
     private final ScheduledExecutorService scheduler;
-    private final AtomicBoolean isRunning;
+    private final AtomicBoolean running = new AtomicBoolean(false);
     private ScheduledFuture<?> autosaveTask;
-    
-    private TradingState currentState;
-    private String currentStateFilePath;
-    
-    /**
-     * Конструктор с директорией по умолчанию
-     */
+    private volatile TradingState currentState;
+
     public StateManager() {
-        this(DEFAULT_STATE_DIR);
+        this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "StateManager-autosave");
+            t.setDaemon(true);
+            return t;
+        });
+        try { Files.createDirectories(Paths.get(STATE_DIR)); } catch (IOException ignored) {}
     }
-    
-    /**
-     * Конструктор с указанием директории
-     */
-    public StateManager(String stateDirectory) {
-        this.stateDirectory = stateDirectory;
-        this.scheduler = Executors.newScheduledThreadPool(1);
-        this.isRunning = new AtomicBoolean(false);
-        
-        // Создать директорию, если не существует
-        createStateDirectory();
+
+    // ---- Path helpers ----
+
+    /** Primary path for a sessionId */
+    public static String getPath(String sessionId) {
+        return Paths.get(STATE_DIR, sessionId + ".json").toString();
     }
-    
-    /**
-     * Создать директорию для сохранения состояний
-     */
-    private void createStateDirectory() {
-        try {
-            Path path = Paths.get(stateDirectory);
-            if (!Files.exists(path)) {
-                Files.createDirectories(path);
-                log.info("Created state directory: {}", stateDirectory);
-            }
-        } catch (IOException e) {
-            log.error("Failed to create state directory: {}", stateDirectory, e);
-        }
-    }
-    
-    /**
-     * Получить путь к файлу состояния для конкретной монеты
-     */
-    public String getStateFilePath(String coinName, String accountType) {
-        String fileName = String.format("%s_%s%s", 
-            coinName.toLowerCase(), 
-            accountType.toLowerCase(),
-            STATE_FILE_EXTENSION
-        );
-        return Paths.get(stateDirectory, fileName).toString();
-    }
-    
-    /**
-     * Сохранить состояние
-     */
+
+    // ---- Save / Load ----
+
     public synchronized void saveState(TradingState state) {
-        if (state == null) {
-            log.warn("Attempted to save null state");
-            return;
-        }
-        
+        if (state == null) return;
         try {
-            String filePath = getStateFilePath(state.getCoinName(), state.getAccountType());
-            
-            // Создать бэкап существующего файла
-            if (new File(filePath).exists()) {
-                createBackup(filePath);
-            }
-            
-            // Сохранить состояние
-            state.saveToFile(filePath);
-            log.info("State saved successfully: {}", filePath);
-            
+            String path = getPath(state.getSessionId());
+            // Rotate backups
+            File existing = new File(path);
+            if (existing.exists()) rotateBackups(path);
+            state.saveToFile(path);
             this.currentState = state;
-            this.currentStateFilePath = filePath;
-            
+            log.debug("State saved: {}", path);
         } catch (IOException e) {
-            log.error("Failed to save state for coin: {}", state.getCoinName(), e);
-            notifyError("Ошибка сохранения состояния: " + e.getMessage());
+            log.error("Failed to save state for session {}", state.getSessionId(), e);
         }
     }
-    
-    /**
-     * Загрузить состояние
-     */
-    public TradingState loadState(String coinName, String accountType) {
-        String filePath = getStateFilePath(coinName, accountType);
-        
-        if (!TradingState.stateFileExists(filePath)) {
-            log.info("No saved state found for coin: {} ({})", coinName, accountType);
-            return null;
-        }
-        
+
+    public TradingState loadState(String sessionId) {
+        String path = getPath(sessionId);
+        if (!new File(path).exists()) return null;
         try {
-            TradingState state = TradingState.loadFromFile(filePath);
-            log.info("State loaded successfully: {}", filePath);
-            
+            TradingState state = TradingState.loadFromFile(path);
             this.currentState = state;
-            this.currentStateFilePath = filePath;
-            
+            log.info("State loaded: {}", path);
             return state;
-            
         } catch (IOException e) {
-            log.error("Failed to load state from: {}", filePath, e);
-            notifyError("Ошибка загрузки состояния: " + e.getMessage());
-            
-            // Попытаться восстановить из бэкапа
-            return attemptRestoreFromBackup(filePath);
+            log.warn("Failed to load state {}, trying backups...", path);
+            return restoreFromBackup(path);
         }
     }
-    
-    /**
-     * Попытаться восстановить из бэкапа
-     */
-    private TradingState attemptRestoreFromBackup(String originalFilePath) {
-        log.info("Attempting to restore from backup...");
-        
+
+    public boolean hasState(String sessionId) {
+        return new File(getPath(sessionId)).exists();
+    }
+
+    public void deleteState(String sessionId) {
+        String path = getPath(sessionId);
+        new File(path).delete();
+        // also delete backups
+        File dir = new File(STATE_DIR);
+        String prefix = sessionId + ".json.bak.";
+        File[] baks = dir.listFiles((d, n) -> n.startsWith(prefix));
+        if (baks != null) for (File f : baks) f.delete();
+        log.info("State deleted for session {}", sessionId);
+    }
+
+    // ---- Backup rotation ----
+
+    private void rotateBackups(String path) {
         try {
-            File stateDir = new File(stateDirectory);
-            String baseName = new File(originalFilePath).getName();
-            String backupPrefix = baseName + ".backup.";
-            
-            File[] backupFiles = stateDir.listFiles((dir, name) -> 
-                name.startsWith(backupPrefix)
-            );
-            
-            if (backupFiles == null || backupFiles.length == 0) {
-                log.warn("No backup files found");
-                return null;
+            String bakPath = path + ".bak." + System.currentTimeMillis();
+            Files.copy(Paths.get(path), Paths.get(bakPath));
+            // Prune old backups
+            File dir = new File(STATE_DIR);
+            String prefix = new File(path).getName() + ".bak.";
+            File[] baks = dir.listFiles((d, n) -> n.startsWith(prefix));
+            if (baks != null && baks.length > MAX_BACKUPS) {
+                java.util.Arrays.sort(baks, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
+                for (int i = 0; i < baks.length - MAX_BACKUPS; i++) baks[i].delete();
             }
-            
-            // Сортировать по времени (самый новый первым)
-            java.util.Arrays.sort(backupFiles, (a, b) -> 
-                Long.compare(b.lastModified(), a.lastModified())
-            );
-            
-            // Попытаться загрузить самый новый бэкап
-            for (File backupFile : backupFiles) {
-                try {
-                    TradingState state = TradingState.loadFromFile(backupFile.getPath());
-                    log.info("Successfully restored from backup: {}", backupFile.getName());
-                    notifyError("Состояние восстановлено из бэкапа: " + backupFile.getName());
-                    return state;
-                } catch (IOException e) {
-                    log.warn("Failed to load backup: {}", backupFile.getName(), e);
-                }
-            }
-            
-        } catch (Exception e) {
-            log.error("Error during backup restoration", e);
+        } catch (IOException ignored) {}
+    }
+
+    private TradingState restoreFromBackup(String originalPath) {
+        File dir = new File(STATE_DIR);
+        String prefix = new File(originalPath).getName() + ".bak.";
+        File[] baks = dir.listFiles((d, n) -> n.startsWith(prefix));
+        if (baks == null || baks.length == 0) return null;
+        java.util.Arrays.sort(baks, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+        for (File bak : baks) {
+            try {
+                TradingState state = TradingState.loadFromFile(bak.getPath());
+                log.info("Restored from backup: {}", bak.getName());
+                return state;
+            } catch (IOException ignored) {}
         }
-        
         return null;
     }
-    
-    /**
-     * Создать бэкап файла состояния
-     */
-    private void createBackup(String filePath) {
-        try {
-            String backupPath = filePath + ".backup." + System.currentTimeMillis();
-            Files.copy(Paths.get(filePath), Paths.get(backupPath));
-            log.debug("Backup created: {}", backupPath);
-            
-            // Очистить старые бэкапы
-            cleanupOldBackups(filePath);
-            
-        } catch (IOException e) {
-            log.warn("Failed to create backup for: {}", filePath, e);
-        }
-    }
-    
-    /**
-     * Удалить старые бэкапы, оставив только MAX_BACKUP_FILES
-     */
-    private void cleanupOldBackups(String originalFilePath) {
-        try {
-            File stateDir = new File(stateDirectory);
-            String baseName = new File(originalFilePath).getName();
-            String backupPrefix = baseName + ".backup.";
-            
-            File[] backupFiles = stateDir.listFiles((dir, name) -> 
-                name.startsWith(backupPrefix)
-            );
-            
-            if (backupFiles != null && backupFiles.length > MAX_BACKUP_FILES) {
-                // Сортировать по времени
-                java.util.Arrays.sort(backupFiles, (a, b) -> 
-                    Long.compare(a.lastModified(), b.lastModified())
-                );
-                
-                // Удалить старые
-                int toDelete = backupFiles.length - MAX_BACKUP_FILES;
-                for (int i = 0; i < toDelete; i++) {
-                    if (backupFiles[i].delete()) {
-                        log.debug("Deleted old backup: {}", backupFiles[i].getName());
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.warn("Error during backup cleanup", e);
-        }
-    }
-    
-    /**
-     * Запустить автоматическое сохранение
-     */
-    public void startAutosave(int intervalSeconds) {
-        if (isRunning.get()) {
-            log.warn("Autosave is already running");
-            return;
-        }
-        
-        isRunning.set(true);
-        
-        autosaveTask = scheduler.scheduleAtFixedRate(() -> {
-            try {
-                if (currentState != null) {
-                    saveState(currentState);
-                    log.debug("Autosave completed");
-                }
-            } catch (Exception e) {
-                log.error("Error during autosave", e);
-            }
-        }, intervalSeconds, intervalSeconds, TimeUnit.SECONDS);
-        
-        log.info("Autosave started with interval: {} seconds", intervalSeconds);
-    }
-    
-    /**
-     * Запустить автоматическое сохранение с интервалом по умолчанию
-     */
+
+    // ---- Autosave ----
+
     public void startAutosave() {
-        startAutosave(DEFAULT_AUTOSAVE_INTERVAL_SECONDS);
+        if (!running.compareAndSet(false, true)) return;
+        autosaveTask = scheduler.scheduleAtFixedRate(() -> {
+            TradingState s = currentState;
+            if (s != null) saveState(s);
+        }, DEFAULT_AUTOSAVE_SEC, DEFAULT_AUTOSAVE_SEC, TimeUnit.SECONDS);
+        log.info("Autosave started ({}s interval)", DEFAULT_AUTOSAVE_SEC);
     }
-    
-    /**
-     * Остановить автоматическое сохранение
-     */
-    public void stopAutosave() {
-        if (!isRunning.get()) {
-            return;
-        }
-        
-        isRunning.set(false);
-        
-        if (autosaveTask != null) {
-            autosaveTask.cancel(false);
-        }
-        
-        // Финальное сохранение
-        if (currentState != null) {
-            saveState(currentState);
-        }
-        
-        log.info("Autosave stopped");
-    }
-    
-    /**
-     * Завершить работу менеджера
-     */
+
+    public void setCurrentState(TradingState state) { this.currentState = state; }
+    public TradingState getCurrentState() { return currentState; }
+
     public void shutdown() {
-        stopAutosave();
-        
+        running.set(false);
+        if (autosaveTask != null) autosaveTask.cancel(false);
+        // Final save
+        TradingState s = currentState;
+        if (s != null) saveState(s);
         scheduler.shutdown();
-        try {
-            if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
-                scheduler.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            scheduler.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
-        
-        log.info("StateManager shutdown completed");
-    }
-    
-    /**
-     * Получить текущее состояние
-     */
-    public TradingState getCurrentState() {
-        return currentState;
-    }
-    
-    /**
-     * Установить текущее состояние
-     */
-    public void setCurrentState(TradingState state) {
-        this.currentState = state;
-    }
-    
-    /**
-     * Удалить файл состояния
-     */
-    public boolean deleteState(String coinName, String accountType) {
-        String filePath = getStateFilePath(coinName, accountType);
-        File file = new File(filePath);
-        
-        if (file.exists()) {
-            boolean deleted = file.delete();
-            if (deleted) {
-                log.info("State file deleted: {}", filePath);
-            }
-            return deleted;
-        }
-        
-        return false;
-    }
-    
-    /**
-     * Отправить уведомление об ошибке
-     */
-    private void notifyError(String message) {
-        try {
-            ImageAndMessageSender.sendTelegramMessage("⚠️ " + message);
-        } catch (Exception e) {
-            log.warn("Failed to send error notification", e);
-        }
-    }
-    
-    /**
-     * Проверить существование сохраненного состояния
-     */
-    public boolean hasState(String coinName, String accountType) {
-        String filePath = getStateFilePath(coinName, accountType);
-        return TradingState.stateFileExists(filePath);
-    }
-    
-    /**
-     * Найти любое сохранённое состояние для указанного типа аккаунта.
-     * Возвращает самое свежее состояние (не старше 24ч).
-     */
-    public TradingState findAnyState(String accountType) {
-        File dir = new File(stateDirectory);
-        if (!dir.exists() || !dir.isDirectory()) return null;
-        
-        String suffix = "_" + accountType.toLowerCase() + ".json";
-        File[] stateFiles = dir.listFiles((d, name) -> 
-            name.endsWith(suffix) && !name.contains(".backup."));
-        
-        if (stateFiles == null || stateFiles.length == 0) return null;
-        
-        // Берём самый свежий файл
-        File latestFile = stateFiles[0];
-        for (File f : stateFiles) {
-            if (f.lastModified() > latestFile.lastModified()) {
-                latestFile = f;
-            }
-        }
-        
-        try {
-            TradingState state = TradingState.loadFromFile(latestFile.getPath());
-            // Проверяем актуальность
-            long ageMs = System.currentTimeMillis() - state.getTimestamp();
-            if (ageMs > java.util.concurrent.TimeUnit.HOURS.toMillis(24)) {
-                log.info("State file too old (>24h), ignoring: {}", latestFile.getName());
-                return null;
-            }
-            return state;
-        } catch (Exception e) {
-            log.error("Failed to load state from {}", latestFile.getName(), e);
-            return null;
-        }
+        try { scheduler.awaitTermination(3, TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
+        log.info("StateManager shutdown");
     }
 }
