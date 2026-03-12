@@ -116,6 +116,28 @@ public class MiniAppServer {
             });
         });
 
+        server.createContext("/api/trading/resume", exchange -> {
+            if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            handleJson(exchange, () -> {
+                Map<String, Object> body = parseBody(exchange);
+                String sessionId = (String) body.get("sessionId");
+                long chatId = toLong(body.get("chatId"), AppConfig.getInstance().getDefaultChatId());
+                if (sessionId == null) return errorMap("sessionId обязателен");
+                return TradingSessionManager.getInstance().resumeSession(sessionId, chatId);
+            });
+        });
+
+        server.createContext("/api/trading/delete", exchange -> {
+            if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            handleJson(exchange, () -> {
+                Map<String, Object> body = parseBody(exchange);
+                String sessionId = (String) body.get("sessionId");
+                if (sessionId == null) return errorMap("sessionId обязателен");
+                boolean ok = TradingSessionManager.getInstance().deleteSession(sessionId);
+                return Map.of("deleted", ok, "sessionId", sessionId != null ? sessionId : "");
+            });
+        });
+
         server.createContext("/api/backtest/start", exchange -> {
             if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
             handleJson(exchange, () -> startBacktestFromRequest(exchange));
@@ -133,6 +155,12 @@ public class MiniAppServer {
         server.start();
         log.info("🚀 MiniApp сервер запущен на порту {}", port);
         log.info("   URL: http://localhost:{}", port);
+
+        // Load persisted sessions and auto-resume unexpectedly stopped ones
+        TradingSessionManager mgr = TradingSessionManager.getInstance();
+        mgr.loadSessions();
+        long chatId = AppConfig.getInstance().getDefaultChatId();
+        mgr.autoResumeSessions(chatId);
     }
 
     public void stop() {
@@ -159,26 +187,20 @@ public class MiniAppServer {
 
         TradingSessionManager mgr = TradingSessionManager.getInstance();
 
-        // Enforce 1 active session limit
-        if (mgr.hasActiveSession()) {
-            Map<String, Object> err = new LinkedHashMap<>();
-            err.put("error", "Уже есть активная сессия. Остановите её перед запуском новой.");
-            return err;
-        }
-
-        TradingSessionManager.SessionInfo info;
+        Object result;
         switch (type.toLowerCase()) {
             case "binance":
             case "binance_real":
-                info = mgr.startBinanceTrading(coinName, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chartRefreshInterval, chatId);
+                result = mgr.startBinanceTrading(coinName, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chartRefreshInterval, chatId);
                 break;
             case "binance_test":
-                info = mgr.startBinanceTestTrading(coinName, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chartRefreshInterval, chatId);
+                result = mgr.startBinanceTestTrading(coinName, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chartRefreshInterval, chatId);
                 break;
             default: // tester
-                info = mgr.startTesterTrading(coinName, startAssets, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chartRefreshInterval, chatId);
+                result = mgr.startTesterTrading(coinName, startAssets, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chartRefreshInterval, chatId);
         }
-        return info.toMap();
+        if (result instanceof TradingSessionManager.SessionInfo) return ((TradingSessionManager.SessionInfo) result).toMap();
+        return (Map<String, Object>) result;
     }
 
     private Map<String, Object> startBacktestFromRequest(HttpExchange exchange) throws Exception {

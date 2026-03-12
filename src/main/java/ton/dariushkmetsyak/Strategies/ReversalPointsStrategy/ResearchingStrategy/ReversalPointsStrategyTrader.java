@@ -117,8 +117,15 @@ public class ReversalPointsStrategyTrader {
             this.sellWithLossGap = sellWithLossGap;
             this.updateTimeout = updateTimeout;
             
-            ImageAndMessageSender.sendTelegramMessage(
-                    "🆕 Новая торговая сессия\nБаланс: " + account.wallet().getAllAssets(), chatID);
+            {
+                double _usdtBal = 0;
+                double _coinBal = 0;
+                try { _usdtBal = account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin()); } catch(Exception ignored) {}
+                try { _coinBal = account.wallet().getAmountOfCoin(coin); } catch(Exception ignored) {}
+                ImageAndMessageSender.sendTelegramMessage(
+                    "🆕 Новая торговая сессия\nБаланс: " + ton.dariushkmetsyak.Util.Prices.round(_coinBal) + " " + coin.getSymbol() +
+                    ", " + ton.dariushkmetsyak.Util.Prices.round(_usdtBal) + " USDT", chatID);
+            }
         }
 
         // Автосохранение каждые 30 секунд
@@ -440,7 +447,29 @@ public class ReversalPointsStrategyTrader {
                 
                 // Анализ графика и торговля
                 this.startResearchingChart(System.currentTimeMillis(), currentPrice);
-                
+
+                // Обновить live-состояние сессии в MiniApp
+                try {
+                    double coinBal = 0;
+                    try { coinBal = account.wallet().getAmountOfCoin(coin); } catch (Exception ignored) {}
+                    double usdtBal = 0;
+                    try { usdtBal = account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin()); } catch (Exception ignored) {}
+                    Double buyTarget = (!trading && currentMaxPrice[0] != null && currentMaxPrice[0] > 0)
+                        ? currentMaxPrice[0] * (1 - buyGap / 100.0) : null;
+                    Double profitTarget = (trading && boughtFor != null)
+                        ? boughtFor * (1 + sellWithProfitGap / 100.0) : null;
+                    Double lossTarget = (trading && boughtFor != null)
+                        ? boughtFor * (1 - sellWithLossGap / 100.0) : null;
+                    ton.dariushkmetsyak.Web.TradingSessionManager.updateLiveState(
+                        coinBal, usdtBal, trading,
+                        currentMaxPrice[0] > 0 ? currentMaxPrice[0] : null,
+                        buyTarget,
+                        boughtFor,
+                        profitTarget,
+                        lossTarget
+                    );
+                } catch (Exception ignored) {}
+
                 // Сброс счётчика ошибок при успехе
                 consecutiveErrors = 0;
                 
