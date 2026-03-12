@@ -79,6 +79,56 @@ public class StateManager {
         return new File(getPath(sessionId)).exists();
     }
 
+    // ---- Backward-compat overloads (used by MenuHandler) ----
+
+    /**
+     * Backward-compat: delete by coinName + accountType (old naming scheme).
+     * Tries both old path (coinName_accountType.json) and new (sessionId.json via scan).
+     */
+    public void deleteState(String coinName, String accountType) {
+        // Old naming scheme: trading_states/bitcoin_testeraccount.json
+        String oldPath = Paths.get(STATE_DIR,
+                coinName.toLowerCase() + "_" + accountType.toLowerCase() + ".json").toString();
+        new File(oldPath).delete();
+        // Also scan for any new-style file matching this coin+type
+        File dir = new File(STATE_DIR);
+        File[] files = dir.listFiles((d, n) -> n.endsWith(".json") && !n.contains(".bak."));
+        if (files != null) {
+            for (File f : files) {
+                try {
+                    TradingState s = TradingState.loadFromFile(f.getPath());
+                    if (coinName.equalsIgnoreCase(s.getCoinName())
+                            && accountType.equalsIgnoreCase(s.getAccountType())) {
+                        deleteState(f.getName().replace(".json", ""));
+                    }
+                } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    /**
+     * Backward-compat: find any state for the given accountType.
+     * Returns the most recently saved state not older than 24h.
+     */
+    public TradingState findAnyState(String accountType) {
+        File dir = new File(STATE_DIR);
+        if (!dir.exists()) return null;
+        File[] files = dir.listFiles((d, n) -> n.endsWith(".json") && !n.contains(".bak."));
+        if (files == null) return null;
+        TradingState best = null;
+        long bestTs = 0;
+        for (File f : files) {
+            try {
+                TradingState s = TradingState.loadFromFile(f.getPath());
+                if (accountType != null && !accountType.equalsIgnoreCase(s.getAccountType())) continue;
+                long age = System.currentTimeMillis() - s.getTimestamp();
+                if (age > java.util.concurrent.TimeUnit.HOURS.toMillis(24)) continue;
+                if (s.getTimestamp() > bestTs) { bestTs = s.getTimestamp(); best = s; }
+            } catch (Exception ignored) {}
+        }
+        return best;
+    }
+
     public void deleteState(String sessionId) {
         String path = getPath(sessionId);
         new File(path).delete();

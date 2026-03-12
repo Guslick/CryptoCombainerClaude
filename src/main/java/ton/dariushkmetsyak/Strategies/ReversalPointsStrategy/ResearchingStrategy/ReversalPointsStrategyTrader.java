@@ -82,6 +82,15 @@ public class ReversalPointsStrategyTrader {
              updateTimeout, chatID, null, null);
     }
 
+    /** Backward-compat: 9-arg constructor without sessionId (used by MenuHandler). */
+    public ReversalPointsStrategyTrader(Account account, Coin coin, double tradingSum,
+                                        double buyGap, double sellWithProfitGap,
+                                        double sellWithLossGap, int updateTimeout, Long chatID,
+                                        TradingState savedState) {
+        this(account, coin, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap,
+             updateTimeout, chatID, savedState, null);
+    }
+
     /**
      * Full constructor. savedState != null → restore from saved state instead of fresh start.
      * sessionId must match the MiniApp session ID for state file naming.
