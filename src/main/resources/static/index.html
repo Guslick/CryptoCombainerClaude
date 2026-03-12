@@ -1006,7 +1006,12 @@ function patchSessionCard(s, prev) {
   const timeEl = card.querySelector('.session-time');
   if (timeEl) timeEl.textContent = `▶ ${fmtDateTime(s.startedAt)}${s.endedAt ? '  ⏹ ' + fmtDateTime(s.endedAt) : ''}`;
 
-  // session-balance removed from card
+  const balEl = card.querySelector('.session-balance');
+  if (balEl) {
+    const balCoin = s.coinBalance > 0 ? `${fmtNum(s.coinBalance)} ${s.coinName}` : '';
+    const balUsdt = s.usdtBalance > 0 ? `${fmtNum(s.usdtBalance)} USDT` : '';
+    balEl.textContent = '💼 ' + ([balCoin, balUsdt].filter(Boolean).join(', ') || '—');
+  }
 
   // Update target prices
   const tpEl = card.querySelector('.target-prices');
@@ -1099,6 +1104,7 @@ function buildSessionCard(s) {
         <div class="session-card-body" style="flex:1;min-width:0;">
           <div class="session-name">${escHtml(s.coinName)} <span class="chip">${s.type}</span>${stoppedUnexpected}</div>
           <div class="session-time">▶ ${fmtDateTime(s.startedAt)}${s.endedAt ? '  ⏹ ' + fmtDateTime(s.endedAt) : ''}</div>
+          <div class="session-balance">💼 ${balText}</div>
         </div>
       </div>
       <div class="session-card-actions" onclick="event.stopPropagation();">${actionsHtml}</div>
