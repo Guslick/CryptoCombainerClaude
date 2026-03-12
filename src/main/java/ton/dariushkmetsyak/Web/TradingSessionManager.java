@@ -4,15 +4,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ton.dariushkmetsyak.Charts.Chart;
-import ton.dariushkmetsyak.TradingApi.ApiService.Exceptions.NoSuchSymbolException;
 import ton.dariushkmetsyak.Config.AppConfig;
 import ton.dariushkmetsyak.GeckoApiService.geckoEntities.Coin;
 import ton.dariushkmetsyak.GeckoApiService.geckoEntities.CoinsList;
+import ton.dariushkmetsyak.Persistence.StateManager;
+import ton.dariushkmetsyak.Persistence.TradingState;
 import ton.dariushkmetsyak.Strategies.ReversalPointsStrategy.ResearchingStrategy.ReversalPointStrategyBackTester;
 import ton.dariushkmetsyak.Strategies.ReversalPointsStrategy.ResearchingStrategy.ReversalPointsStrategyTrader;
 import ton.dariushkmetsyak.Telegram.ImageAndMessageSender;
 import ton.dariushkmetsyak.TradingApi.ApiService.Account;
 import ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder;
+import ton.dariushkmetsyak.TradingApi.ApiService.Exceptions.NoSuchSymbolException;
 
 import java.io.*;
 import java.nio.file.*;
@@ -23,8 +25,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 /**
- * Управляет сессиями торговли, запущенными из MiniApp.
- * Поддерживает журналирование событий, персистентность сессий и авто-возобновление.
+ * Manages MiniApp trading sessions with full state persistence and auto-resume.
  */
 public class TradingSessionManager {
     private static final Logger log = LoggerFactory.getLogger(TradingSessionManager.class);
@@ -37,7 +38,7 @@ public class TradingSessionManager {
     // ---- SessionEvent ----
     public static class SessionEvent {
         public long timestamp;
-        public String type;   // BUY, SELL, INFO, ERROR, START, STOP
+        public String type;
         public String message;
 
         public SessionEvent() {}
@@ -66,16 +67,16 @@ public class TradingSessionManager {
         public volatile String lastMessage;
         public volatile long startedAt;
         public volatile long endedAt = 0;
-        // Live trading state (updated by trader via updateLiveState)
+        // Live state — updated every tick by updateLiveState()
         public volatile double coinBalance = 0;
         public volatile double usdtBalance = 0;
-        public volatile boolean isTrading = false;        // true = holding coin
+        public volatile boolean isTrading = false;
+        public volatile Double currentPrice = null;
         public volatile Double maxPrice = null;
-        public volatile Double buyTargetPrice = null;     // price at which we'd buy
-        public volatile Double boughtAtPrice = null;      // price we actually bought at
+        public volatile Double buyTargetPrice = null;
+        public volatile Double boughtAtPrice = null;
         public volatile Double sellProfitPrice = null;
         public volatile Double sellLossPrice = null;
-        // Stopped unexpectedly (not by user) — should auto-resume
         public volatile boolean stoppedUnexpectedly = false;
         public transient Thread thread;
         public final List<SessionEvent> events = new CopyOnWriteArrayList<>();
@@ -106,6 +107,7 @@ public class TradingSessionManager {
             m.put("coinBalance", coinBalance);
             m.put("usdtBalance", usdtBalance);
             m.put("isTrading", isTrading);
+            m.put("currentPrice", currentPrice);
             m.put("maxPrice", maxPrice);
             m.put("buyTargetPrice", buyTargetPrice);
             m.put("boughtAtPrice", boughtAtPrice);
@@ -139,38 +141,49 @@ public class TradingSessionManager {
     // ---- Live state update from trading thread ----
 
     /**
-     * Called by ReversalPointsStrategyTrader on every tick to push live state.
+     * Called by ReversalPointsStrategyTrader on every tick.
+     * All nullable fields are represented as Double (null = not applicable).
      */
     public static void updateLiveState(double coinBalance, double usdtBalance,
-                                       boolean isTrading, Double maxPrice,
-                                       Double buyTargetPrice, Double boughtAtPrice,
-                                       Double sellProfitPrice, Double sellLossPrice) {
+                                       boolean isTrading,
+                                       double currentPrice,
+                                       Double maxPrice,
+                                       Double buyTargetPrice,
+                                       Double boughtAtPrice,
+                                       Double sellProfitPrice,
+                                       Double sellLossPrice) {
         TradingSessionManager mgr = instance;
         if (mgr == null) return;
         String sid = mgr.threadToSession.get(Thread.currentThread().getId());
         if (sid == null) return;
         SessionInfo info = mgr.sessions.get(sid);
         if (info == null) return;
-        info.coinBalance = coinBalance;
-        info.usdtBalance = usdtBalance;
-        info.isTrading = isTrading;
-        info.maxPrice = maxPrice;
+
+        info.coinBalance    = coinBalance;
+        info.usdtBalance    = usdtBalance;
+        info.isTrading      = isTrading;
+        info.currentPrice   = currentPrice;
+        info.maxPrice       = maxPrice;
         info.buyTargetPrice = buyTargetPrice;
-        info.boughtAtPrice = boughtAtPrice;
+        info.boughtAtPrice  = boughtAtPrice;
         info.sellProfitPrice = sellProfitPrice;
-        info.sellLossPrice = sellLossPrice;
+        info.sellLossPrice  = sellLossPrice;
+
+        // Persist session list on every live update so balances are always current
+        mgr.saveSessions();
     }
 
-    // ---- Event logging from trading threads ----
+    // ---- Event logging ----
 
     public static void logEventFromCurrentThread(String message) {
         TradingSessionManager mgr = instance;
         if (mgr == null || message == null) return;
-        String sessionId = mgr.threadToSession.get(Thread.currentThread().getId());
-        if (sessionId == null) return;
-        SessionInfo info = mgr.sessions.get(sessionId);
+        String sid = mgr.threadToSession.get(Thread.currentThread().getId());
+        if (sid == null) return;
+        SessionInfo info = mgr.sessions.get(sid);
         if (info == null) return;
         info.addEvent(detectEventType(message), message);
+        mgr.saveSessions();
     }
 
     private static String detectEventType(String msg) {
@@ -180,14 +193,13 @@ public class TradingSessionManager {
         if (lower.contains("прода") || lower.contains("sell") || lower.contains("продан")) return "SELL";
         if (lower.contains("ошибк") || lower.contains("error") || lower.contains("exception") || lower.contains("fail")) return "ERROR";
         if (lower.contains("остановл") || lower.contains("стоп") || lower.contains("stopped")) return "STOP";
-        if (lower.contains("готов") || lower.contains("завершен") || lower.contains("done")) return "DONE";
+        if (lower.contains("завершен") || lower.contains("done")) return "DONE";
         return "INFO";
     }
 
     public void registerThread(String sessionId) {
         threadToSession.put(Thread.currentThread().getId(), sessionId);
     }
-
     public void unregisterThread() {
         threadToSession.remove(Thread.currentThread().getId());
     }
@@ -199,39 +211,19 @@ public class TradingSessionManager {
     }
 
     private Map<String, Object> tooManySessionsError() {
-        Map<String, Object> err = new LinkedHashMap<>();
-        err.put("error", "Уже есть активная сессия. Остановите её перед запуском новой.");
-        return err;
+        Map<String, Object> e = new LinkedHashMap<>();
+        e.put("error", "Уже есть активная сессия. Остановите её перед запуском новой.");
+        return e;
     }
 
-    // ---- Helpers ----
-
-    private static void setFinalStatus(SessionInfo info, boolean stoppedByUser) {
-        if (stoppedByUser || Thread.currentThread().isInterrupted()) {
-            info.status = "STOPPED";
-            info.stoppedUnexpectedly = false;
-            info.lastMessage = "Остановлено пользователем";
-            info.addEvent("STOP", "Остановлено пользователем");
-        } else {
-            info.status = "STOPPED";
-            info.stoppedUnexpectedly = false;
-            info.lastMessage = "Торговля завершена";
-            info.addEvent("STOP", "Торговля завершена");
-        }
-        info.endedAt = System.currentTimeMillis();
-    }
-
-    // ---- Session persistence ----
+    // ---- Persistence: sessions list ----
 
     public void saveSessions() {
         try {
             Files.createDirectories(Paths.get("trading_states"));
-            List<Map<String, Object>> list = new ArrayList<>();
-            for (SessionInfo s : sessions.values()) {
-                Map<String, Object> m = s.toMap(true);
-                // Include events for persistence
-                list.add(m);
-            }
+            List<Map<String, Object>> list = sessions.values().stream()
+                .map(s -> s.toMap(true))
+                .collect(Collectors.toList());
             mapper.writerWithDefaultPrettyPrinter().writeValue(new File(SESSION_STORE_FILE), list);
         } catch (Exception e) {
             log.warn("Failed to save sessions: {}", e.getMessage());
@@ -258,6 +250,7 @@ public class TradingSessionManager {
                 info.coinBalance = toDouble(m.get("coinBalance"));
                 info.usdtBalance = toDouble(m.get("usdtBalance"));
                 info.isTrading = (Boolean) m.getOrDefault("isTrading", false);
+                info.currentPrice = m.get("currentPrice") != null ? toDouble(m.get("currentPrice")) : null;
                 info.maxPrice = m.get("maxPrice") != null ? toDouble(m.get("maxPrice")) : null;
                 info.buyTargetPrice = m.get("buyTargetPrice") != null ? toDouble(m.get("buyTargetPrice")) : null;
                 info.boughtAtPrice = m.get("boughtAtPrice") != null ? toDouble(m.get("boughtAtPrice")) : null;
@@ -274,12 +267,12 @@ public class TradingSessionManager {
                         info.events.add(e);
                     }
                 }
-                // Mark running sessions as unexpectedly stopped (JVM was killed)
+                // Mark running sessions as interrupted (JVM was killed)
                 if ("RUNNING".equals(info.status)) {
                     info.status = "STOPPED";
                     info.stoppedUnexpectedly = true;
                     info.endedAt = System.currentTimeMillis();
-                    info.addEvent("ERROR", "Сессия прервана (JVM завершён)");
+                    info.addEvent("ERROR", "Сессия прервана (JVM завершён) — ожидает возобновления");
                 }
                 sessions.put(info.id, info);
             }
@@ -300,60 +293,85 @@ public class TradingSessionManager {
             });
     }
 
-    private static long toLong(Object v) {
-        if (v == null) return 0L;
-        if (v instanceof Long) return (Long) v;
-        if (v instanceof Integer) return ((Integer) v).longValue();
-        if (v instanceof Number) return ((Number) v).longValue();
-        return 0L;
-    }
-    private static double toDouble(Object v) {
-        if (v == null) return 0.0;
-        if (v instanceof Number) return ((Number) v).doubleValue();
-        return 0.0;
+    // ---- Helper: load TradingState for a session ----
+
+    private TradingState loadTradingState(String sessionId) {
+        StateManager sm = new StateManager();
+        if (!sm.hasState(sessionId)) {
+            log.info("No TradingState found for session {}", sessionId);
+            return null;
+        }
+        TradingState state = sm.loadState(sessionId);
+        if (state != null) {
+            log.info("Loaded TradingState for session {}: isTrading={}, boughtFor={}",
+                sessionId, state.isTrading(), state.getBoughtFor());
+        }
+        return state;
     }
 
     // ---- Start tester trading ----
 
     public Object startTesterTrading(String coinName, double startAssets, double tradingSum,
-                                          double buyGap, double sellWithProfitGap,
-                                          double sellWithLossGap, int updateTimeout,
-                                          int chartRefreshInterval, long chatId) {
+                                     double buyGap, double sellWithProfitGap, double sellWithLossGap,
+                                     int updateTimeout, int chartRefreshInterval, long chatId) {
         if (hasActiveSession()) return tooManySessionsError();
         String id = "tester_" + System.currentTimeMillis();
-        Map<String, Object> params = new LinkedHashMap<>();
+        Map<String, Object> params = buildParams(tradingSum, buyGap, sellWithProfitGap, sellWithLossGap,
+                                                  updateTimeout, chartRefreshInterval);
         params.put("startAssets", startAssets);
-        params.put("tradingSum", tradingSum);
-        params.put("buyGap", buyGap);
-        params.put("sellWithProfitGap", sellWithProfitGap);
-        params.put("sellWithLossGap", sellWithLossGap);
-        params.put("telegramUpdateSec", updateTimeout);
-        params.put("chartRefreshSec", chartRefreshInterval);
 
         SessionInfo info = new SessionInfo(id, SessionType.TESTER, coinName, params);
         info.addEvent("START", "Сессия запущена: " + coinName);
         sessions.put(id, info);
         launchTesterThread(info, startAssets, tradingSum, buyGap, sellWithProfitGap,
-                           sellWithLossGap, updateTimeout, chatId);
+                           sellWithLossGap, updateTimeout, null, chatId);
         saveSessions();
-        log.info("Started tester trading session: {}", id);
+        log.info("Started tester session: {}", id);
         return info;
     }
 
     private void launchTesterThread(SessionInfo info, double startAssets, double tradingSum,
                                     double buyGap, double sellWithProfitGap, double sellWithLossGap,
-                                    int updateTimeout, long chatId) {
+                                    int updateTimeout, TradingState savedState, long chatId) {
         Thread t = new Thread(() -> {
             registerThread(info.id);
             try {
                 Coin coin = CoinsList.getCoinByName(info.coinName);
+
+                // Build wallet: from saved state if resuming, else from startAssets
                 Map<Coin, Double> assets = new HashMap<>();
-                assets.put(Coin.createCoin("Tether"), startAssets);
-                assets.put(coin, 0d);
+                if (savedState != null && savedState.getWalletAssets() != null
+                        && !savedState.getWalletAssets().isEmpty()) {
+                    // Restore exact wallet from saved state
+                    double usdtAmt = savedState.getWalletAssets().getOrDefault("USDT", startAssets);
+                    double coinAmt = savedState.getWalletAssets().getOrDefault(
+                            coin.getSymbol().toUpperCase(), 0.0);
+                    // Fallback: use Session-level balances if state wallet is empty
+                    if (usdtAmt == 0 && coinAmt == 0) {
+                        usdtAmt = info.usdtBalance > 0 ? info.usdtBalance : startAssets;
+                        coinAmt = info.coinBalance;
+                    }
+                    assets.put(Account.USD_TOKENS.USDT.getCoin(), usdtAmt);
+                    assets.put(coin, coinAmt);
+                    log.info("Restoring tester wallet: {} USDT, {} {}", usdtAmt, coinAmt, coin.getSymbol());
+                } else if (savedState == null && info.coinBalance == 0 && info.usdtBalance == 0) {
+                    // Fresh session
+                    assets.put(Account.USD_TOKENS.USDT.getCoin(), startAssets);
+                    assets.put(coin, 0.0);
+                } else {
+                    // Resume without full state file — use session balances
+                    double usdtAmt = info.usdtBalance > 0 ? info.usdtBalance : startAssets;
+                    double coinAmt = info.coinBalance;
+                    assets.put(Account.USD_TOKENS.USDT.getCoin(), usdtAmt);
+                    assets.put(coin, coinAmt);
+                    log.info("Resuming tester wallet from session: {} USDT, {} {}", usdtAmt, coinAmt, coin.getSymbol());
+                }
+
                 Account account = AccountBuilder.createNewTester(assets);
                 try { ImageAndMessageSender.setChatId(chatId); } catch (Exception ignored) {}
                 new ReversalPointsStrategyTrader(account, coin, tradingSum,
-                        buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chatId)
+                        buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chatId,
+                        savedState, info.id)
                         .startTrading();
                 setFinalStatus(info, false);
             } catch (Exception e) {
@@ -375,24 +393,17 @@ public class TradingSessionManager {
     // ---- Start Binance Real ----
 
     public Object startBinanceTrading(String coinName, double tradingSum,
-                                           double buyGap, double sellWithProfitGap,
-                                           double sellWithLossGap, int updateTimeout,
-                                           int chartRefreshInterval, long chatId) {
+                                      double buyGap, double sellWithProfitGap, double sellWithLossGap,
+                                      int updateTimeout, int chartRefreshInterval, long chatId) {
         if (hasActiveSession()) return tooManySessionsError();
         String id = "binance_" + System.currentTimeMillis();
-        Map<String, Object> params = new LinkedHashMap<>();
-        params.put("tradingSum", tradingSum);
-        params.put("buyGap", buyGap);
-        params.put("sellWithProfitGap", sellWithProfitGap);
-        params.put("sellWithLossGap", sellWithLossGap);
-        params.put("telegramUpdateSec", updateTimeout);
-        params.put("chartRefreshSec", chartRefreshInterval);
-
+        Map<String, Object> params = buildParams(tradingSum, buyGap, sellWithProfitGap, sellWithLossGap,
+                                                  updateTimeout, chartRefreshInterval);
         SessionInfo info = new SessionInfo(id, SessionType.BINANCE_REAL, coinName, params);
         info.addEvent("START", "Binance REAL сессия запущена: " + coinName);
         sessions.put(id, info);
         launchBinanceThread(info, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap,
-                            updateTimeout, false, chatId);
+                            updateTimeout, false, null, chatId);
         saveSessions();
         return info;
     }
@@ -400,31 +411,25 @@ public class TradingSessionManager {
     // ---- Start Binance Testnet ----
 
     public Object startBinanceTestTrading(String coinName, double tradingSum,
-                                               double buyGap, double sellWithProfitGap,
-                                               double sellWithLossGap, int updateTimeout,
-                                               int chartRefreshInterval, long chatId) {
+                                          double buyGap, double sellWithProfitGap, double sellWithLossGap,
+                                          int updateTimeout, int chartRefreshInterval, long chatId) {
         if (hasActiveSession()) return tooManySessionsError();
         String id = "binance_test_" + System.currentTimeMillis();
-        Map<String, Object> params = new LinkedHashMap<>();
-        params.put("tradingSum", tradingSum);
-        params.put("buyGap", buyGap);
-        params.put("sellWithProfitGap", sellWithProfitGap);
-        params.put("sellWithLossGap", sellWithLossGap);
-        params.put("telegramUpdateSec", updateTimeout);
-        params.put("chartRefreshSec", chartRefreshInterval);
-
+        Map<String, Object> params = buildParams(tradingSum, buyGap, sellWithProfitGap, sellWithLossGap,
+                                                  updateTimeout, chartRefreshInterval);
         SessionInfo info = new SessionInfo(id, SessionType.BINANCE_TEST, coinName, params);
         info.addEvent("START", "Binance TEST сессия запущена: " + coinName);
         sessions.put(id, info);
         launchBinanceThread(info, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap,
-                            updateTimeout, true, chatId);
+                            updateTimeout, true, null, chatId);
         saveSessions();
         return info;
     }
 
     private void launchBinanceThread(SessionInfo info, double tradingSum,
                                      double buyGap, double sellWithProfitGap, double sellWithLossGap,
-                                     int updateTimeout, boolean testnet, long chatId) {
+                                     int updateTimeout, boolean testnet,
+                                     TradingState savedState, long chatId) {
         Thread t = new Thread(() -> {
             registerThread(info.id);
             try {
@@ -440,7 +445,8 @@ public class TradingSessionManager {
                         testnet ? AccountBuilder.BINANCE_BASE_URL.TESTNET : AccountBuilder.BINANCE_BASE_URL.MAINNET);
                 try { ImageAndMessageSender.setChatId(chatId); } catch (Exception ignored) {}
                 new ReversalPointsStrategyTrader(account, coin, tradingSum,
-                        buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chatId)
+                        buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chatId,
+                        savedState, info.id)
                         .startTrading();
                 setFinalStatus(info, false);
             } catch (Exception e) {
@@ -468,10 +474,15 @@ public class TradingSessionManager {
         if (hasActiveSession()) return Map.of("error", "Уже есть активная сессия");
         if (info.type == SessionType.BACKTEST) return Map.of("error", "Бэктест нельзя возобновить");
 
+        // Load saved TradingState (full strategy state)
+        TradingState savedState = loadTradingState(sessionId);
+
         info.status = "RUNNING";
         info.stoppedUnexpectedly = false;
         info.endedAt = 0;
-        info.addEvent("START", "Сессия возобновлена");
+        info.addEvent("START", savedState != null
+            ? "Сессия возобновлена (состояние восстановлено: isTrading=" + savedState.isTrading() + ")"
+            : "Сессия возобновлена (состояние не найдено — начинаем заново)");
 
         Map<String, Object> p = info.params;
         double tradingSum = toDouble(p.get("tradingSum"));
@@ -486,24 +497,26 @@ public class TradingSessionManager {
             case TESTER: {
                 double startAssets = toDouble(p.getOrDefault("startAssets", 150.0));
                 launchTesterThread(info, startAssets, tradingSum, buyGap, sellWithProfitGap,
-                                   sellWithLossGap, updateTimeout, chatId);
+                                   sellWithLossGap, updateTimeout, savedState, chatId);
                 break;
             }
             case BINANCE_REAL:
                 launchBinanceThread(info, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap,
-                                    updateTimeout, false, chatId);
+                                    updateTimeout, false, savedState, chatId);
                 break;
             case BINANCE_TEST:
                 launchBinanceThread(info, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap,
-                                    updateTimeout, true, chatId);
+                                    updateTimeout, true, savedState, chatId);
                 break;
             default:
                 info.status = "STOPPED";
                 return Map.of("error", "Тип сессии не поддерживает возобновление");
         }
         saveSessions();
-        log.info("Resumed session: {}", sessionId);
-        return Map.of("resumed", true, "id", sessionId);
+        log.info("Resumed session: {} (state loaded: {})", sessionId, savedState != null);
+        return Map.of("resumed", true, "id", sessionId,
+                      "stateRestored", savedState != null,
+                      "wasTrading", savedState != null && savedState.isTrading());
     }
 
     // ---- Stop ----
@@ -511,9 +524,7 @@ public class TradingSessionManager {
     public boolean stopSession(String sessionId) {
         SessionInfo info = sessions.get(sessionId);
         if (info == null) return false;
-        if (info.thread != null && info.thread.isAlive()) {
-            info.thread.interrupt();
-        }
+        if (info.thread != null && info.thread.isAlive()) info.thread.interrupt();
         info.status = "STOPPED";
         info.stoppedUnexpectedly = false;
         info.endedAt = System.currentTimeMillis();
@@ -527,13 +538,15 @@ public class TradingSessionManager {
         sessions.values().forEach(s -> stopSession(s.id));
     }
 
-    // ---- Delete session ----
+    // ---- Delete ----
 
     public boolean deleteSession(String sessionId) {
         SessionInfo info = sessions.get(sessionId);
         if (info == null) return false;
-        if ("RUNNING".equals(info.status)) return false; // only inactive
+        if ("RUNNING".equals(info.status)) return false;
         sessions.remove(sessionId);
+        // Also delete TradingState file
+        new StateManager().deleteState(sessionId);
         saveSessions();
         log.info("Deleted session: {}", sessionId);
         return true;
@@ -560,11 +573,7 @@ public class TradingSessionManager {
                                      double buyGap, double sellWithProfitGap,
                                      double sellWithLossGap, String chartType) {
         String id = "backtest_" + System.currentTimeMillis();
-        Map<String, Object> params = new LinkedHashMap<>();
-        params.put("tradingSum", tradingSum);
-        params.put("buyGap", buyGap);
-        params.put("sellWithProfitGap", sellWithProfitGap);
-        params.put("sellWithLossGap", sellWithLossGap);
+        Map<String, Object> params = buildParams(tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, 30, 60);
         params.put("chartType", chartType);
 
         SessionInfo info = new SessionInfo(id, SessionType.BACKTEST, coinName, params);
@@ -621,5 +630,45 @@ public class TradingSessionManager {
 
     public Map<String, Object> getLastBacktestResult() {
         return lastBacktestResult.get();
+    }
+
+    // ---- Helpers ----
+
+    private static Map<String, Object> buildParams(double tradingSum, double buyGap,
+                                                   double sellWithProfitGap, double sellWithLossGap,
+                                                   int updateTimeout, int chartRefresh) {
+        Map<String, Object> p = new LinkedHashMap<>();
+        p.put("tradingSum", tradingSum);
+        p.put("buyGap", buyGap);
+        p.put("sellWithProfitGap", sellWithProfitGap);
+        p.put("sellWithLossGap", sellWithLossGap);
+        p.put("telegramUpdateSec", updateTimeout);
+        p.put("chartRefreshSec", chartRefresh);
+        return p;
+    }
+
+    private static void setFinalStatus(SessionInfo info, boolean stoppedByUser) {
+        info.status = "STOPPED";
+        info.stoppedUnexpectedly = false;
+        if (stoppedByUser || Thread.currentThread().isInterrupted()) {
+            info.lastMessage = "Остановлено пользователем";
+            info.addEvent("STOP", "Остановлено пользователем");
+        } else {
+            info.lastMessage = "Торговля завершена";
+            info.addEvent("STOP", "Торговля завершена");
+        }
+        info.endedAt = System.currentTimeMillis();
+    }
+
+    private static long toLong(Object v) {
+        if (v == null) return 0L;
+        if (v instanceof Number) return ((Number) v).longValue();
+        return 0L;
+    }
+
+    private static double toDouble(Object v) {
+        if (v == null) return 0.0;
+        if (v instanceof Number) return ((Number) v).doubleValue();
+        return 0.0;
     }
 }
