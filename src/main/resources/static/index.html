@@ -177,7 +177,11 @@
   .drawer-content{flex:1;overflow-y:scroll;-webkit-overflow-scrolling:touch;padding:12px 12px 32px;display:flex;flex-direction:column;gap:10px}
 
   /* ---- EVENT TIMELINE ---- */
-  .event-list{display:flex;flex-direction:column;gap:4px;padding-right:4px}
+  .event-list{display:flex;flex-direction:column;gap:4px;padding-right:2px}
+  .events-scroll-wrap{height:320px;overflow-y:scroll;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;border-radius:6px}
+  .events-scroll-wrap::-webkit-scrollbar{width:3px}
+  .events-scroll-wrap::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+  .events-count-bar{font-size:10px;color:var(--muted);padding:4px 0 6px;display:flex;justify-content:space-between;align-items:center}
   .event-list::-webkit-scrollbar{width:3px}
   .event-list::-webkit-scrollbar-thumb{background:var(--border)}
   .event-item{display:flex;gap:8px;align-items:flex-start;padding:5px 8px;border-radius:6px;font-size:11px;border-left:3px solid var(--border)}
@@ -1167,15 +1171,23 @@ function initInlineChart(sess) {
     grid: { vertLines: { color: 'rgba(42,53,96,0.25)' }, horzLines: { color: 'rgba(42,53,96,0.25)' } },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
     rightPriceScale: { borderColor: '#2a3560', visible: true, minimumWidth: 60 },
-    timeScale: { borderColor: '#2a3560', timeVisible: true, fixLeftEdge: false },
-    handleScroll: { mouseWheel: false, pressedMouseMove: true, horzTouchDrag: true },
-    handleScale: { mouseWheel: false, pinch: true },
+    timeScale: {
+      borderColor: '#2a3560', timeVisible: true,
+      fixLeftEdge: false, fixRightEdge: true,   // keep latest candle pinned to right edge
+      lockVisibleTimeRangeOnResize: true,
+    },
+    // Disable ALL scroll/scale on inline chart — prevents accidental drift on touch
+    handleScroll: false,
+    handleScale: false,
   });
   const ls = ch.addLineSeries({ color: '#00e5ff', lineWidth: 2,
     priceFormat: { type: 'price', precision: 4, minMove: 0.0001 } });
 
   const ro = new ResizeObserver(() => {
-    if (container.clientWidth > 0) ch.applyOptions({ width: container.clientWidth });
+    if (container.clientWidth > 0) {
+      ch.applyOptions({ width: container.clientWidth });
+      ch.timeScale().fitContent();   // re-fit after every resize
+    }
   });
   ro.observe(container);
 
@@ -1208,6 +1220,8 @@ async function loadInlineChartData(sess) {
     if (!data.length) return;
 
     entry.line.setData(data);
+    // Always show the rightmost (latest) data point — no drift
+    entry.chart.timeScale().fitContent();
 
     // Extract current price from last chart data point
     const lastPrice = data[data.length - 1]?.value;
@@ -1652,6 +1666,9 @@ function renderDrawer(sess, isFirstRender = false, scrollOpts = {}) {
           <span class="event-type-tag ${e.type}">${e.type}</span>
           <span class="event-msg">${escHtml(e.message || '')}</span>
         </div>`).join('');
+  const eventsCountBar = events.length > 0
+    ? `<div class="events-count-bar"><span>Всего событий: <b style="color:var(--accent)">${events.length}</b></span><span>↕ скролл</span></div>`
+    : '';
 
   // -- LOGS --
   const logsText = events.map(e => `[${fmtDateTime(e.timestamp)}] [${e.type}] ${e.message || ''}`).join('\n');
@@ -1666,7 +1683,7 @@ function renderDrawer(sess, isFirstRender = false, scrollOpts = {}) {
   content.innerHTML =
     makeCollapsible('📊 СТАТУС', statusHtml, 'status', true) +
     makeCollapsible('⚙️ ПАРАМЕТРЫ', paramsBodyHtml, 'params', false, true) +
-    makeCollapsible(`📋 СОБЫТИЯ (${events.length})`, `<div class="event-list" id="evt-list-inner">${eventsHtml}</div>`, 'events', true, true) +
+    makeCollapsible(`📋 СОБЫТИЯ (${events.length})`, `${eventsCountBar}<div class="events-scroll-wrap" id="evt-scroll-wrap"><div class="event-list" id="evt-list-inner">${eventsHtml}</div></div>`, 'events', true, false) +
     makeCollapsible('📄 ЛОГИ И ЭКСПОРТ', logsBodyHtml, 'logs', false, true);
 
   // Restore scroll
@@ -1675,8 +1692,8 @@ function renderDrawer(sess, isFirstRender = false, scrollOpts = {}) {
   // Scroll to events/logs if new data
   if (scrollOpts.scrollToEvents) {
     setTimeout(() => {
-      const evSec = document.getElementById('sec-events');
-      if (evSec && _drawerState.open.has('events')) evSec.scrollTop = evSec.scrollHeight;
+      const evWrap = document.getElementById('evt-scroll-wrap');
+      if (evWrap) evWrap.scrollTop = 0; // newest is at top
       const logSec = document.getElementById('sec-logs');
       if (logSec && _drawerState.open.has('logs')) logSec.scrollTop = logSec.scrollHeight;
     }, 60);
