@@ -176,24 +176,37 @@ public class TradingSessionManager {
     // ---- Event logging ----
 
     public static void logEventFromCurrentThread(String message) {
+        logTypedEventFromCurrentThread(detectEventType(message), message);
+    }
+
+    /**
+     * Log event with explicit type — bypasses keyword-based auto-detection.
+     * Use this when the message content could be misclassified (e.g., restore messages,
+     * error messages mentioning sell/buy in stack trace context).
+     */
+    public static void logTypedEventFromCurrentThread(String type, String message) {
         TradingSessionManager mgr = instance;
         if (mgr == null || message == null) return;
         String sid = mgr.threadToSession.get(Thread.currentThread().getId());
         if (sid == null) return;
         SessionInfo info = mgr.sessions.get(sid);
         if (info == null) return;
-        info.addEvent(detectEventType(message), message);
+        info.addEvent(type != null ? type : "INFO", message);
         mgr.saveSessions();
     }
 
     private static String detectEventType(String msg) {
         if (msg == null) return "INFO";
         String lower = msg.toLowerCase();
-        if (lower.contains("куп") || lower.contains("buy") || lower.contains("покупк")) return "BUY";
-        if (lower.contains("прода") || lower.contains("sell") || lower.contains("продан")) return "SELL";
-        if (lower.contains("ошибк") || lower.contains("error") || lower.contains("exception") || lower.contains("fail")) return "ERROR";
-        if (lower.contains("остановл") || lower.contains("стоп") || lower.contains("stopped")) return "STOP";
+        // Check ERROR/STOP first — if message contains stack trace or error keyword, it's an error
+        // regardless of other words in the message
+        if (lower.contains("ошибк") || lower.contains("❌ ошибка") || lower.contains("❌ error")
+                || lower.contains("exception") || lower.contains("критическ") || lower.contains("⛔")) return "ERROR";
+        if (lower.contains("остановл") || lower.contains("🛑") || lower.contains("stopped")) return "STOP";
         if (lower.contains("завершен") || lower.contains("done")) return "DONE";
+        // BUY/SELL only match explicit trading action phrases, not method names
+        if (lower.contains("✅ покупка") || lower.contains("покупка совершена") || lower.contains("покупк выполн")) return "BUY";
+        if (lower.contains("📈 продажа") || lower.contains("📉 продажа") || lower.contains("продажа в прибыль") || lower.contains("продажа в убыток")) return "SELL";
         return "INFO";
     }
 

@@ -133,6 +133,12 @@ public class TradingChart extends Application {
     }
     public static void addSellIntervalMarker(double timestamp, double price) {            //добавляем на график точку продажи (время, цена)
         addSimplePoint(timestamp,price);
+        // intervalMarker may be null after state restore — guard to avoid NPE
+        if (intervalMarker == null) {
+            intervalMarker = new IntervalMarker(timestamp, timestamp);
+            intervalMarker.setPaint(Color.decode("#F0E68C"));
+            plot.addDomainMarker(intervalMarker);
+        }
         intervalMarker.setEndValue(timestamp);
         XYTextAnnotation annotation = new XYTextAnnotation(String.valueOf(price), timestamp, price);
         annotation.setPaint(Color.BLACK);

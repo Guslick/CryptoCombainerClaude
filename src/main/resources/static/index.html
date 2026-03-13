@@ -164,20 +164,20 @@
   /* Drawer collapsible panels */
   .coll-body{display:none;padding:0 14px 12px;flex-direction:column;gap:8px}
   .coll-body.open{display:flex}
-  .coll-body.scrollable{overflow-y:auto;max-height:260px}
+  .coll-body.scrollable{overflow-y:visible;max-height:none}
   .coll-body::-webkit-scrollbar{width:3px}
   .coll-body::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
 
   /* ---- SESSION DETAIL DRAWER ---- */
-  #sessionDrawer{position:fixed;bottom:0;left:0;right:0;top:0;z-index:1000;display:none;flex-direction:column;background:var(--bg);overflow:hidden}
+  #sessionDrawer{position:fixed;bottom:0;left:0;right:0;top:0;z-index:1000;display:none;flex-direction:column;background:var(--bg);overflow:hidden;-webkit-overflow-scrolling:touch}
   #sessionDrawer.open{display:flex}
   .drawer-header{flex-shrink:0;display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--bg2);border-bottom:1px solid var(--border)}
   .drawer-title{font-family:var(--font-head);font-size:13px;font-weight:700;color:var(--accent);flex:1}
   .drawer-close{background:none;border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 12px;font-family:var(--font-head);font-size:10px;cursor:pointer}
-  .drawer-content{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:10px}
+  .drawer-content{flex:1;overflow-y:scroll;-webkit-overflow-scrolling:touch;padding:12px 12px 32px;display:flex;flex-direction:column;gap:10px}
 
   /* ---- EVENT TIMELINE ---- */
-  .event-list{display:flex;flex-direction:column;gap:4px;max-height:200px;overflow-y:auto;padding-right:4px}
+  .event-list{display:flex;flex-direction:column;gap:4px;padding-right:4px}
   .event-list::-webkit-scrollbar{width:3px}
   .event-list::-webkit-scrollbar-thumb{background:var(--border)}
   .event-item{display:flex;gap:8px;align-items:flex-start;padding:5px 8px;border-radius:6px;font-size:11px;border-left:3px solid var(--border)}
@@ -201,7 +201,7 @@
   .logs-toggle-arrow.open{transform:rotate(180deg)}
   .logs-body{display:none;flex-direction:column;gap:6px}
   .logs-body.open{display:flex}
-  .logs-body.scrollable{overflow-y:auto;max-height:260px}
+  .logs-body.scrollable{overflow-y:visible;max-height:none}
   .logs-body.scrollable::-webkit-scrollbar{width:3px}
   .logs-body.scrollable::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
   .logs-textarea{background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--muted);font-family:monospace;font-size:10px;padding:10px;height:160px;resize:none;overflow-y:auto;width:100%;outline:none;line-height:1.5}
@@ -1186,11 +1186,22 @@ function initInlineChart(sess) {
   startChartTimer(sess.id, refreshSec);
 }
 
+function getChartIntervalForSession(sess) {
+  // Choose interval based on how old the session is
+  const now = Date.now();
+  const age = now - (sess.startedAt || now);
+  const hours = age / 3600000;
+  if (hours > 168) return '30d';   // > 1 week → 30d
+  if (hours > 48)  return '7d';    // > 2 days → 7d
+  return '1d';                     // default: 1d (5-min resolution)
+}
+
 async function loadInlineChartData(sess) {
   const entry = inlineCharts[sess.id];
   if (!entry) return;
   try {
-    const r = await fetch(`${API_BASE}/api/chart/${encodeURIComponent(sess.coinName)}?interval=1d`);
+    const interval = getChartIntervalForSession(sess);
+    const r = await fetch(`${API_BASE}/api/chart/${encodeURIComponent(sess.coinName)}?interval=${interval}`);
     const json = await r.json();
     if (json.error || !json.data) return;
     const data = dedupeChartData(json.data);
@@ -1253,24 +1264,50 @@ function applyChartPriceLines(lineSeries, linesArr, live) {
   }
 }
 
-/** Apply BUY (circle dot below bar) and SELL (circle dot above bar) markers,
- *  keeping all historical ones regardless of current trading state. */
+/** Apply BUY/SELL markers snapped to nearest chart data point.
+ *  Only circle shape — no text labels. */
 function applyChartMarkers(lineSeries, data, events) {
-  if (!events.length) return;
+  if (!events.length || !data.length) return;
   const times = data.map(d => d.time);
-  const minT = Math.min(...times), maxT = Math.max(...times);
+  const minT = times[0], maxT = times[times.length - 1];
+
+  // Build a sorted array of chart times for binary-search snap
+  const sortedTimes = [...times].sort((a, b) => a - b);
+  function snapToNearest(t) {
+    let lo = 0, hi = sortedTimes.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (sortedTimes[mid] < t) lo = mid + 1;
+      else hi = mid;
+    }
+    // Compare with previous
+    if (lo > 0 && Math.abs(sortedTimes[lo-1] - t) < Math.abs(sortedTimes[lo] - t)) return sortedTimes[lo-1];
+    return sortedTimes[lo];
+  }
+
+  const seen = new Set();
   const markers = events
     .filter(e => e.type === 'BUY' || e.type === 'SELL')
-    .map(e => ({
-      time: Math.floor(e.timestamp / 1000),
-      position: e.type === 'BUY' ? 'belowBar' : 'aboveBar',
-      color: e.type === 'BUY' ? PC.buy : PC.sold,
-      shape: 'circle',
-      text: e.type === 'BUY' ? '▲' : '▼',
-    }))
+    .map(e => {
+      const rawT = Math.floor(e.timestamp / 1000);
+      const snappedT = snapToNearest(rawT);
+      return {
+        time: snappedT,
+        position: e.type === 'BUY' ? 'belowBar' : 'aboveBar',
+        color: e.type === 'BUY' ? PC.buy : PC.sold,
+        shape: 'circle',
+        text: '',   // no text label — shape only
+      };
+    })
     .filter(m => m.time >= minT && m.time <= maxT)
-    // dedupe by time+type
-    .sort((a, b) => a.time - b.time);
+    .sort((a, b) => a.time - b.time)
+    .filter(m => {
+      const key = m.time + m.position;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
   if (markers.length) lineSeries.setMarkers(markers);
 }
 
@@ -1313,7 +1350,8 @@ function openFullscreenChart(sessionId, coinName) {
 
 async function loadInlineChartDataInto(sess, lineSeries, chart) {
   try {
-    const r = await fetch(`${API_BASE}/api/chart/${encodeURIComponent(sess.coinName)}?interval=1d`);
+    const interval = getChartIntervalForSession(sess);
+    const r = await fetch(`${API_BASE}/api/chart/${encodeURIComponent(sess.coinName)}?interval=${interval}`);
     const json = await r.json();
     if (json.error || !json.data) return;
     const data = dedupeChartData(json.data);
