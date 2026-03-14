@@ -204,10 +204,23 @@ public class MiniAppServer {
             UserProfileManager upm = UserProfileManager.getInstance();
             Map<String, Object> tgUser = null;
 
-            // Mode 1: Telegram WebApp initData
+            // Mode 1: Telegram WebApp initData (verified)
             String initData = (String) body.get("initData");
             if (initData != null && !initData.isBlank()) {
                 tgUser = upm.verifyInitData(initData, botToken);
+            }
+
+            // Mode 1b: Telegram WebApp unsafe fallback (some clients provide empty initData)
+            // Controlled by config: telegram.webapp.unsafe.auth.enabled=true|false
+            if (tgUser == null && AppConfig.getInstance().isUnsafeTelegramWebAppAuthEnabled()) {
+                Object unsafeUserObj = body.get("unsafeUser");
+                if (unsafeUserObj instanceof Map) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> unsafeUser = (Map<String, Object>) unsafeUserObj;
+                    if (unsafeUser.get("id") != null) {
+                        tgUser = new java.util.HashMap<>(unsafeUser);
+                    }
+                }
             }
 
             // Mode 2: Telegram Login Widget data (browser)

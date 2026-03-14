@@ -65,6 +65,10 @@ public class AppConfig {
         try { return Integer.parseInt(v); } catch (NumberFormatException e) { return defaultValue; }
     }
 
+    public boolean getBoolean(String key, boolean defaultValue) {
+        return Boolean.parseBoolean(get(key, String.valueOf(defaultValue)));
+    }
+
     // ---- Удобные методы доступа к конкретным параметрам ----
 
     public String getBotToken() {
@@ -162,5 +166,9 @@ public class AppConfig {
 
     public boolean isWebServerEnabled() {
         return Boolean.parseBoolean(get("web.server.enabled", "true"));
+    }
+
+    public boolean isUnsafeTelegramWebAppAuthEnabled() {
+        return getBoolean("telegram.webapp.unsafe.auth.enabled", true);
     }
 }

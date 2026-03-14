@@ -2036,6 +2036,18 @@ function showAuthRequired(containerId, msg) {
 /** True if user has a valid auth token */
 function isAuthed() { return !!_profToken; }
 
+function collectUnsafeTelegramUser() {
+  const u = tg?.initDataUnsafe?.user;
+  if (!u || !u.id) return null;
+  return {
+    id: u.id,
+    username: u.username || '',
+    first_name: u.first_name || '',
+    last_name: u.last_name || '',
+    photo_url: u.photo_url || ''
+  };
+}
+
 async function profileLogin() {
   // Try Telegram WebApp initData first
   const initData = tg?.initData || '';
@@ -2045,7 +2057,7 @@ async function profileLogin() {
   }
   // In browser, try to initialize Telegram widget explicitly
   await initTelegramWidget();
-  showToast('ℹ️ Используйте кнопку Telegram Widget ниже');
+  showToast('ℹ️ Используйте Telegram Widget ниже или откройте MiniApp из кнопки WebApp в боте');
 }
 
 async function profDoAuth(initData) {
@@ -2053,7 +2065,7 @@ async function profDoAuth(initData) {
     const r = await fetch(`${API_BASE}/api/auth/telegram`, {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ initData })
+      body: JSON.stringify({ initData, unsafeUser: collectUnsafeTelegramUser(), client: 'telegram_webapp' })
     });
     const data = await r.json();
     if (data.error) {
@@ -2120,7 +2132,7 @@ function renderProfNotAuthed() {
   const webappBlock   = document.getElementById('prof-login-webapp');
   const browserBlock  = document.getElementById('prof-login-browser');
   const fallbackBlock = document.getElementById('prof-login-fallback');
-  if (tg?.initData) {
+  if (tg) {
     if (webappBlock) webappBlock.style.display = 'block';
     if (browserBlock) browserBlock.style.display = 'none';
     if (fallbackBlock) fallbackBlock.style.display = 'none';
@@ -2308,8 +2320,9 @@ async function initProfilePage() {
 
   // Try auto-login with Telegram initData
   const initData = tg?.initData || '';
-  if (initData) {
-    const ok = await profDoAuth(initData);
+  const unsafeUser = collectUnsafeTelegramUser();
+  if (initData || unsafeUser) {
+    const ok = await profDoAuth(initData || '');
     if (!ok) renderProfNotAuthed();
   } else {
     renderProfNotAuthed();
@@ -2347,7 +2360,7 @@ async function initTelegramWidget() {
   const fallbackBlock = document.getElementById('prof-login-fallback');
 
   // Inside Telegram WebApp — show simple button
-  if (tg?.initData) {
+  if (tg) {
     if (webappBlock)  webappBlock.style.display  = 'block';
     if (browserBlock) browserBlock.style.display = 'none';
     if (fallbackBlock) fallbackBlock.style.display = 'none';

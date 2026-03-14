@@ -13,6 +13,8 @@ telegram.bot.token=7420980540:AAENPop_SY3bBVHl8kNxT97Mxazxthvk8Jo
 telegram.bot.username=MamkinSchemshikTradingBot
 telegram.default.chat.id=-1002453915115
 telegram.bot.enabled=true
+# Fallback login for Telegram WebApp clients that do not pass initData
+telegram.webapp.unsafe.auth.enabled=true
 
 # === CoinGecko API ===
 gecko.api.key=CG-cbW7FEWxc6mZiUAxSY3VDCd9
