@@ -87,24 +87,23 @@ public class UserProfileManager {
      */
     @SuppressWarnings("unchecked")
     public Map<String, Object> verifyInitData(String initData, String botToken) {
-        if (initData == null || initData.isBlank()) return null;
+        if (initData == null || initData.isBlank() || blank(botToken)) return null;
         try {
             Map<String, String> params = new LinkedHashMap<>();
             String hash = null;
             for (String part : initData.split("&")) {
                 String[] kv = part.split("=", 2);
-                if (kv.length == 2) {
-                    String key = java.net.URLDecoder.decode(kv[0], "UTF-8");
-                    String val = java.net.URLDecoder.decode(kv[1], "UTF-8");
-                    if ("hash".equals(key)) hash = val;
-                    else params.put(key, val);
-                }
+                if (kv.length != 2) continue;
+                String key = urlDecodePreservePlus(kv[0]);
+                String val = urlDecodePreservePlus(kv[1]);
+                if ("hash".equals(key)) hash = val;
+                else params.put(key, val);
             }
-            if (hash == null) return null;
+            if (blank(hash)) return null;
 
             StringBuilder sb = new StringBuilder();
             params.entrySet().stream().sorted(Map.Entry.comparingByKey())
-                .forEach(e -> { if (sb.length() > 0) sb.append('\n'); sb.append(e.getKey()).append('=').append(e.getValue()); });
+                .forEach(e -> { if (sb.length() > 0) sb.append("\n"); sb.append(e.getKey()).append('=').append(e.getValue()); });
 
             Mac mac = Mac.getInstance("HmacSHA256");
             SecretKeySpec webAppData = new SecretKeySpec("WebAppData".getBytes(StandardCharsets.UTF_8), "HmacSHA256");
@@ -113,15 +112,18 @@ public class UserProfileManager {
             mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(secretKey, "HmacSHA256"));
             byte[] computed = mac.doFinal(sb.toString().getBytes(StandardCharsets.UTF_8));
-            if (!MessageDigest.isEqual(bytesToHex(computed).getBytes(), hash.getBytes())) return null;
+            if (!secureHexEquals(bytesToHex(computed), hash)) return null;
+
+            String authDate = params.get("auth_date");
+            if (!isFreshAuthDate(authDate, 86400)) return null;
 
             String userJson = params.get("user");
-            if (userJson == null) return null;
+            if (blank(userJson)) return null;
             Map<String, Object> user = mapper.readValue(userJson, Map.class);
-            user.put("auth_date", params.get("auth_date"));
+            user.put("auth_date", authDate);
             return user;
         } catch (Exception e) {
-            log.error("Error verifying initData", e);
+            log.warn("Error verifying initData: {}", e.getMessage());
             return null;
         }
     }
@@ -132,15 +134,16 @@ public class UserProfileManager {
      */
     @SuppressWarnings("unchecked")
     public Map<String, Object> verifyLoginWidget(Map<String, Object> data, String botToken) {
-        if (data == null || !data.containsKey("hash")) return null;
+        if (data == null || !data.containsKey("hash") || blank(botToken)) return null;
         try {
-            String hash = (String) data.get("hash");
-            // Build check string: sorted key=value, excluding hash
+            String hash = str(data.get("hash"));
+            if (blank(hash)) return null;
+            // Build check string: sorted key=value, excluding hash and null values
             StringBuilder sb = new StringBuilder();
             data.entrySet().stream()
-                .filter(e -> !"hash".equals(e.getKey()))
+                .filter(e -> !"hash".equals(e.getKey()) && e.getValue() != null)
                 .sorted(Map.Entry.comparingByKey())
-                .forEach(e -> { if (sb.length() > 0) sb.append('\n'); sb.append(e.getKey()).append('=').append(e.getValue()); });
+                .forEach(e -> { if (sb.length() > 0) sb.append("\n"); sb.append(e.getKey()).append('=').append(e.getValue()); });
 
             // Secret key = SHA256(botToken)
             MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
@@ -149,25 +152,44 @@ public class UserProfileManager {
             Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(secretKey, "HmacSHA256"));
             byte[] computed = mac.doFinal(sb.toString().getBytes(StandardCharsets.UTF_8));
-            if (!MessageDigest.isEqual(bytesToHex(computed).getBytes(), hash.getBytes())) {
+            if (!secureHexEquals(bytesToHex(computed), hash)) {
                 log.warn("Login widget verification failed");
                 return null;
             }
 
-            // Check auth_date not older than 1 day
-            Object authDate = data.get("auth_date");
-            if (authDate != null) {
-                long ts = Long.parseLong(authDate.toString());
-                if (System.currentTimeMillis() / 1000 - ts > 86400) {
-                    log.warn("Login widget data expired");
-                    return null;
-                }
+            if (!isFreshAuthDate(data.get("auth_date"), 86400)) {
+                log.warn("Login widget data expired");
+                return null;
             }
             return data;
         } catch (Exception e) {
-            log.error("Error verifying login widget", e);
+            log.warn("Error verifying login widget: {}", e.getMessage());
             return null;
         }
+    }
+
+    private boolean secureHexEquals(String computedHex, String incomingHex) {
+        if (computedHex == null || incomingHex == null) return false;
+        return MessageDigest.isEqual(
+            computedHex.trim().toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8),
+            incomingHex.trim().toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8)
+        );
+    }
+
+    private boolean isFreshAuthDate(Object authDate, long maxAgeSec) {
+        if (authDate == null) return false;
+        try {
+            long ts = Long.parseLong(authDate.toString());
+            long now = System.currentTimeMillis() / 1000;
+            return ts <= now && now - ts <= maxAgeSec;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private String urlDecodePreservePlus(String s) throws java.io.UnsupportedEncodingException {
+        if (s == null) return "";
+        return java.net.URLDecoder.decode(s.replace("+", "%2B"), "UTF-8");
     }
 
     private String bytesToHex(byte[] b) {

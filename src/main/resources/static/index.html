@@ -33,6 +33,7 @@
   .tab{flex-shrink:0;padding:8px 14px;font-family:var(--font-head);font-size:10px;font-weight:600;letter-spacing:0.5px;color:var(--muted);border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;transition:all 0.2s;display:flex;align-items:center;gap:5px}
   .tab.active{color:var(--accent);border-bottom-color:var(--accent)}
   .tab:hover:not(.active){color:var(--text)}
+  .tab.locked{opacity:.45;pointer-events:none;filter:grayscale(.4)}
   .content{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;padding:12px;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
   .content::-webkit-scrollbar{width:4px}
   .content::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
@@ -665,8 +666,24 @@ async function checkHealth() {
 // NAVIGATION
 // ============================================================
 const AUTH_REQUIRED_PAGES = new Set(['trade', 'research', 'backtest', 'sessions']);
+const PUBLIC_PAGES = new Set(['dashboard', 'chart', 'profile']);
+
+function refreshTabAccess() {
+  document.querySelectorAll('.tab').forEach(tab => {
+    const id = (tab.id || '').replace('tab-', '');
+    const isPublic = PUBLIC_PAGES.has(id);
+    const shouldLock = !isAuthed() && !isPublic;
+    tab.classList.toggle('locked', shouldLock);
+    if (shouldLock) {
+      tab.title = 'Доступно после авторизации';
+    } else {
+      tab.removeAttribute('title');
+    }
+  });
+}
 
 function showPage(pageId) {
+  refreshTabAccess();
   // Auth gate — protected pages require login
   if (AUTH_REQUIRED_PAGES.has(pageId) && !isAuthed()) {
     // Activate the page so the lock screen shows
@@ -2042,6 +2059,7 @@ async function profDoAuth(initData) {
     _profToken = data.token;
     try { localStorage.setItem('cc_prof_token', _profToken); } catch(e) {}
     renderProfAuthed(data);
+    refreshTabAccess();
     await profLoadKeys();
     showToast('✅ Авторизован как ' + (data.telegramFirstName || data.telegramUsername || 'пользователь'));
     // Refresh any protected page that may be currently shown
@@ -2056,6 +2074,7 @@ function profileLogout() {
   _profToken = null;
   try { localStorage.removeItem('cc_prof_token'); } catch(e) {}
   renderProfNotAuthed();
+  refreshTabAccess();
   showToast('Выход выполнен');
   // Clear session data and redirect to safe page
   _sessionsData = {};
@@ -2081,6 +2100,7 @@ function renderProfAuthed(profile) {
 
 function renderProfNotAuthed() {
   document.getElementById('prof-not-authed').style.display = 'block';
+  refreshTabAccess();
   document.getElementById('prof-authed').style.display = 'none';
   document.getElementById('prof-keys-card').style.display = 'none';
   document.getElementById('prof-wallet-card').style.display = 'none';
@@ -2252,6 +2272,7 @@ async function initProfilePage() {
       const data = await r.json();
       if (!data.error) {
         renderProfAuthed(data);
+        refreshTabAccess();
         await profLoadKeys();
         return;
       }
@@ -2406,6 +2427,7 @@ async function initProfilePage() {
 (async function init() {
   restoreFields();
   updateTradeForm();
+  refreshTabAccess();
   const ok = await checkHealth();
   if (!ok) {
     document.getElementById('tickerGrid').innerHTML='<div style="grid-column:1/-1;" class="alert alert-error">❌ Сервер недоступен</div>';

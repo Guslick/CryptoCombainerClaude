@@ -10,6 +10,7 @@
 
 # === Telegram Bot ===
 telegram.bot.token=7420980540:AAENPop_SY3bBVHl8kNxT97Mxazxthvk8Jo
+telegram.bot.username=MamkinSchemshikTradingBot
 telegram.default.chat.id=-1002453915115
 telegram.bot.enabled=true
 

@@ -198,6 +198,9 @@ public class MiniAppServer {
             if (!"POST".equals(exchange.getRequestMethod())) return errorMap("POST required");
             Map<String, Object> body = parseBody(exchange);
             String botToken = ton.dariushkmetsyak.Config.AppConfig.getInstance().getBotToken();
+            if (botToken == null || botToken.isBlank() || "YOUR_BOT_TOKEN_HERE".equals(botToken)) {
+                return errorMap("Бот не настроен: укажите telegram.bot.token в config.properties");
+            }
             UserProfileManager upm = UserProfileManager.getInstance();
             Map<String, Object> tgUser = null;
 
@@ -218,7 +221,7 @@ public class MiniAppServer {
                 if ("dev_bypass".equals(initData) && (host.startsWith("127.") || host.startsWith("::1"))) {
                     tgUser = new java.util.HashMap<>(Map.of("id", 0L, "first_name", "Dev", "username", "dev"));
                 } else {
-                    return errorMap("Ошибка авторизации Telegram");
+                    return errorMap("Ошибка авторизации Telegram: проверьте telegram.bot.token и telegram.bot.username");
                 }
             }
 
