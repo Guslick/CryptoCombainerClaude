@@ -1,17 +1,11 @@
 package ton.dariushkmetsyak.Graphics.DrawTradingChart;
 
 import ExecPack.App;
-import javafx.application.Application;
-import javafx.application.Platform;
-import javafx.scene.Scene;
-import javafx.scene.layout.BorderPane;
-import javafx.stage.Stage;
 import org.jfree.chart.ChartFactory;
 import org.jfree.chart.ChartUtils;
 import org.jfree.chart.JFreeChart;
 import org.jfree.chart.annotations.XYShapeAnnotation;
 import org.jfree.chart.annotations.XYTextAnnotation;
-import org.jfree.chart.fx.ChartViewer;
 import org.jfree.chart.plot.IntervalMarker;
 import org.jfree.chart.plot.ValueMarker;
 import org.jfree.chart.plot.XYPlot;
@@ -34,7 +28,7 @@ import java.util.Date;
 import java.util.concurrent.TimeUnit;
 
 
-public class TradingChart extends Application {
+public class TradingChart {
     // ── Per-thread chart state via ThreadLocal ────────────────────────────────
     // Each trading thread gets an isolated chart instance so multiple users
     // can trade simultaneously without charts interfering with each other.
@@ -200,26 +194,16 @@ public class TradingChart extends Application {
         intervalMarker = null;
     }
 
-    public static void drawChart (Chart chart){
-        TradingChart.chart.setTitle(chart.getCoinName());
-        for (double[] priceTimestamp: chart.getPrices()){
+    public static void drawChart (Chart chartData){
+        TradingChart.chart.setTitle(chartData.getCoinName());
+        for (double[] priceTimestamp: chartData.getPrices()){
             TradingChart.addSimplePoint(priceTimestamp[0],priceTimestamp[1]);
         }
     }
-    public static void drawChart (ArrayList<double[]> chart, String chartTitle){
+    public static void drawChart (ArrayList<double[]> chartData, String chartTitle){
         TradingChart.chart.setTitle(chartTitle);
-        for (double[] priceTimestamp: chart){
+        for (double[] priceTimestamp: chartData){
             TradingChart.addSimplePriceMarker(priceTimestamp[0],priceTimestamp[1]);
         }
-    }
-        @Override
-    public void start(Stage stage) throws Exception {
-        BorderPane root = new BorderPane();
-        root.setCenter(chartViewer);
-        Scene scene = new Scene(root, 1920, 1080);
-        stage.setTitle("Title");
-        stage.setScene(scene);
-//        TimeUnit.SECONDS.sleep(10);
-//        stage.show();
     }
 }

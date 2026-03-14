@@ -57,7 +57,7 @@ public class StateManager {
     public synchronized void saveState(TradingState state) {
         if (state == null) return;
         try {
-            String path = getStatePath(state.getSessionId());
+            String path = getPath(state.getSessionId());
             File existing = new File(path);
             if (existing.exists()) rotateBackups(path);
             state.saveToFile(path);
@@ -69,7 +69,7 @@ public class StateManager {
     }
 
     public TradingState loadState(String sessionId) {
-        String path = getStatePath(sessionId);
+        String path = getPath(sessionId);
         if (!new File(path).exists()) return null;
         try {
             TradingState state = TradingState.loadFromFile(path);
@@ -83,11 +83,11 @@ public class StateManager {
     }
 
     public boolean hasState(String sessionId) {
-        return new File(getStatePath(sessionId)).exists();
+        return new File(getPath(sessionId)).exists();
     }
 
     public void deleteState(String sessionId) {
-        String path = getStatePath(sessionId);
+        String path = getPath(sessionId);
         new File(path).delete();
         File dir = new File(baseDir);
         String prefix = sessionId + ".json.bak.";

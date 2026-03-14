@@ -490,7 +490,7 @@ public class TradingSessionManager {
         SessionInfo info = sessions.get(sessionId);
         if (info == null) return Map.of("error", "Сессия не найдена");
         if ("RUNNING".equals(info.status)) return Map.of("error", "Сессия уже запущена");
-        if (hasActiveSessionForUser(info.ownerId)) return Map.of("error", "Уже есть активная сессия");
+        if (hasActiveSession()) return Map.of("error", "Уже есть активная сессия");
         if (info.type == SessionType.BACKTEST) return Map.of("error", "Бэктест нельзя возобновить");
 
         TradingState savedState = loadTradingState(sessionId);
