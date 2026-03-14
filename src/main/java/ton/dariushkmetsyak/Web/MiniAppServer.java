@@ -151,6 +151,107 @@ public class MiniAppServer {
             });
         });
 
+        // ---- Profile / Auth / Keys ----
+
+        server.createContext("/api/auth/telegram", exchange -> handleJson(exchange, () -> {
+            if (!"POST".equals(exchange.getRequestMethod())) return errorMap("POST required");
+            Map<String, Object> body = parseBody(exchange);
+            String initData = (String) body.get("initData");
+            String botToken = ton.dariushkmetsyak.Config.AppConfig.getInstance().getBotToken();
+            UserProfileManager upm = UserProfileManager.getInstance();
+            Map<String, Object> tgUser = upm.verifyInitData(initData, botToken);
+            if (tgUser == null) {
+                String host = exchange.getRemoteAddress().getAddress().getHostAddress();
+                if (!"dev_bypass".equals(initData) || (!host.startsWith("127.") && !host.startsWith("::1"))) {
+                    return errorMap("Ошибка авторизации Telegram");
+                }
+                tgUser = new java.util.HashMap<>(Map.of("id", 0L, "first_name", "Dev", "username", "dev"));
+            }
+            UserProfileManager.UserProfile profile = upm.updateFromTelegram(tgUser);
+            String token = upm.createSession(profile.telegramUserId);
+            Map<String, Object> resp = new LinkedHashMap<>(profile.toPublicMap());
+            resp.put("token", token);
+            return resp;
+        }));
+
+        server.createContext("/api/profile", exchange -> handleJson(exchange, () -> {
+            Long userId = resolveUser(exchange);
+            if (userId == null) return errorMap("Требуется авторизация");
+            if ("POST".equals(exchange.getRequestMethod())) {
+                Map<String, Object> body = parseBody(exchange);
+                UserProfileManager upm = UserProfileManager.getInstance();
+                UserProfileManager.UserProfile p = upm.loadProfile(userId);
+                if (p == null) return errorMap("Профиль не найден");
+                if (body.containsKey("telegramFirstName")) p.telegramFirstName = (String) body.get("telegramFirstName");
+                upm.saveProfile(p);
+                return p.toPublicMap();
+            }
+            UserProfileManager.UserProfile p = UserProfileManager.getInstance().loadProfile(userId);
+            return p != null ? p.toPublicMap() : errorMap("Профиль не найден");
+        }));
+
+        server.createContext("/api/profile/keys", exchange -> handleJson(exchange, () -> {
+            Long userId = resolveUser(exchange);
+            if (userId == null) return errorMap("Требуется авторизация");
+            if ("POST".equals(exchange.getRequestMethod())) {
+                Map<String, Object> body = parseBody(exchange);
+                boolean testnet = Boolean.TRUE.equals(body.get("testnet"));
+                return UserProfileManager.getInstance().updateBinanceKeys(userId, body, testnet);
+            }
+            return UserProfileManager.getInstance().getBinanceKeysStatus(userId);
+        }));
+
+        server.createContext("/api/profile/report", exchange -> handleJson(exchange, () -> {
+            Long userId = resolveUser(exchange);
+            if (userId == null) return errorMap("Требуется авторизация");
+            return UserProfileManager.getInstance().getTradingReport(userId);
+        }));
+
+        server.createContext("/api/profile/wallet", exchange -> handleJson(exchange, () -> {
+            Long userId = resolveUser(exchange);
+            if (userId == null) return errorMap("Требуется авторизация");
+            UserProfileManager upm = UserProfileManager.getInstance();
+            UserProfileManager.UserProfile profile = upm.loadProfile(userId);
+            if (profile == null) return errorMap("Профиль не найден");
+            Map<String, Object> result = new LinkedHashMap<>();
+            if (profile.binanceApiKey != null && !profile.binanceApiKey.isBlank()
+                    && profile.binancePrivKeyPath != null && !profile.binancePrivKeyPath.isBlank()) {
+                try {
+                    char[] apiKey = profile.binanceApiKey.toCharArray();
+                    char[] privKey = ton.dariushkmetsyak.Config.AppConfig.getInstance()
+                        .resolvePrivateKeyPath(profile.binancePrivKeyPath).toCharArray();
+                    ton.dariushkmetsyak.TradingApi.ApiService.Account acc =
+                        ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder.createNewBinance(
+                            apiKey, privKey,
+                            ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder.BINANCE_BASE_URL.MAINNET);
+                    result.put("mainnet", acc.wallet().getAllAssets().toString());
+                } catch (Exception e) { result.put("mainnet_error", "Ошибка: " + e.getMessage()); }
+            }
+            if (profile.binanceTestApiKey != null && !profile.binanceTestApiKey.isBlank()
+                    && profile.binanceTestPrivKeyPath != null && !profile.binanceTestPrivKeyPath.isBlank()) {
+                try {
+                    char[] apiKey = profile.binanceTestApiKey.toCharArray();
+                    char[] privKey = ton.dariushkmetsyak.Config.AppConfig.getInstance()
+                        .resolvePrivateKeyPath(profile.binanceTestPrivKeyPath).toCharArray();
+                    ton.dariushkmetsyak.TradingApi.ApiService.Account acc =
+                        ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder.createNewBinance(
+                            apiKey, privKey,
+                            ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder.BINANCE_BASE_URL.TESTNET);
+                    result.put("testnet", acc.wallet().getAllAssets().toString());
+                } catch (Exception e) { result.put("testnet_error", "Ошибка: " + e.getMessage()); }
+            }
+            java.util.List<Map<String, Object>> running = TradingSessionManager.getInstance().getAllSessions()
+                .stream().filter(s -> "RUNNING".equals(s.get("status")))
+                .map(s -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("id", s.get("id")); m.put("coin", s.get("coinName"));
+                    m.put("coinBalance", s.get("coinBalance")); m.put("usdtBalance", s.get("usdtBalance"));
+                    return m;
+                }).collect(java.util.stream.Collectors.toList());
+            result.put("active_sessions", running);
+            return result;
+        }));
+
         server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
         server.start();
         log.info("🚀 MiniApp сервер запущен на порту {}", port);
@@ -334,6 +435,18 @@ public class MiniAppServer {
 
     private Map<String, Object> errorMap(String msg) {
         return Map.of("error", msg != null ? msg : "Неизвестная ошибка");
+    }
+
+    /** Extract bearer token from Authorization header or query param, resolve userId */
+    private Long resolveUser(com.sun.net.httpserver.HttpExchange exchange) {
+        String auth = exchange.getRequestHeaders().getFirst("Authorization");
+        String token = null;
+        if (auth != null && auth.startsWith("Bearer ")) {
+            token = auth.substring(7).trim();
+        } else {
+            token = getQueryParam(exchange.getRequestURI().getQuery(), "token");
+        }
+        return UserProfileManager.getInstance().resolveSession(token);
     }
 
     private double toDouble(Object val, double def) {

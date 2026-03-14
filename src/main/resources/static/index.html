@@ -243,6 +243,7 @@
     <button class="tab" onclick="showPage('research')" id="tab-research">🔬 ИССЛ.</button>
     <button class="tab" onclick="showPage('backtest')" id="tab-backtest">🧪 БЭКТЕСТ</button>
     <button class="tab" onclick="showPage('sessions')" id="tab-sessions">🎮 СЕССИИ</button>
+    <button class="tab" onclick="showPage('profile')" id="tab-profile">👤 КАБИНЕТ</button>
   </div>
   <div class="content" id="mainContent">
 
@@ -480,6 +481,67 @@
       <button class="btn btn-danger" onclick="stopAllTrading()" style="margin-top:4px;">■ ОСТАНОВИТЬ ВСЕ</button>
     </div>
 
+    <!-- PROFILE / CABINET -->
+    <div class="page" id="page-profile">
+
+      <div class="card" id="prof-auth-card">
+        <div class="card-title">👤 ЛИЧНЫЙ КАБИНЕТ</div>
+        <div id="prof-not-authed">
+          <div style="color:var(--muted);font-size:12px;margin-bottom:14px;line-height:1.6">Авторизуйтесь через Telegram для доступа к настройкам API ключей и истории торговли.</div>
+          <button class="btn btn-primary" onclick="profileLogin()" style="width:100%">🔑 Войти через Telegram</button>
+        </div>
+        <div id="prof-authed" style="display:none">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+            <div id="prof-avatar-wrap" style="width:48px;height:48px;border-radius:50%;background:var(--bg3);border:2px solid var(--accent);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;overflow:hidden">👤</div>
+            <div style="min-width:0">
+              <div id="prof-name" style="font-family:var(--font-head);font-size:13px;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+              <div id="prof-username" style="font-size:11px;color:var(--muted);margin-top:2px"></div>
+            </div>
+            <button class="btn btn-sm" style="margin-left:auto;flex-shrink:0;background:rgba(255,23,68,0.15);color:var(--red);border:1px solid rgba(255,23,68,0.3)" onclick="profileLogout()">Выйти</button>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">
+            <span id="prof-key-badge-main" style="display:none;background:rgba(0,230,118,0.15);color:var(--green);border:1px solid rgba(0,230,118,0.3);padding:3px 8px;border-radius:4px;font-size:10px;font-family:var(--font-head)">✅ MAINNET</span>
+            <span id="prof-key-badge-test" style="display:none;background:rgba(0,229,255,0.1);color:var(--accent);border:1px solid rgba(0,229,255,0.2);padding:3px 8px;border-radius:4px;font-size:10px;font-family:var(--font-head)">✅ TESTNET</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="prof-keys-card" style="display:none">
+        <div class="card-title">🔑 BINANCE API КЛЮЧИ</div>
+        <div style="display:flex;gap:6px;margin-bottom:14px">
+          <button class="btn btn-sm" id="prof-net-test-btn" onclick="profSelectNet('test')" style="flex:1;background:var(--accent);color:#000;font-family:var(--font-head)">TESTNET</button>
+          <button class="btn btn-sm" id="prof-net-main-btn" onclick="profSelectNet('main')" style="flex:1;font-family:var(--font-head)">MAINNET</button>
+        </div>
+        <div id="prof-keys-test-panel">
+          <div style="font-size:10px;color:var(--muted);margin-bottom:6px">testnet.binance.vision</div>
+          <div id="prof-hint-test" style="font-size:11px;color:var(--accent);margin-bottom:8px;font-family:monospace;word-break:break-all"></div>
+          <input type="text" id="prof-apikey-test" placeholder="API Key" autocomplete="off" style="width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:var(--radius-sm);font-size:12px;margin-bottom:8px;outline:none">
+          <input type="text" id="prof-privpath-test" placeholder="Путь к .pem файлу на сервере" autocomplete="off" style="width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:var(--radius-sm);font-size:12px;margin-bottom:4px;outline:none">
+          <div style="font-size:10px;color:var(--muted);margin-bottom:10px">Пример: /opt/cryptotrader/test-prv-key.pem</div>
+          <button class="btn btn-primary btn-sm" onclick="profSaveKeys(true)" style="width:100%">💾 Сохранить Testnet ключи</button>
+        </div>
+        <div id="prof-keys-main-panel" style="display:none">
+          <div style="font-size:10px;color:var(--muted);margin-bottom:6px">api.binance.com — реальные средства</div>
+          <div id="prof-hint-main" style="font-size:11px;color:var(--accent);margin-bottom:8px;font-family:monospace;word-break:break-all"></div>
+          <input type="text" id="prof-apikey-main" placeholder="API Key" autocomplete="off" style="width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:var(--radius-sm);font-size:12px;margin-bottom:8px;outline:none">
+          <input type="text" id="prof-privpath-main" placeholder="Путь к .pem файлу на сервере" autocomplete="off" style="width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:var(--radius-sm);font-size:12px;margin-bottom:4px;outline:none">
+          <div style="background:rgba(255,23,68,0.08);border:1px solid rgba(255,23,68,0.25);border-radius:var(--radius-sm);padding:8px;font-size:10px;color:var(--red);margin-bottom:10px">⚠️ Реальные ключи. Хранятся только на вашем сервере.</div>
+          <button class="btn btn-danger btn-sm" onclick="profSaveKeys(false)" style="width:100%">⚠️ Сохранить Mainnet ключи</button>
+        </div>
+      </div>
+
+      <div class="card" id="prof-wallet-card" style="display:none">
+        <div class="card-title" style="display:flex;align-items:center">💼 КОШЕЛЁК<button class="btn btn-sm btn-secondary" onclick="profLoadWallet()" style="margin-left:auto">🔄</button></div>
+        <div id="prof-wallet-content"><div class="empty-state" style="padding:16px 0"><span class="icon">💼</span>Нажмите 🔄 для загрузки</div></div>
+      </div>
+
+      <div class="card" id="prof-report-card" style="display:none">
+        <div class="card-title" style="display:flex;align-items:center">📊 ИСТОРИЯ ТОРГОВЛИ<button class="btn btn-sm btn-secondary" onclick="profLoadReport()" style="margin-left:auto">🔄</button></div>
+        <div id="prof-report-content"><div class="empty-state" style="padding:16px 0"><span class="icon">📊</span>Нажмите 🔄 для загрузки</div></div>
+      </div>
+
+    </div><!-- /page-profile -->
+
   </div><!-- /content -->
 </div><!-- /app -->
 
@@ -568,6 +630,7 @@ function showPage(pageId) {
   if (pageId === 'sessions') { loadSessions(); startSessionsRefresh(); }
   else stopSessionsRefresh();
   if (pageId === 'trade' || pageId === 'research') checkActiveSessionBanner();
+  if (pageId === 'profile') initProfilePage();
 }
 
 // ============================================================
@@ -1056,11 +1119,20 @@ function buildTargetPricesHtml(s) {
       <span class="tp-label">🎯 Цена покупки:</span><span class="tp-val" style="color:${PC.buy}">${s.buyTargetPrice ? '$' + formatPrice(s.buyTargetPrice) : '—'}</span>
     </div>`;
   } else {
+    // Calculate remaining % to profit/loss targets from current price
+    const remProfit = (s.sellProfitPrice && curVal)
+      ? ((s.sellProfitPrice - curVal) / curVal * 100).toFixed(2) : null;
+    const remLoss = (s.sellLossPrice && curVal)
+      ? ((curVal - s.sellLossPrice) / curVal * 100).toFixed(2) : null;
+    const remProfitStr = remProfit !== null
+      ? `<span style="font-size:9px;color:${parseFloat(remProfit)<=0?PC.buy:'#ffea00'};margin-left:4px">${parseFloat(remProfit)<=0?'✅':'осталось +'+remProfit+'%'}</span>` : '';
+    const remLossStr = remLoss !== null
+      ? `<span style="font-size:9px;color:${parseFloat(remLoss)<=0?PC.sold:'#ffea00'};margin-left:4px">${parseFloat(remLoss)<=0?'🔴':'осталось −'+remLoss+'%'}</span>` : '';
     return `<div class="target-prices">
       <span class="tp-label">💰 Куплено за:</span><span class="tp-val" style="color:var(--muted)">${s.boughtAtPrice ? '$' + formatPrice(s.boughtAtPrice) : '—'}</span>
       <span class="tp-label">💹 Текущая:</span>${curStr}
-      <span class="tp-label">📈 Продажа+:</span><span class="tp-val" style="color:${PC.buy}">${s.sellProfitPrice ? '$' + formatPrice(s.sellProfitPrice) : '—'}</span>
-      <span class="tp-label">📉 Продажа−:</span><span class="tp-val" style="color:${PC.sold}">${s.sellLossPrice ? '$' + formatPrice(s.sellLossPrice) : '—'}</span>
+      <span class="tp-label">📈 Продажа+:</span><span class="tp-val" style="color:${PC.buy}">${s.sellProfitPrice ? '$' + formatPrice(s.sellProfitPrice) : '—'}</span>${remProfitStr}
+      <span class="tp-label">📉 Продажа−:</span><span class="tp-val" style="color:${PC.sold}">${s.sellLossPrice ? '$' + formatPrice(s.sellLossPrice) : '—'}</span>${remLossStr}
     </div>`;
   }
 }
@@ -1208,6 +1280,57 @@ function getChartIntervalForSession(sess) {
   return '1d';                     // default: 1d (5-min resolution)
 }
 
+/** Split chart data into 3 colored segments based on session start/end time.
+ *  Before session: dim gray. During session: accent cyan. After session: dim gray.
+ *  Uses two line series stored in entry.lineBefore and entry.lineAfter. */
+function applySessionRangeColoring(entry, data, sess) {
+  const sessionStartSec = sess.startedAt ? Math.floor(sess.startedAt / 1000) : null;
+  const sessionEndSec   = sess.endedAt   ? Math.floor(sess.endedAt   / 1000) : null;
+  const GRAY  = 'rgba(104,120,168,0.35)';
+  const CYAN  = '#00e5ff';
+
+  if (!sessionStartSec) {
+    // No session boundaries — just set all data on main series
+    entry.line.setData(data);
+    if (entry.lineBefore) { try { entry.lineBefore.setData([]); } catch(e){} }
+    if (entry.lineAfter)  { try { entry.lineAfter.setData([]);  } catch(e){} }
+    return;
+  }
+
+  // Create secondary series for before/after if not already created
+  if (!entry.lineBefore) {
+    entry.lineBefore = entry.chart.addLineSeries({
+      color: GRAY, lineWidth: 1, lastValueVisible: false, priceLineVisible: false,
+      priceFormat: { type: 'price', precision: 4, minMove: 0.0001 },
+      crosshairMarkerVisible: false,
+    });
+  }
+  if (!entry.lineAfter) {
+    entry.lineAfter = entry.chart.addLineSeries({
+      color: GRAY, lineWidth: 1, lastValueVisible: false, priceLineVisible: false,
+      priceFormat: { type: 'price', precision: 4, minMove: 0.0001 },
+      crosshairMarkerVisible: false,
+    });
+  }
+
+  const before = [], during = [], after = [];
+  for (const p of data) {
+    if (p.time < sessionStartSec) before.push(p);
+    else if (sessionEndSec && p.time > sessionEndSec) after.push(p);
+    else during.push(p);
+  }
+
+  // Bridge gaps between segments (add connecting point for smooth line)
+  if (before.length && during.length)
+    before.push({ time: during[0].time, value: during[0].value });
+  if (during.length && after.length)
+    after.unshift({ time: during[during.length-1].time, value: during[during.length-1].value });
+
+  entry.lineBefore.setData(before);
+  entry.line.setData(during.length ? during : data); // fallback: all data on main series
+  entry.lineAfter.setData(after);
+}
+
 async function loadInlineChartData(sess) {
   const entry = inlineCharts[sess.id];
   if (!entry) return;
@@ -1219,8 +1342,8 @@ async function loadInlineChartData(sess) {
     const data = dedupeChartData(json.data);
     if (!data.length) return;
 
-    entry.line.setData(data);
-    // Always show the rightmost (latest) data point — no drift
+    // Split data into before/during/after session ranges for coloring
+    applySessionRangeColoring(entry, data, sess);
     entry.chart.timeScale().fitContent();
 
     // Extract current price from last chart data point
@@ -1254,7 +1377,7 @@ async function loadInlineChartData(sess) {
     }
 
     applyChartPriceLines(entry.line, entry.lines, live);
-    applyChartMarkers(entry.line, data, live.events || []);
+    applyChartMarkers(entry.line, data, live.events || [], true /* inlineMode */);
 
     entry.chart.timeScale().fitContent();
   } catch(e) { console.error('Inline chart error', e); }
@@ -1278,25 +1401,27 @@ function applyChartPriceLines(lineSeries, linesArr, live) {
   }
 }
 
-/** Apply BUY/SELL markers snapped to nearest chart data point.
- *  Only circle shape — no text labels. */
-function applyChartMarkers(lineSeries, data, events) {
+/** Apply BUY/SELL markers.
+ *  For inline chart: snap event timestamp to the nearest candle time
+ *  using binary search. Uses 'inlineMode' to skip markers that are
+ *  too far from any chart candle (>15min gap) which causes visual drift.
+ */
+function applyChartMarkers(lineSeries, data, events, inlineMode = false) {
   if (!events.length || !data.length) return;
-  const times = data.map(d => d.time);
-  const minT = times[0], maxT = times[times.length - 1];
 
-  // Build a sorted array of chart times for binary-search snap
-  const sortedTimes = [...times].sort((a, b) => a - b);
-  function snapToNearest(t) {
-    let lo = 0, hi = sortedTimes.length - 1;
+  // Build sorted index: time → data point
+  const sorted = [...data].sort((a, b) => a.time - b.time);
+  const minT = sorted[0].time, maxT = sorted[sorted.length - 1].time;
+
+  function snapToNearestPoint(t) {
+    let lo = 0, hi = sorted.length - 1;
     while (lo < hi) {
       const mid = (lo + hi) >> 1;
-      if (sortedTimes[mid] < t) lo = mid + 1;
+      if (sorted[mid].time < t) lo = mid + 1;
       else hi = mid;
     }
-    // Compare with previous
-    if (lo > 0 && Math.abs(sortedTimes[lo-1] - t) < Math.abs(sortedTimes[lo] - t)) return sortedTimes[lo-1];
-    return sortedTimes[lo];
+    if (lo > 0 && Math.abs(sorted[lo-1].time - t) < Math.abs(sorted[lo].time - t)) return sorted[lo-1];
+    return sorted[lo];
   }
 
   const seen = new Set();
@@ -1304,19 +1429,23 @@ function applyChartMarkers(lineSeries, data, events) {
     .filter(e => e.type === 'BUY' || e.type === 'SELL')
     .map(e => {
       const rawT = Math.floor(e.timestamp / 1000);
-      const snappedT = snapToNearest(rawT);
+      const nearest = snapToNearestPoint(rawT);
+      const gapSec = Math.abs(nearest.time - rawT);
+      // In inline mode, skip markers that are > 20 minutes away from any candle
+      // (means event happened outside chart range or chart resolution mismatch)
+      if (inlineMode && gapSec > 1200) return null;
       return {
-        time: snappedT,
+        time: nearest.time,   // use EXACT chart candle time — no drift
         position: e.type === 'BUY' ? 'belowBar' : 'aboveBar',
         color: e.type === 'BUY' ? PC.buy : PC.sold,
         shape: 'circle',
-        text: '',   // no text label — shape only
+        text: '',
       };
     })
-    .filter(m => m.time >= minT && m.time <= maxT)
+    .filter(m => m && m.time >= minT && m.time <= maxT)
     .sort((a, b) => a.time - b.time)
     .filter(m => {
-      const key = m.time + m.position;
+      const key = m.time + ':' + m.position;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -1658,17 +1787,18 @@ function renderDrawer(sess, isFirstRender = false, scrollOpts = {}) {
     ${targetHtml}`;
 
   // -- EVENTS --
-  const eventsHtml = events.length === 0
-    ? '<div style="color:var(--muted);font-size:11px;padding:8px 0;">Событий пока нет</div>'
-    : [...events].reverse().map(e => `
+  // KEY events: BUY, SELL, ERROR, START, STOP, DONE — shown in "Events" panel
+  const KEY_TYPES = new Set(['BUY','SELL','ERROR','START','STOP','DONE','CRASH']);
+  const keyEvents = events.filter(e => KEY_TYPES.has(e.type));
+  const eventsHtml = keyEvents.length === 0
+    ? '<div style="color:var(--muted);font-size:11px;padding:8px 0;">Ключевых событий пока нет</div>'
+    : [...keyEvents].reverse().map(e => `
         <div class="event-item ${e.type}">
           <span class="event-time">${fmtDateTime(e.timestamp)}</span>
           <span class="event-type-tag ${e.type}">${e.type}</span>
           <span class="event-msg">${escHtml(e.message || '')}</span>
         </div>`).join('');
-  const eventsCountBar = events.length > 0
-    ? `<div class="events-count-bar"><span>Всего событий: <b style="color:var(--accent)">${events.length}</b></span><span>↕ скролл</span></div>`
-    : '';
+  const eventsCountBar = `<div class="events-count-bar"><span>Ключевых событий: <b style="color:var(--accent)">${keyEvents.length}</b> / всего: ${events.length}</span><span>↕ скролл</span></div>`;
 
   // -- LOGS --
   const logsText = events.map(e => `[${fmtDateTime(e.timestamp)}] [${e.type}] ${e.message || ''}`).join('\n');
@@ -1772,6 +1902,250 @@ async function checkActiveSessionBanner() {
     const startBtn = document.getElementById('startTradeBtn');
     if (startBtn) startBtn.disabled = hasActive;
   } catch {}
+}
+
+// ============================================================
+// PROFILE / ЛИЧНЫЙ КАБИНЕТ
+// ============================================================
+
+let _profToken = null;
+try { _profToken = localStorage.getItem('cc_prof_token'); } catch(e) {}
+
+async function profileLogin() {
+  // Try Telegram WebApp initData first
+  const initData = tg?.initData || '';
+  if (initData) {
+    await profDoAuth(initData);
+    return;
+  }
+  // Fallback: dev bypass when running locally
+  showToast('⚠️ Открывайте приложение через Telegram для авторизации');
+}
+
+async function profDoAuth(initData) {
+  try {
+    const r = await fetch(`${API_BASE}/api/auth/telegram`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ initData })
+    });
+    const data = await r.json();
+    if (data.error) { showToast('❌ ' + data.error); return; }
+    _profToken = data.token;
+    try { localStorage.setItem('cc_prof_token', _profToken); } catch(e) {}
+    renderProfAuthed(data);
+    await profLoadKeys();
+    showToast('✅ Авторизован как ' + (data.telegramFirstName || data.telegramUsername || 'пользователь'));
+  } catch(e) {
+    showToast('❌ Ошибка авторизации: ' + e.message);
+  }
+}
+
+function profileLogout() {
+  _profToken = null;
+  try { localStorage.removeItem('cc_prof_token'); } catch(e) {}
+  renderProfNotAuthed();
+  showToast('Выход выполнен');
+}
+
+function renderProfAuthed(profile) {
+  document.getElementById('prof-not-authed').style.display = 'none';
+  document.getElementById('prof-authed').style.display = 'block';
+  document.getElementById('prof-keys-card').style.display = 'block';
+  document.getElementById('prof-wallet-card').style.display = 'block';
+  document.getElementById('prof-report-card').style.display = 'block';
+
+  document.getElementById('prof-name').textContent = profile.telegramFirstName || 'Пользователь';
+  document.getElementById('prof-username').textContent = profile.telegramUsername ? '@' + profile.telegramUsername : '';
+
+  const avatarWrap = document.getElementById('prof-avatar-wrap');
+  if (profile.telegramPhotoUrl) {
+    avatarWrap.innerHTML = `<img src="${escHtml(profile.telegramPhotoUrl)}" style="width:100%;height:100%;object-fit:cover" onerror="this.parentNode.innerHTML='👤'">`;
+  }
+}
+
+function renderProfNotAuthed() {
+  document.getElementById('prof-not-authed').style.display = 'block';
+  document.getElementById('prof-authed').style.display = 'none';
+  document.getElementById('prof-keys-card').style.display = 'none';
+  document.getElementById('prof-wallet-card').style.display = 'none';
+  document.getElementById('prof-report-card').style.display = 'none';
+}
+
+function profSelectNet(net) {
+  const isTest = net === 'test';
+  document.getElementById('prof-keys-test-panel').style.display = isTest ? 'block' : 'none';
+  document.getElementById('prof-keys-main-panel').style.display = isTest ? 'none' : 'block';
+  document.getElementById('prof-net-test-btn').style.background = isTest ? 'var(--accent)' : '';
+  document.getElementById('prof-net-test-btn').style.color = isTest ? '#000' : '';
+  document.getElementById('prof-net-main-btn').style.background = isTest ? '' : 'var(--red)';
+  document.getElementById('prof-net-main-btn').style.color = isTest ? '' : '#fff';
+}
+
+async function profLoadKeys() {
+  if (!_profToken) return;
+  try {
+    const r = await fetch(`${API_BASE}/api/profile/keys`, {
+      headers: {'Authorization': 'Bearer ' + _profToken}
+    });
+    const data = await r.json();
+    if (data.error) return;
+
+    const mn = data.mainnet || {};
+    const tn = data.testnet || {};
+    document.getElementById('prof-hint-test').textContent = tn.hasApiKey ? 'Текущий ключ: ' + tn.apiKeyHint : '';
+    document.getElementById('prof-hint-main').textContent = mn.hasApiKey ? 'Текущий ключ: ' + mn.apiKeyHint : '';
+    if (tn.privKeyPath) document.getElementById('prof-privpath-test').placeholder = tn.privKeyPath || 'Путь к .pem файлу';
+    if (mn.privKeyPath) document.getElementById('prof-privpath-main').placeholder = mn.privKeyPath || 'Путь к .pem файлу';
+
+    document.getElementById('prof-key-badge-main').style.display = mn.hasApiKey ? 'inline' : 'none';
+    document.getElementById('prof-key-badge-test').style.display = tn.hasApiKey ? 'inline' : 'none';
+  } catch(e) {}
+}
+
+async function profSaveKeys(testnet) {
+  if (!_profToken) { showToast('Войдите в аккаунт'); return; }
+  const suffix = testnet ? 'test' : 'main';
+  const apiKey  = document.getElementById('prof-apikey-' + suffix).value.trim();
+  const privPath = document.getElementById('prof-privpath-' + suffix).value.trim();
+  if (!apiKey && !privPath) { showToast('Введите хотя бы один параметр'); return; }
+  try {
+    const r = await fetch(`${API_BASE}/api/profile/keys`, {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer ' + _profToken, 'Content-Type': 'application/json'},
+      body: JSON.stringify({ testnet, apiKey, privKeyPath: privPath })
+    });
+    const data = await r.json();
+    if (data.error) { showToast('❌ ' + data.error); return; }
+    showToast('✅ Ключи сохранены');
+    document.getElementById('prof-apikey-' + suffix).value = '';
+    document.getElementById('prof-privpath-' + suffix).value = '';
+    await profLoadKeys();
+  } catch(e) { showToast('❌ Ошибка: ' + e.message); }
+}
+
+async function profLoadWallet() {
+  if (!_profToken) { showToast('Войдите в аккаунт'); return; }
+  const el = document.getElementById('prof-wallet-content');
+  el.innerHTML = '<div class="empty-state"><div class="spinner" style="margin:0 auto 8px"></div></div>';
+  try {
+    const r = await fetch(`${API_BASE}/api/profile/wallet`, {
+      headers: {'Authorization': 'Bearer ' + _profToken}
+    });
+    const data = await r.json();
+    if (data.error) { el.innerHTML = `<div style="color:var(--red);font-size:12px">${escHtml(data.error)}</div>`; return; }
+
+    let html = '';
+    if (data.mainnet) {
+      html += `<div style="margin-bottom:12px"><div style="font-family:var(--font-head);font-size:9px;color:var(--green);margin-bottom:6px">MAINNET</div>
+        <pre style="font-size:11px;color:var(--text);white-space:pre-wrap;word-break:break-all;background:var(--bg3);padding:8px;border-radius:var(--radius-sm)">${escHtml(data.mainnet)}</pre></div>`;
+    }
+    if (data.mainnet_error) {
+      html += `<div style="margin-bottom:12px"><div style="font-family:var(--font-head);font-size:9px;color:var(--green);margin-bottom:4px">MAINNET</div><div style="color:var(--red);font-size:11px">${escHtml(data.mainnet_error)}</div></div>`;
+    }
+    if (data.testnet) {
+      html += `<div style="margin-bottom:12px"><div style="font-family:var(--font-head);font-size:9px;color:var(--accent);margin-bottom:6px">TESTNET</div>
+        <pre style="font-size:11px;color:var(--text);white-space:pre-wrap;word-break:break-all;background:var(--bg3);padding:8px;border-radius:var(--radius-sm)">${escHtml(data.testnet)}</pre></div>`;
+    }
+    if (data.testnet_error) {
+      html += `<div style="margin-bottom:12px"><div style="font-family:var(--font-head);font-size:9px;color:var(--accent);margin-bottom:4px">TESTNET</div><div style="color:var(--red);font-size:11px">${escHtml(data.testnet_error)}</div></div>`;
+    }
+    if (data.active_sessions?.length) {
+      html += `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+        <div style="font-family:var(--font-head);font-size:9px;color:var(--muted);margin-bottom:6px">АКТИВНЫЕ СЕССИИ</div>`;
+      for (const s of data.active_sessions) {
+        html += `<div style="display:flex;justify-content:space-between;font-size:11px;padding:4px 0;border-bottom:1px solid rgba(42,53,96,0.5)">
+          <span style="color:var(--muted)">${escHtml(String(s.coin))}</span>
+          <span>${fmtNum(s.coinBalance)} ${escHtml(String(s.coin))} / ${fmtNum(s.usdtBalance)} USDT</span></div>`;
+      }
+      html += '</div>';
+    }
+    if (!html) html = '<div style="color:var(--muted);font-size:12px">Нет данных. Добавьте API ключи.</div>';
+    el.innerHTML = html;
+  } catch(e) { el.innerHTML = `<div style="color:var(--red);font-size:12px">Ошибка: ${escHtml(e.message)}</div>`; }
+}
+
+async function profLoadReport() {
+  if (!_profToken) { showToast('Войдите в аккаунт'); return; }
+  const el = document.getElementById('prof-report-content');
+  el.innerHTML = '<div class="empty-state"><div class="spinner" style="margin:0 auto 8px"></div></div>';
+  try {
+    const r = await fetch(`${API_BASE}/api/profile/report`, {
+      headers: {'Authorization': 'Bearer ' + _profToken}
+    });
+    const data = await r.json();
+    if (data.error) { el.innerHTML = `<div style="color:var(--red);font-size:12px">${escHtml(data.error)}</div>`; return; }
+
+    const byType = data.sessionsByType || {};
+    const typeRows = Object.entries(byType).map(([t,n]) =>
+      `<div style="display:flex;justify-content:space-between;font-size:11px;padding:3px 0">
+        <span style="color:var(--muted)">${t}</span><span>${n} сессий</span></div>`).join('');
+
+    let html = `
+      <div class="params-grid" style="margin-bottom:12px">
+        <div class="param-item"><div class="param-key">СЕССИЙ ВСЕГО</div><div class="param-val" style="color:var(--accent)">${data.totalSessions}</div></div>
+        <div class="param-item"><div class="param-key">ПОКУПОК</div><div class="param-val" style="color:var(--green)">${data.buyCount}</div></div>
+        <div class="param-item"><div class="param-key">ПРОДАЖ</div><div class="param-val" style="color:var(--red)">${data.sellCount}</div></div>
+      </div>
+      <div style="margin-bottom:12px">${typeRows}</div>`;
+
+    // Session history table
+    const sessions = (data.sessions || []).slice(0, 50);
+    if (sessions.length) {
+      html += `<div style="font-family:var(--font-head);font-size:9px;color:var(--muted);margin-bottom:8px">ПОСЛЕДНИЕ СЕССИИ</div>
+        <div style="display:flex;flex-direction:column;gap:6px">`;
+      for (const s of sessions) {
+        const buys  = (s.events||[]).filter(e=>e.type==='BUY').length;
+        const sells = (s.events||[]).filter(e=>e.type==='SELL').length;
+        const dot   = s.status==='RUNNING' ? 'var(--green)' : s.status==='ERROR' ? 'var(--red)' : 'var(--muted)';
+        const dur   = s.endedAt ? Math.round((s.endedAt - s.startedAt)/60000) + ' мин' : 'в процессе';
+        html += `<div style="background:var(--bg3);border-radius:var(--radius-sm);padding:8px 10px;border:1px solid var(--border)">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <div style="width:7px;height:7px;border-radius:50%;background:${dot};flex-shrink:0"></div>
+            <span style="font-family:var(--font-head);font-size:10px;color:var(--text)">${escHtml(s.coinName)}</span>
+            <span style="font-size:9px;color:var(--muted)">${s.type}</span>
+            <span style="font-size:9px;color:var(--muted);margin-left:auto">${fmtDateTime(s.startedAt)}</span>
+          </div>
+          <div style="display:flex;gap:12px;font-size:10px;color:var(--muted)">
+            <span>⏱ ${dur}</span>
+            <span style="color:var(--green)">▲ ${buys} покупок</span>
+            <span style="color:var(--red)">▼ ${sells} продаж</span>
+          </div></div>`;
+      }
+      html += '</div>';
+    }
+
+    el.innerHTML = html;
+  } catch(e) { el.innerHTML = `<div style="color:var(--red);font-size:12px">Ошибка: ${escHtml(e.message)}</div>`; }
+}
+
+// Auto-login on profile tab open using Telegram initData
+async function initProfilePage() {
+  if (_profToken) {
+    // Verify token is still valid by fetching profile
+    try {
+      const r = await fetch(`${API_BASE}/api/profile`, {
+        headers: {'Authorization': 'Bearer ' + _profToken}
+      });
+      const data = await r.json();
+      if (!data.error) {
+        renderProfAuthed(data);
+        await profLoadKeys();
+        return;
+      }
+    } catch(e) {}
+    // Token invalid — clear it
+    _profToken = null;
+    try { localStorage.removeItem('cc_prof_token'); } catch(e) {}
+  }
+
+  // Try auto-login with Telegram initData
+  const initData = tg?.initData || '';
+  if (initData) {
+    await profDoAuth(initData);
+  } else {
+    renderProfNotAuthed();
+  }
 }
 
 // ============================================================
