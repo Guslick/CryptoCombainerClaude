@@ -138,6 +138,12 @@ public class MiniAppServer {
                 String sessionId = (String) body.get("sessionId");
                 long chatId = toLong(body.get("chatId"), AppConfig.getInstance().getDefaultChatId());
                 if (sessionId == null) return errorMap("sessionId обязателен");
+                Long resumeOwner = resolveUser(exchange);
+                // Verify ownership: getSessionDetailForOwner returns error map if not owner
+                if (resumeOwner != null && resumeOwner != 0L) {
+                    Map<String, Object> check = TradingSessionManager.getInstance().getSessionDetailForOwner(sessionId, resumeOwner);
+                    if (check.containsKey("error")) return check;
+                }
                 return TradingSessionManager.getInstance().resumeSession(sessionId, chatId);
             });
         });

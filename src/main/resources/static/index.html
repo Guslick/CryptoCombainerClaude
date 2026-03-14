@@ -143,7 +143,8 @@
   .session-card-actions{display:flex;flex-wrap:wrap;gap:5px;padding:0 12px 10px}
   .session-card-actions .btn{flex:0 0 auto;min-width:80px}
   /* Target prices */
-  .target-prices{display:grid;grid-template-columns:auto 1fr auto;gap:3px 8px;padding:7px 12px;background:rgba(0,0,0,0.25);border-top:1px solid rgba(255,255,255,0.05);font-size:11px;align-items:center}
+  .target-prices{display:grid;grid-template-columns:auto auto auto 1fr;gap:3px 6px;padding:7px 12px;background:rgba(0,0,0,0.25);border-top:1px solid rgba(255,255,255,0.05);font-size:11px;align-items:center}
+  .tp-rem{font-size:9px;white-space:nowrap}
   .tp-label{color:var(--muted);white-space:nowrap}
   .tp-val{color:var(--text);font-weight:600;font-family:var(--font-head)}
   .tp-val.green{color:var(--green)}
@@ -487,12 +488,39 @@
       <div class="card" id="prof-auth-card">
         <div class="card-title">👤 ЛИЧНЫЙ КАБИНЕТ</div>
         <div id="prof-not-authed">
-          <div style="color:var(--muted);font-size:12px;margin-bottom:14px;line-height:1.6">Авторизуйтесь через Telegram для доступа к настройкам API ключей и истории торговли.</div>
-          <button class="btn btn-primary" onclick="profileLogin()" style="width:100%;margin-bottom:8px">🔑 Войти через Telegram (приложение)</button>
-          <div id="prof-tg-widget-wrap" style="margin-bottom:4px">
-            <!-- Telegram Login Widget rendered here for browser auth -->
+          <div style="color:var(--muted);font-size:12px;margin-bottom:14px;line-height:1.6">
+            Авторизуйтесь через Telegram для доступа к настройкам API ключей, сессиям и истории торговли.
           </div>
-          <div style="font-size:10px;color:var(--muted);text-align:center">или через виджет, если открыто в браузере</div>
+          <!-- Telegram WebApp login (inside Telegram app) -->
+          <div id="prof-login-webapp" style="display:none">
+            <button class="btn btn-primary" onclick="profileLogin()" style="width:100%;margin-bottom:10px">🔑 Войти через Telegram</button>
+          </div>
+          <!-- Browser login via Telegram Widget -->
+          <div id="prof-login-browser" style="display:none">
+            <div style="background:rgba(0,229,255,0.07);border:1px solid rgba(0,229,255,0.2);border-radius:var(--radius-sm);padding:12px;margin-bottom:12px">
+              <div style="font-family:var(--font-head);font-size:9px;color:var(--accent);margin-bottom:8px">КАК ВОЙТИ В БРАУЗЕРЕ</div>
+              <div style="font-size:11px;color:var(--text);line-height:1.6">
+                Нажмите кнопку «Войти через Telegram» ниже.<br>
+                Вы будете перенаправлены в Telegram, где нужно подтвердить вход.<br>
+                После подтверждения вернитесь на эту страницу.
+              </div>
+            </div>
+            <div id="prof-tg-widget-wrap" style="display:flex;justify-content:center;margin-bottom:8px">
+              <!-- Telegram Login Widget injected here -->
+            </div>
+            <div style="font-size:10px;color:var(--muted);text-align:center;margin-top:4px">
+              Используется официальный виджет Telegram
+            </div>
+          </div>
+          <!-- Fallback when no auth method available -->
+          <div id="prof-login-fallback" style="display:none">
+            <div style="background:rgba(255,234,0,0.07);border:1px solid rgba(255,234,0,0.2);border-radius:var(--radius-sm);padding:12px">
+              <div style="font-size:11px;color:var(--yellow);line-height:1.6">
+                ⚠️ Откройте приложение через Telegram Bot для авторизации.<br>
+                <span style="font-size:10px;color:var(--muted)">Или откройте в браузере для входа через виджет Telegram.</span>
+              </div>
+            </div>
+          </div>
         </div>
         <div id="prof-authed" style="display:none">
           <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
@@ -636,7 +664,23 @@ async function checkHealth() {
 // ============================================================
 // NAVIGATION
 // ============================================================
+const AUTH_REQUIRED_PAGES = new Set(['trade', 'research', 'backtest', 'sessions']);
+
 function showPage(pageId) {
+  // Auth gate — protected pages require login
+  if (AUTH_REQUIRED_PAGES.has(pageId) && !isAuthed()) {
+    // Activate the page so the lock screen shows
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.getElementById('page-' + pageId)?.classList.add('active');
+    document.getElementById('tab-' + pageId)?.classList.add('active');
+    const lockTarget = {
+      trade: 'page-trade', research: 'page-research', backtest: 'page-backtest', sessions: 'sessionsList'
+    }[pageId] || 'page-' + pageId;
+    showAuthRequired(lockTarget, 'Войдите через Telegram, чтобы торговать и видеть сессии.');
+    return;
+  }
+
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.getElementById('page-' + pageId)?.classList.add('active');
@@ -1022,8 +1066,14 @@ const _chartTimers = {};      // id -> {timer, countdown, intervalSec}
 
 async function loadSessions() {
   const list = document.getElementById('sessionsList');
+  if (!isAuthed()) {
+    showAuthRequired('sessionsList');
+    return;
+  }
   try {
-    const r = await fetch(`${API_BASE}/api/trading/sessions`);
+    const r = await fetch(`${API_BASE}/api/trading/sessions`, {
+      headers: authHeaders()
+    });
     const sessions = await r.json();
     if (!Array.isArray(sessions) || !sessions.length) {
       list.innerHTML = '<div class="empty-state"><span class="icon">🎮</span>Нет сессий</div>';
@@ -1142,9 +1192,9 @@ function buildTargetPricesHtml(s) {
       ? `<span style="font-size:9px;color:${parseFloat(leftToBuy)<=0?PC.buy:'#ffea00'}">${parseFloat(leftToBuy)<=0?'🎯 сигнал!':'осталось '+leftToBuy+'%'}</span>`
       : '<span></span>';
     return `<div class="target-prices">
-      <span class="tp-label">🔭 Макс. волна:</span><span class="tp-val" style="color:${PC.max}">${s.maxPrice ? '$' + formatPrice(s.maxPrice) : '—'}</span><span></span>
-      <span class="tp-label">💹 Текущая:</span>${curStr}${dropStr}
-      <span class="tp-label">🎯 Цена покупки:</span><span class="tp-val" style="color:${PC.buy}">${s.buyTargetPrice ? '$' + formatPrice(s.buyTargetPrice) : '—'}</span>${leftToBuyStr}
+      <span class="tp-label">🔭 Макс. волна:</span><span class="tp-val" style="color:${PC.max}">${s.maxPrice ? '$' + formatPrice(s.maxPrice) : '—'}</span><span class="tp-rem"></span><span></span>
+      <span class="tp-label">💹 Текущая:</span>${curStr}<span class="tp-rem">${dropStr}</span><span></span>
+      <span class="tp-label">🎯 Цена покупки:</span><span class="tp-val" style="color:${PC.buy}">${s.buyTargetPrice ? '$' + formatPrice(s.buyTargetPrice) : '—'}</span><span class="tp-rem">${leftToBuyStr}</span><span></span>
     </div>`;
   } else {
     // Calculate remaining % to profit/loss targets from current price
@@ -1166,10 +1216,10 @@ function buildTargetPricesHtml(s) {
       ? `<span style="font-size:9px;color:${parseFloat(changePct)>=0?PC.buy:PC.sold}">${parseFloat(changePct)>=0?'+':''}${changePct}%</span>`
       : '<span></span>';
     return `<div class="target-prices">
-      <span class="tp-label">💰 Куплено за:</span><span class="tp-val" style="color:var(--muted)">${s.boughtAtPrice ? '$' + formatPrice(s.boughtAtPrice) : '—'}</span><span></span>
-      <span class="tp-label">💹 Текущая:</span>${curStr}${changeCol}
-      <span class="tp-label">📈 Продажа+:</span><span class="tp-val" style="color:${PC.buy}">${s.sellProfitPrice ? '$' + formatPrice(s.sellProfitPrice) : '—'}</span>${remProfitCol}
-      <span class="tp-label">📉 Продажа−:</span><span class="tp-val" style="color:${PC.sold}">${s.sellLossPrice ? '$' + formatPrice(s.sellLossPrice) : '—'}</span>${remLossCol}
+      <span class="tp-label">💰 Куплено за:</span><span class="tp-val" style="color:var(--muted)">${s.boughtAtPrice ? '$' + formatPrice(s.boughtAtPrice) : '—'}</span><span class="tp-rem"></span><span></span>
+      <span class="tp-label">💹 Текущая:</span>${curStr}<span class="tp-rem">${changeCol}</span><span></span>
+      <span class="tp-label">📈 Продажа+:</span><span class="tp-val" style="color:${PC.buy}">${s.sellProfitPrice ? '$' + formatPrice(s.sellProfitPrice) : '—'}</span><span class="tp-rem">${remProfitCol}</span><span></span>
+      <span class="tp-label">📉 Продажа−:</span><span class="tp-val" style="color:${PC.sold}">${s.sellLossPrice ? '$' + formatPrice(s.sellLossPrice) : '—'}</span><span class="tp-rem">${remLossCol}</span><span></span>
     </div>`;
   }
 }
@@ -1404,7 +1454,7 @@ async function loadInlineChartData(sess) {
     entry.lines = [];
 
     // Fetch fresh session data
-    const sr = await fetch(`${API_BASE}/api/trading/sessions/${sess.id}`).catch(() => null);
+    const sr = await fetch(`${API_BASE}/api/trading/sessions/${sess.id}`, { headers: authHeaders() }).catch(() => null);
     const live = sr?.ok ? await sr.json() : sess;
 
     // Merge live data into _sessionsData (keep currentPrice)
@@ -1537,7 +1587,7 @@ async function loadInlineChartDataInto(sess, lineSeries, chart) {
     const data = dedupeChartData(json.data);
     lineSeries.setData(data);
 
-    const sr = await fetch(`${API_BASE}/api/trading/sessions/${sess.id}`).catch(() => null);
+    const sr = await fetch(`${API_BASE}/api/trading/sessions/${sess.id}`, { headers: authHeaders() }).catch(() => null);
     const live = sr?.ok ? await sr.json() : sess;
 
     const lines = [];
@@ -1557,7 +1607,7 @@ function closeFullscreenChart() {
 // SESSION ACTIONS
 // ============================================================
 async function stopSession(id) {
-  await fetch(`${API_BASE}/api/trading/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: id }) });
+  await fetch(`${API_BASE}/api/trading/stop`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ sessionId: id }) });
   showToast('⏹ Сессия остановлена');
   clearChartTimer(id);
   delete _sessionsData[id];
@@ -1566,7 +1616,7 @@ async function stopSession(id) {
 }
 
 async function resumeSession(id) {
-  const r = await fetch(`${API_BASE}/api/trading/resume`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: id }) });
+  const r = await fetch(`${API_BASE}/api/trading/resume`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ sessionId: id }) });
   const data = await r.json();
   if (data.error) { showToast('❌ ' + data.error); return; }
   showToast('▶ Сессия возобновлена!');
@@ -1576,7 +1626,7 @@ async function resumeSession(id) {
 
 async function deleteSession(id) {
   if (!confirm('Удалить сессию и все её данные?')) return;
-  const r = await fetch(`${API_BASE}/api/trading/delete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: id }) });
+  const r = await fetch(`${API_BASE}/api/trading/delete`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ sessionId: id }) });
   const data = await r.json();
   if (data.deleted) {
     showToast('🗑 Сессия удалена');
@@ -1677,7 +1727,7 @@ function closeDrawer() {
 
 async function fetchSessionDetail(id) {
   try {
-    const r = await fetch(`${API_BASE}/api/trading/sessions/${id}`);
+    const r = await fetch(`${API_BASE}/api/trading/sessions/${id}`, { headers: authHeaders() });
     const d = await r.json();
     return d.error ? null : d;
   } catch(e) { return null; }
@@ -1928,8 +1978,9 @@ function showToast(msg) {
 // ACTIVE SESSION BANNER
 // ============================================================
 async function checkActiveSessionBanner() {
+  if (!isAuthed()) return;
   try {
-    const r = await fetch(`${API_BASE}/api/trading/sessions`);
+    const r = await fetch(`${API_BASE}/api/trading/sessions`, { headers: authHeaders() });
     const sessions = await r.json();
     const hasActive = sessions.some(s => s.status === 'RUNNING');
     const b1 = document.getElementById('activeSessionBanner');
@@ -1947,6 +1998,28 @@ async function checkActiveSessionBanner() {
 
 let _profToken = null;
 try { _profToken = localStorage.getItem('cc_prof_token'); } catch(e) {}
+
+/** Returns fetch headers including auth token if logged in */
+function authHeaders(extra) {
+  const h = { 'Content-Type': 'application/json', ...(extra || {}) };
+  if (_profToken) h['Authorization'] = 'Bearer ' + _profToken;
+  return h;
+}
+
+/** Show auth-required overlay on a page element */
+function showAuthRequired(containerId, msg) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px;gap:12px;text-align:center">
+    <div style="font-size:36px">🔒</div>
+    <div style="font-family:var(--font-head);font-size:13px;color:var(--accent)">ТРЕБУЕТСЯ АВТОРИЗАЦИЯ</div>
+    <div style="font-size:12px;color:var(--muted);max-width:260px;line-height:1.5">${msg || 'Войдите через Telegram в разделе 👤 КАБИНЕТ'}</div>
+    <button class="btn btn-primary btn-sm" onclick="showPage('profile')" style="margin-top:8px">👤 Перейти в кабинет</button>
+  </div>`;
+}
+
+/** True if user has a valid auth token */
+function isAuthed() { return !!_profToken; }
 
 async function profileLogin() {
   // Try Telegram WebApp initData first
@@ -1973,6 +2046,9 @@ async function profDoAuth(initData) {
     renderProfAuthed(data);
     await profLoadKeys();
     showToast('✅ Авторизован как ' + (data.telegramFirstName || data.telegramUsername || 'пользователь'));
+    // Refresh any protected page that may be currently shown
+    const curPage = document.querySelector('.page.active')?.id?.replace('page-', '');
+    if (curPage && AUTH_REQUIRED_PAGES.has(curPage)) showPage(curPage);
   } catch(e) {
     showToast('❌ Ошибка авторизации: ' + e.message);
   }
@@ -1983,6 +2059,10 @@ function profileLogout() {
   try { localStorage.removeItem('cc_prof_token'); } catch(e) {}
   renderProfNotAuthed();
   showToast('Выход выполнен');
+  // Clear session data and redirect to safe page
+  _sessionsData = {};
+  stopSessionsRefresh();
+  showPage('dashboard');
 }
 
 function renderProfAuthed(profile) {
@@ -2217,47 +2297,69 @@ const _origProfSaveKeys = profSaveKeys;
 
 // ── Browser Telegram Login Widget ───────────────────────────────────────────
 async function initTelegramWidget() {
-  // Only show widget if NOT inside Telegram WebApp
-  if (tg?.initData) return;
+  const webappBlock   = document.getElementById('prof-login-webapp');
+  const browserBlock  = document.getElementById('prof-login-browser');
+  const fallbackBlock = document.getElementById('prof-login-fallback');
+
+  // Inside Telegram WebApp — show simple button
+  if (tg?.initData) {
+    if (webappBlock)  webappBlock.style.display  = 'block';
+    if (browserBlock) browserBlock.style.display = 'none';
+    if (fallbackBlock) fallbackBlock.style.display = 'none';
+    return;
+  }
+
+  // Browser — try to show Login Widget
   try {
     const r = await fetch(`${API_BASE}/api/auth/config`);
     const cfg = await r.json();
     const botUsername = cfg.botUsername;
-    if (!botUsername || botUsername === 'YOUR_BOT_NAME') return;
 
-    const wrap = document.getElementById('prof-tg-widget-wrap');
-    if (!wrap) return;
+    if (botUsername && botUsername !== 'YOUR_BOT_NAME' && botUsername !== 'NEW_MAMA_CXHEMA') {
+      if (webappBlock)   webappBlock.style.display   = 'none';
+      if (browserBlock)  browserBlock.style.display  = 'block';
+      if (fallbackBlock) fallbackBlock.style.display = 'none';
 
-    // Inject Telegram Login Widget script
-    const script = document.createElement('script');
-    script.async = true;
-    script.src = 'https://telegram.org/js/telegram-widget.js?22';
-    script.setAttribute('data-telegram-login', botUsername);
-    script.setAttribute('data-size', 'large');
-    script.setAttribute('data-radius', '8');
-    script.setAttribute('data-userpic', 'true');
-    script.setAttribute('data-request-access', 'write');
-    // Callback must be global
-    window.onTelegramWidgetAuth = async (user) => {
-      try {
-        const r = await fetch(`${API_BASE}/api/auth/telegram`, {
-          method: 'POST',
-          headers: {'Content-Type':'application/json'},
-          body: JSON.stringify(user)   // contains id, first_name, username, hash, auth_date etc.
-        });
-        const data = await r.json();
-        if (data.error) { showToast('❌ ' + data.error); return; }
-        _profToken = data.token;
-        try { localStorage.setItem('cc_prof_token', _profToken); } catch(e) {}
-        renderProfAuthed(data);
-        await profLoadKeys();
-        showToast('✅ Авторизован как ' + (data.telegramFirstName || 'пользователь'));
-      } catch(e) { showToast('❌ Ошибка: ' + e.message); }
-    };
-    script.setAttribute('data-onauth', 'onTelegramWidgetAuth(user)');
-    wrap.innerHTML = '';
-    wrap.appendChild(script);
-  } catch(e) { /* silently fail */ }
+      const wrap = document.getElementById('prof-tg-widget-wrap');
+      if (!wrap || wrap.querySelector('script')) return; // already injected
+
+      window.onTelegramWidgetAuth = async (user) => {
+        try {
+          const r = await fetch(`${API_BASE}/api/auth/telegram`, {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify(user)
+          });
+          const data = await r.json();
+          if (data.error) { showToast('❌ ' + data.error); return; }
+          _profToken = data.token;
+          try { localStorage.setItem('cc_prof_token', _profToken); } catch(e) {}
+          renderProfAuthed(data);
+          await profLoadKeys();
+          showToast('✅ Авторизован как ' + (data.telegramFirstName || 'пользователь'));
+        } catch(e) { showToast('❌ Ошибка: ' + e.message); }
+      };
+
+      const script = document.createElement('script');
+      script.async = true;
+      script.src = 'https://telegram.org/js/telegram-widget.js?22';
+      script.setAttribute('data-telegram-login', botUsername);
+      script.setAttribute('data-size', 'large');
+      script.setAttribute('data-radius', '8');
+      script.setAttribute('data-userpic', 'true');
+      script.setAttribute('data-request-access', 'write');
+      script.setAttribute('data-onauth', 'onTelegramWidgetAuth(user)');
+      wrap.innerHTML = '';
+      wrap.appendChild(script);
+    } else {
+      // Bot username not configured — show fallback instructions
+      if (webappBlock)   webappBlock.style.display   = 'none';
+      if (browserBlock)  browserBlock.style.display  = 'none';
+      if (fallbackBlock) fallbackBlock.style.display = 'block';
+    }
+  } catch(e) {
+    if (fallbackBlock) fallbackBlock.style.display = 'block';
+  }
 }
 
 // ── Override profSaveKeys with PEM support ───────────────────────────────────
