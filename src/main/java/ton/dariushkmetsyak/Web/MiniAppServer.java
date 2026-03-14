@@ -43,7 +43,14 @@ public class MiniAppServer {
         // Bot name for Telegram Login Widget (browser auth)
         server.createContext("/api/auth/config", exchange -> handleJson(exchange, () -> {
             Map<String, Object> cfg = new LinkedHashMap<>();
-            cfg.put("botUsername", "MamkinSchemshikTradingBot");
+            // Read bot username from actual bot configuration
+            String botUsername = "NEW_MAMA_CXHEMA"; // default
+            try {
+                // Try to get from config property first
+                String configured = ton.dariushkmetsyak.Config.AppConfig.getInstance().get("telegram.bot.username", "");
+                if (!configured.isBlank()) botUsername = configured;
+            } catch (Exception ignored) {}
+            cfg.put("botUsername", botUsername);
             return cfg;
         }));
 

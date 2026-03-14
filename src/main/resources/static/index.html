@@ -491,36 +491,23 @@
           <div style="color:var(--muted);font-size:12px;margin-bottom:14px;line-height:1.6">
             Авторизуйтесь через Telegram для доступа к настройкам API ключей, сессиям и истории торговли.
           </div>
-          <!-- Telegram WebApp login (inside Telegram app) -->
-          <div id="prof-login-webapp" style="display:none">
-            <button class="btn btn-primary" onclick="profileLogin()" style="width:100%;margin-bottom:10px">🔑 Войти через Telegram</button>
+
+          <!-- Always-visible login button — works in Telegram app AND browser -->
+          <button class="btn btn-primary" id="prof-btn-login" onclick="profileLogin()" style="width:100%;margin-bottom:12px;font-size:13px;padding:12px">
+            🔑 Войти через Telegram
+          </button>
+
+          <!-- Status/spinner shown during auto-login attempt -->
+          <div id="prof-login-status" style="display:none;text-align:center;padding:8px;font-size:12px;color:var(--muted)">
+            <div class="spinner" style="margin:0 auto 8px;width:20px;height:20px"></div>
+            Авторизация...
           </div>
-          <!-- Browser login via Telegram Widget -->
-          <div id="prof-login-browser" style="display:none">
-            <div style="background:rgba(0,229,255,0.07);border:1px solid rgba(0,229,255,0.2);border-radius:var(--radius-sm);padding:12px;margin-bottom:12px">
-              <div style="font-family:var(--font-head);font-size:9px;color:var(--accent);margin-bottom:8px">КАК ВОЙТИ В БРАУЗЕРЕ</div>
-              <div style="font-size:11px;color:var(--text);line-height:1.6">
-                Нажмите кнопку «Войти через Telegram» ниже.<br>
-                Вы будете перенаправлены в Telegram, где нужно подтвердить вход.<br>
-                После подтверждения вернитесь на эту страницу.
-              </div>
-            </div>
-            <div id="prof-tg-widget-wrap" style="display:flex;justify-content:center;margin-bottom:8px">
-              <!-- Telegram Login Widget injected here -->
-            </div>
-            <div style="font-size:10px;color:var(--muted);text-align:center;margin-top:4px">
-              Используется официальный виджет Telegram
-            </div>
-          </div>
-          <!-- Fallback when no auth method available -->
-          <div id="prof-login-fallback" style="display:none">
-            <div style="background:rgba(255,234,0,0.07);border:1px solid rgba(255,234,0,0.2);border-radius:var(--radius-sm);padding:12px">
-              <div style="font-size:11px;color:var(--yellow);line-height:1.6">
-                ⚠️ Откройте приложение через Telegram Bot для авторизации.<br>
-                <span style="font-size:10px;color:var(--muted)">Или откройте в браузере для входа через виджет Telegram.</span>
-              </div>
-            </div>
-          </div>
+
+          <!-- Telegram Login Widget for browser (injected dynamically) -->
+          <div id="prof-tg-widget-wrap" style="display:flex;justify-content:center;margin-bottom:8px"></div>
+
+          <!-- Context hint shown below the button -->
+          <div id="prof-login-hint" style="font-size:10px;color:var(--muted);text-align:center;line-height:1.5;padding:0 8px"></div>
         </div>
         <div id="prof-authed" style="display:none">
           <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
@@ -1993,20 +1980,23 @@ async function checkActiveSessionBanner() {
 }
 
 // ============================================================
-// PROFILE / ЛИЧНЫЙ КАБИНЕТ
+// PROFILE / AUTH — Clean refactor
 // ============================================================
 
 let _profToken = null;
 try { _profToken = localStorage.getItem('cc_prof_token'); } catch(e) {}
 
-/** Returns fetch headers including auth token if logged in */
+/** Returns fetch headers including auth token */
 function authHeaders(extra) {
   const h = { 'Content-Type': 'application/json', ...(extra || {}) };
   if (_profToken) h['Authorization'] = 'Bearer ' + _profToken;
   return h;
 }
 
-/** Show auth-required overlay on a page element */
+/** True if user has a valid auth token in memory */
+function isAuthed() { return !!_profToken; }
+
+/** Show auth-required lock screen inside a container */
 function showAuthRequired(containerId, msg) {
   const el = document.getElementById(containerId);
   if (!el) return;
@@ -2014,55 +2004,187 @@ function showAuthRequired(containerId, msg) {
     <div style="font-size:36px">🔒</div>
     <div style="font-family:var(--font-head);font-size:13px;color:var(--accent)">ТРЕБУЕТСЯ АВТОРИЗАЦИЯ</div>
     <div style="font-size:12px;color:var(--muted);max-width:260px;line-height:1.5">${msg || 'Войдите через Telegram в разделе 👤 КАБИНЕТ'}</div>
-    <button class="btn btn-primary btn-sm" onclick="showPage('profile')" style="margin-top:8px">👤 Перейти в кабинет</button>
+    <button class="btn btn-primary btn-sm" onclick="showPage('profile')" style="margin-top:8px">👤 Войти в кабинет</button>
   </div>`;
 }
 
-/** True if user has a valid auth token */
-function isAuthed() { return !!_profToken; }
+// ── Core auth functions ───────────────────────────────────────────────────────
 
+/**
+ * Central login function — called by the button AND auto-login.
+ * Tries:
+ * 1. Telegram WebApp initData (inside Telegram app)
+ * 2. Shows visual feedback if neither is available
+ */
 async function profileLogin() {
-  // Try Telegram WebApp initData first
   const initData = tg?.initData || '';
+
   if (initData) {
-    await profDoAuth(initData);
+    // Inside Telegram app — use initData directly
+    _setLoginState('loading');
+    try {
+      const r = await fetch(`${API_BASE}/api/auth/telegram`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData })
+      });
+      const data = await r.json();
+      if (data.error) {
+        _setLoginState('error', '❌ ' + data.error);
+        return;
+      }
+      _saveToken(data.token);
+      renderProfAuthed(data);
+      await profLoadKeys();
+      showToast('✅ Авторизован как ' + (data.telegramFirstName || data.telegramUsername || 'пользователь'));
+      const curPage = document.querySelector('.page.active')?.id?.replace('page-', '');
+      if (curPage && AUTH_REQUIRED_PAGES.has(curPage)) showPage(curPage);
+    } catch(e) {
+      _setLoginState('error', '❌ Ошибка сети: ' + e.message);
+    }
     return;
   }
-  // Fallback: dev bypass when running locally
-  showToast('⚠️ Открывайте приложение через Telegram для авторизации');
+
+  // Not inside Telegram app — try to load the widget or show instructions
+  _setLoginState('idle');
+  _loadTelegramWidget();
 }
 
-async function profDoAuth(initData) {
+/** Called by Telegram Login Widget when user completes browser login */
+window.onTelegramWidgetAuth = async function(user) {
+  _setLoginState('loading');
   try {
     const r = await fetch(`${API_BASE}/api/auth/telegram`, {
       method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ initData })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(user)
     });
     const data = await r.json();
-    if (data.error) { showToast('❌ ' + data.error); return; }
-    _profToken = data.token;
-    try { localStorage.setItem('cc_prof_token', _profToken); } catch(e) {}
+    if (data.error) { _setLoginState('error', '❌ ' + data.error); return; }
+    _saveToken(data.token);
     renderProfAuthed(data);
     await profLoadKeys();
     showToast('✅ Авторизован как ' + (data.telegramFirstName || data.telegramUsername || 'пользователь'));
-    // Refresh any protected page that may be currently shown
     const curPage = document.querySelector('.page.active')?.id?.replace('page-', '');
     if (curPage && AUTH_REQUIRED_PAGES.has(curPage)) showPage(curPage);
   } catch(e) {
-    showToast('❌ Ошибка авторизации: ' + e.message);
+    _setLoginState('error', '❌ Ошибка: ' + e.message);
+  }
+};
+
+/** Inject Telegram Login Widget script into the page */
+async function _loadTelegramWidget() {
+  const wrap = document.getElementById('prof-tg-widget-wrap');
+  if (!wrap) return;
+  if (wrap.querySelector('script')) return; // already injected
+
+  // Fetch bot username from server
+  try {
+    const r = await fetch(`${API_BASE}/api/auth/config`);
+    const cfg = await r.json();
+    const botUsername = cfg?.botUsername;
+
+    if (!botUsername || botUsername === 'YOUR_BOT_NAME' || botUsername === 'NEW_MAMA_CXHEMA') {
+      // Bot username not configured on server — show manual instructions
+      _setLoginHint(
+        '⚠️ Откройте приложение через Telegram для авторизации.<br>' +
+        '<span style="color:var(--muted)">Нажмите кнопку ниже в Telegram → Бот → Открыть приложение</span>'
+      );
+      return;
+    }
+
+    // Inject widget
+    const script = document.createElement('script');
+    script.async = true;
+    script.src = 'https://telegram.org/js/telegram-widget.js?22';
+    script.setAttribute('data-telegram-login', botUsername);
+    script.setAttribute('data-size', 'large');
+    script.setAttribute('data-radius', '8');
+    script.setAttribute('data-userpic', 'true');
+    script.setAttribute('data-request-access', 'write');
+    script.setAttribute('data-onauth', 'onTelegramWidgetAuth(user)');
+    wrap.innerHTML = '';
+    wrap.appendChild(script);
+    _setLoginHint('Нажмите кнопку виджета выше для входа через Telegram');
+    // Hide the manual login button since widget handles it
+    const btn = document.getElementById('prof-btn-login');
+    if (btn) btn.style.display = 'none';
+  } catch(e) {
+    _setLoginHint('Ошибка загрузки виджета. Откройте приложение через Telegram.');
   }
 }
 
-function profileLogout() {
-  _profToken = null;
-  try { localStorage.removeItem('cc_prof_token'); } catch(e) {}
+function _setLoginState(state, msg) {
+  const spinner = document.getElementById('prof-login-status');
+  const btn     = document.getElementById('prof-btn-login');
+  if (state === 'loading') {
+    if (spinner) spinner.style.display = 'block';
+    if (btn) btn.disabled = true;
+  } else {
+    if (spinner) spinner.style.display = 'none';
+    if (btn) btn.disabled = false;
+  }
+  if (msg) showToast(msg);
+}
+
+function _setLoginHint(html) {
+  const el = document.getElementById('prof-login-hint');
+  if (el) el.innerHTML = html;
+}
+
+function _saveToken(token) {
+  _profToken = token;
+  try { localStorage.setItem('cc_prof_token', token); } catch(e) {}
+}
+
+// ── Profile page lifecycle ────────────────────────────────────────────────────
+
+async function initProfilePage() {
+  // 1. Check existing token
+  if (_profToken) {
+    try {
+      const r = await fetch(`${API_BASE}/api/profile`, { headers: authHeaders() });
+      const data = await r.json();
+      if (!data.error) {
+        renderProfAuthed(data);
+        await profLoadKeys();
+        return;
+      }
+    } catch(e) {}
+    // Token expired/invalid
+    _profToken = null;
+    try { localStorage.removeItem('cc_prof_token'); } catch(e) {}
+  }
+
+  // 2. Try auto-login with Telegram initData (silent, no loading state shown)
+  const initData = tg?.initData || '';
+  if (initData) {
+    try {
+      const r = await fetch(`${API_BASE}/api/auth/telegram`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData })
+      });
+      const data = await r.json();
+      if (!data.error) {
+        _saveToken(data.token);
+        renderProfAuthed(data);
+        await profLoadKeys();
+        return;
+      }
+    } catch(e) {}
+  }
+
+  // 3. Not logged in — show login screen
   renderProfNotAuthed();
-  showToast('Выход выполнен');
-  // Clear session data and redirect to safe page
-  _sessionsData = {};
-  stopSessionsRefresh();
-  showPage('dashboard');
+
+  // 4. If in browser (no initData), try to load the widget automatically
+  if (!initData) {
+    setTimeout(_loadTelegramWidget, 100);
+  } else {
+    // Inside Telegram but auto-login failed — show helpful hint
+    _setLoginHint('Нажмите кнопку выше для входа');
+  }
 }
 
 function renderProfAuthed(profile) {
@@ -2071,50 +2193,66 @@ function renderProfAuthed(profile) {
   document.getElementById('prof-keys-card').style.display = 'block';
   document.getElementById('prof-wallet-card').style.display = 'block';
   document.getElementById('prof-report-card').style.display = 'block';
-
   document.getElementById('prof-name').textContent = profile.telegramFirstName || 'Пользователь';
   document.getElementById('prof-username').textContent = profile.telegramUsername ? '@' + profile.telegramUsername : '';
-
   const avatarWrap = document.getElementById('prof-avatar-wrap');
-  if (profile.telegramPhotoUrl) {
+  if (profile.telegramPhotoUrl && avatarWrap) {
     avatarWrap.innerHTML = `<img src="${escHtml(profile.telegramPhotoUrl)}" style="width:100%;height:100%;object-fit:cover" onerror="this.parentNode.innerHTML='👤'">`;
   }
 }
 
 function renderProfNotAuthed() {
-  document.getElementById('prof-not-authed').style.display = 'block';
-  document.getElementById('prof-authed').style.display = 'none';
-  document.getElementById('prof-keys-card').style.display = 'none';
-  document.getElementById('prof-wallet-card').style.display = 'none';
-  document.getElementById('prof-report-card').style.display = 'none';
+  // Show the login section, hide the authed section
+  const notAuthed = document.getElementById('prof-not-authed');
+  const authed    = document.getElementById('prof-authed');
+  if (notAuthed) notAuthed.style.display = 'block';
+  if (authed)    authed.style.display    = 'none';
+  document.getElementById('prof-keys-card')?.style && (document.getElementById('prof-keys-card').style.display = 'none');
+  document.getElementById('prof-wallet-card')?.style && (document.getElementById('prof-wallet-card').style.display = 'none');
+  document.getElementById('prof-report-card')?.style && (document.getElementById('prof-report-card').style.display = 'none');
+  // Reset login button state
+  const btn = document.getElementById('prof-btn-login');
+  if (btn) { btn.disabled = false; btn.style.display = 'block'; }
+  const spinner = document.getElementById('prof-login-status');
+  if (spinner) spinner.style.display = 'none';
 }
+
+function profileLogout() {
+  _profToken = null;
+  try { localStorage.removeItem('cc_prof_token'); } catch(e) {}
+  renderProfNotAuthed();
+  // Clear widget so it can be re-injected fresh
+  const wrap = document.getElementById('prof-tg-widget-wrap');
+  if (wrap) wrap.innerHTML = '';
+  const hint = document.getElementById('prof-login-hint');
+  if (hint) hint.innerHTML = '';
+  showToast('Выход выполнен');
+  _sessionsData = {};
+  stopSessionsRefresh();
+  showPage('dashboard');
+}
+
+// ── Keys ──────────────────────────────────────────────────────────────────────
 
 function profSelectNet(net) {
   const isTest = net === 'test';
   document.getElementById('prof-keys-test-panel').style.display = isTest ? 'block' : 'none';
   document.getElementById('prof-keys-main-panel').style.display = isTest ? 'none' : 'block';
-  document.getElementById('prof-net-test-btn').style.background = isTest ? 'var(--accent)' : '';
-  document.getElementById('prof-net-test-btn').style.color = isTest ? '#000' : '';
-  document.getElementById('prof-net-main-btn').style.background = isTest ? '' : 'var(--red)';
-  document.getElementById('prof-net-main-btn').style.color = isTest ? '' : '#fff';
+  document.getElementById('prof-net-test-btn').style.cssText += isTest ? ';background:var(--accent);color:#000' : ';background:;color:';
+  document.getElementById('prof-net-main-btn').style.cssText += isTest ? ';background:;color:' : ';background:var(--red);color:#fff';
 }
 
 async function profLoadKeys() {
   if (!_profToken) return;
   try {
-    const r = await fetch(`${API_BASE}/api/profile/keys`, {
-      headers: {'Authorization': 'Bearer ' + _profToken}
-    });
+    const r = await fetch(`${API_BASE}/api/profile/keys`, { headers: authHeaders() });
     const data = await r.json();
     if (data.error) return;
-
-    const mn = data.mainnet || {};
-    const tn = data.testnet || {};
+    const mn = data.mainnet || {}, tn = data.testnet || {};
     document.getElementById('prof-hint-test').textContent = tn.hasApiKey ? 'Текущий ключ: ' + tn.apiKeyHint : '';
     document.getElementById('prof-hint-main').textContent = mn.hasApiKey ? 'Текущий ключ: ' + mn.apiKeyHint : '';
-    if (tn.privKeyPath) document.getElementById('prof-privpath-test').placeholder = tn.privKeyPath || 'Путь к .pem файлу';
-    if (mn.privKeyPath) document.getElementById('prof-privpath-main').placeholder = mn.privKeyPath || 'Путь к .pem файлу';
-
+    if (tn.privKeyPath) document.getElementById('prof-privpath-test').placeholder = tn.privKeyPath;
+    if (mn.privKeyPath) document.getElementById('prof-privpath-main').placeholder = mn.privKeyPath;
     document.getElementById('prof-key-badge-main').style.display = mn.hasApiKey ? 'inline' : 'none';
     document.getElementById('prof-key-badge-test').style.display = tn.hasApiKey ? 'inline' : 'none';
   } catch(e) {}
@@ -2123,40 +2261,35 @@ async function profLoadKeys() {
 async function profSaveKeys(testnet) {
   if (!_profToken) { showToast('Войдите в аккаунт'); return; }
   const suffix = testnet ? 'test' : 'main';
-  const apiKey  = document.getElementById('prof-apikey-' + suffix).value.trim();
-  const privPath = document.getElementById('prof-privpath-' + suffix).value.trim();
-  if (!apiKey && !privPath) { showToast('Введите хотя бы один параметр'); return; }
+  const apiKey     = document.getElementById('prof-apikey-' + suffix)?.value.trim() || '';
+  const pemContent = (_pemContents || {})[suffix] || '';
+  const privPath   = document.getElementById('prof-privpath-' + suffix)?.value.trim() || '';
+  if (!apiKey && !pemContent && !privPath) { showToast('Введите API ключ или загрузите PEM файл'); return; }
   try {
     const r = await fetch(`${API_BASE}/api/profile/keys`, {
-      method: 'POST',
-      headers: {'Authorization': 'Bearer ' + _profToken, 'Content-Type': 'application/json'},
-      body: JSON.stringify({ testnet, apiKey, privKeyPath: privPath })
+      method: 'POST', headers: authHeaders(),
+      body: JSON.stringify({ testnet, apiKey, pemContent, privKeyPath: privPath })
     });
     const data = await r.json();
     if (data.error) { showToast('❌ ' + data.error); return; }
-    showToast('✅ Ключи сохранены');
+    showToast(data.pemSaved ? '✅ Ключи и PEM сохранены' : '✅ Ключи сохранены');
     document.getElementById('prof-apikey-' + suffix).value = '';
-    document.getElementById('prof-privpath-' + suffix).value = '';
+    if (document.getElementById('prof-privpath-' + suffix)) document.getElementById('prof-privpath-' + suffix).value = '';
+    if (_pemContents) delete _pemContents[suffix];
+    const st = document.getElementById('prof-pem-' + suffix + '-status');
+    if (st) st.style.display = 'none';
     await profLoadKeys();
   } catch(e) { showToast('❌ Ошибка: ' + e.message); }
 }
 
+// ── Wallet & Report ───────────────────────────────────────────────────────────
+
 function renderBalanceTable(balances, netLabel, color) {
   if (!balances) return '';
-  if (balances.error) {
-    return `<div style="margin-bottom:14px">
-      <div style="font-family:var(--font-head);font-size:9px;color:${color};margin-bottom:6px">${netLabel}</div>
-      <div style="color:var(--red);font-size:11px">${escHtml(balances.error)}</div></div>`;
-  }
+  if (balances.error) return `<div style="margin-bottom:14px"><div style="font-family:var(--font-head);font-size:9px;color:${color};margin-bottom:6px">${netLabel}</div><div style="color:var(--red);font-size:11px">${escHtml(balances.error)}</div></div>`;
   if (!Array.isArray(balances) || !balances.length) return '';
-  let rows = balances.map(b => `
-    <div style="display:grid;grid-template-columns:52px 1fr;gap:4px;padding:5px 0;border-bottom:1px solid rgba(42,53,96,0.4);align-items:center">
-      <span style="font-family:var(--font-head);font-size:10px;color:${color}">${escHtml(b.symbol)}</span>
-      <span style="font-size:11px;color:var(--text);text-align:right">${fmtNum(b.amount)}</span>
-    </div>`).join('');
-  return `<div style="margin-bottom:16px">
-    <div style="font-family:var(--font-head);font-size:9px;color:${color};margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid ${color}44">${netLabel} — ${balances.length} актив(ов)</div>
-    <div style="max-height:200px;overflow-y:auto;-webkit-overflow-scrolling:touch">${rows}</div></div>`;
+  const rows = balances.map(b => `<div style="display:grid;grid-template-columns:52px 1fr;gap:4px;padding:5px 0;border-bottom:1px solid rgba(42,53,96,0.4);align-items:center"><span style="font-family:var(--font-head);font-size:10px;color:${color}">${escHtml(b.symbol)}</span><span style="font-size:11px;color:var(--text);text-align:right">${fmtNum(b.amount)}</span></div>`).join('');
+  return `<div style="margin-bottom:16px"><div style="font-family:var(--font-head);font-size:9px;color:${color};margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid ${color}44">${netLabel} — ${balances.length} актив(ов)</div><div style="max-height:200px;overflow-y:auto;-webkit-overflow-scrolling:touch">${rows}</div></div>`;
 }
 
 async function profLoadWallet() {
@@ -2164,24 +2297,15 @@ async function profLoadWallet() {
   const el = document.getElementById('prof-wallet-content');
   el.innerHTML = '<div class="empty-state"><div class="spinner" style="margin:0 auto 8px"></div>Загрузка балансов...</div>';
   try {
-    const r = await fetch(`${API_BASE}/api/profile/wallet`, {
-      headers: {'Authorization': 'Bearer ' + _profToken}
-    });
+    const r = await fetch(`${API_BASE}/api/profile/wallet`, { headers: authHeaders() });
     const data = await r.json();
     if (data.error) { el.innerHTML = `<div style="color:var(--red);font-size:12px">${escHtml(data.error)}</div>`; return; }
-
     let html = '';
-    html += renderBalanceTable(data.mainnet,  'MAINNET',  'var(--green)');
-    html += renderBalanceTable(data.testnet,  'TESTNET',  'var(--accent)');
-
+    html += renderBalanceTable(data.mainnet, 'MAINNET', 'var(--green)');
+    html += renderBalanceTable(data.testnet, 'TESTNET', 'var(--accent)');
     if (data.activeSessions?.length) {
-      html += `<div style="padding-top:10px;border-top:1px solid var(--border)">
-        <div style="font-family:var(--font-head);font-size:9px;color:var(--muted);margin-bottom:8px">АКТИВНЫЕ СЕССИИ</div>`;
-      for (const s of data.activeSessions) {
-        html += `<div style="display:flex;justify-content:space-between;font-size:11px;padding:5px 0;border-bottom:1px solid rgba(42,53,96,0.4)">
-          <span style="color:var(--muted);font-family:var(--font-head);font-size:10px">${escHtml(String(s.coin))}</span>
-          <span>${fmtNum(s.coinBalance)} ${escHtml(String(s.coin))} + ${fmtNum(s.usdtBalance)} USDT</span></div>`;
-      }
+      html += `<div style="padding-top:10px;border-top:1px solid var(--border)"><div style="font-family:var(--font-head);font-size:9px;color:var(--muted);margin-bottom:8px">АКТИВНЫЕ СЕССИИ</div>`;
+      for (const s of data.activeSessions) html += `<div style="display:flex;justify-content:space-between;font-size:11px;padding:5px 0;border-bottom:1px solid rgba(42,53,96,0.4)"><span style="color:var(--muted);font-family:var(--font-head);font-size:10px">${escHtml(String(s.coin))}</span><span>${fmtNum(s.coinBalance)} ${escHtml(String(s.coin))} + ${fmtNum(s.usdtBalance)} USDT</span></div>`;
       html += '</div>';
     }
     if (!html) html = '<div style="color:var(--muted);font-size:12px;padding:12px 0">Нет данных. Добавьте API ключи Binance.</div>';
@@ -2194,212 +2318,44 @@ async function profLoadReport() {
   const el = document.getElementById('prof-report-content');
   el.innerHTML = '<div class="empty-state"><div class="spinner" style="margin:0 auto 8px"></div></div>';
   try {
-    const r = await fetch(`${API_BASE}/api/profile/report`, {
-      headers: {'Authorization': 'Bearer ' + _profToken}
-    });
+    const r = await fetch(`${API_BASE}/api/profile/report`, { headers: authHeaders() });
     const data = await r.json();
     if (data.error) { el.innerHTML = `<div style="color:var(--red);font-size:12px">${escHtml(data.error)}</div>`; return; }
-
     const byType = data.sessionsByType || {};
-    const typeRows = Object.entries(byType).map(([t,n]) =>
-      `<div style="display:flex;justify-content:space-between;font-size:11px;padding:3px 0">
-        <span style="color:var(--muted)">${t}</span><span>${n} сессий</span></div>`).join('');
-
-    let html = `
-      <div class="params-grid" style="margin-bottom:12px">
-        <div class="param-item"><div class="param-key">СЕССИЙ ВСЕГО</div><div class="param-val" style="color:var(--accent)">${data.totalSessions}</div></div>
-        <div class="param-item"><div class="param-key">ПОКУПОК</div><div class="param-val" style="color:var(--green)">${data.buyCount}</div></div>
-        <div class="param-item"><div class="param-key">ПРОДАЖ</div><div class="param-val" style="color:var(--red)">${data.sellCount}</div></div>
-      </div>
-      <div style="margin-bottom:12px">${typeRows}</div>`;
-
-    // Session history table
+    const typeRows = Object.entries(byType).map(([t,n]) => `<div style="display:flex;justify-content:space-between;font-size:11px;padding:3px 0"><span style="color:var(--muted)">${t}</span><span>${n}</span></div>`).join('');
+    let html = `<div class="params-grid" style="margin-bottom:12px">
+      <div class="param-item"><div class="param-key">СЕССИЙ</div><div class="param-val" style="color:var(--accent)">${data.totalSessions}</div></div>
+      <div class="param-item"><div class="param-key">ПОКУПОК</div><div class="param-val" style="color:var(--green)">${data.buyCount}</div></div>
+      <div class="param-item"><div class="param-key">ПРОДАЖ</div><div class="param-val" style="color:var(--red)">${data.sellCount}</div></div>
+    </div>${typeRows}`;
     const sessions = (data.sessions || []).slice(0, 50);
     if (sessions.length) {
-      html += `<div style="font-family:var(--font-head);font-size:9px;color:var(--muted);margin-bottom:8px">ПОСЛЕДНИЕ СЕССИИ</div>
-        <div style="display:flex;flex-direction:column;gap:6px">`;
+      html += `<div style="font-family:var(--font-head);font-size:9px;color:var(--muted);margin:10px 0 8px">ПОСЛЕДНИЕ СЕССИИ</div><div style="display:flex;flex-direction:column;gap:6px">`;
       for (const s of sessions) {
-        const buys  = (s.events||[]).filter(e=>e.type==='BUY').length;
+        const buys = (s.events||[]).filter(e=>e.type==='BUY').length;
         const sells = (s.events||[]).filter(e=>e.type==='SELL').length;
-        const dot   = s.status==='RUNNING' ? 'var(--green)' : s.status==='ERROR' ? 'var(--red)' : 'var(--muted)';
-        const dur   = s.endedAt ? Math.round((s.endedAt - s.startedAt)/60000) + ' мин' : 'в процессе';
-        html += `<div style="background:var(--bg3);border-radius:var(--radius-sm);padding:8px 10px;border:1px solid var(--border)">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-            <div style="width:7px;height:7px;border-radius:50%;background:${dot};flex-shrink:0"></div>
-            <span style="font-family:var(--font-head);font-size:10px;color:var(--text)">${escHtml(s.coinName)}</span>
-            <span style="font-size:9px;color:var(--muted)">${s.type}</span>
-            <span style="font-size:9px;color:var(--muted);margin-left:auto">${fmtDateTime(s.startedAt)}</span>
-          </div>
-          <div style="display:flex;gap:12px;font-size:10px;color:var(--muted)">
-            <span>⏱ ${dur}</span>
-            <span style="color:var(--green)">▲ ${buys} покупок</span>
-            <span style="color:var(--red)">▼ ${sells} продаж</span>
-          </div></div>`;
+        const dot = s.status==='RUNNING'?'var(--green)':s.status==='ERROR'?'var(--red)':'var(--muted)';
+        const dur = s.endedAt ? Math.round((s.endedAt - s.startedAt)/60000) + ' мин' : 'активна';
+        html += `<div style="background:var(--bg3);border-radius:var(--radius-sm);padding:8px 10px;border:1px solid var(--border)"><div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><div style="width:7px;height:7px;border-radius:50%;background:${dot};flex-shrink:0"></div><span style="font-family:var(--font-head);font-size:10px;color:var(--text)">${escHtml(s.coinName)}</span><span style="font-size:9px;color:var(--muted)">${s.type}</span><span style="font-size:9px;color:var(--muted);margin-left:auto">${fmtDateTime(s.startedAt)}</span></div><div style="display:flex;gap:12px;font-size:10px;color:var(--muted)"><span>⏱ ${dur}</span><span style="color:var(--green)">▲ ${buys}</span><span style="color:var(--red)">▼ ${sells}</span></div></div>`;
       }
       html += '</div>';
     }
-
     el.innerHTML = html;
   } catch(e) { el.innerHTML = `<div style="color:var(--red);font-size:12px">Ошибка: ${escHtml(e.message)}</div>`; }
 }
 
-// Auto-login on profile tab open using Telegram initData
-async function initProfilePage() {
-  if (_profToken) {
-    // Verify token is still valid by fetching profile
-    try {
-      const r = await fetch(`${API_BASE}/api/profile`, {
-        headers: {'Authorization': 'Bearer ' + _profToken}
-      });
-      const data = await r.json();
-      if (!data.error) {
-        renderProfAuthed(data);
-        await profLoadKeys();
-        return;
-      }
-    } catch(e) {}
-    // Token invalid — clear it
-    _profToken = null;
-    try { localStorage.removeItem('cc_prof_token'); } catch(e) {}
-  }
-
-  // Try auto-login with Telegram initData
-  const initData = tg?.initData || '';
-  if (initData) {
-    await profDoAuth(initData);
-  } else {
-    renderProfNotAuthed();
-  }
-}
-
-// ── PEM file reader ─────────────────────────────────────────────────────────
-const _pemContents = {}; // 'test' | 'main' → pem string
-
+// ── PEM file reader ───────────────────────────────────────────────────────────
+const _pemContents = {};
 function profReadPem(suffix, input) {
   const file = input.files?.[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = ev => {
     _pemContents[suffix] = ev.target.result;
-    const statusEl = document.getElementById('prof-pem-' + suffix + '-status');
-    if (statusEl) {
-      statusEl.textContent = '✅ Файл загружен: ' + file.name;
-      statusEl.style.display = 'block';
-    }
+    const st = document.getElementById('prof-pem-' + suffix + '-status');
+    if (st) { st.textContent = '✅ Файл загружен: ' + file.name; st.style.display = 'block'; }
   };
   reader.readAsText(file);
-}
-
-// Override profSaveKeys to include PEM content
-const _origProfSaveKeys = profSaveKeys;
-// Redefine to send pemContent
-// (defined below inline to access _pemContents)
-
-// ── Browser Telegram Login Widget ───────────────────────────────────────────
-async function initTelegramWidget() {
-  const webappBlock   = document.getElementById('prof-login-webapp');
-  const browserBlock  = document.getElementById('prof-login-browser');
-  const fallbackBlock = document.getElementById('prof-login-fallback');
-
-  // Inside Telegram WebApp — show simple button
-  if (tg?.initData) {
-    if (webappBlock)  webappBlock.style.display  = 'block';
-    if (browserBlock) browserBlock.style.display = 'none';
-    if (fallbackBlock) fallbackBlock.style.display = 'none';
-    return;
-  }
-
-  // Browser — try to show Login Widget
-  try {
-    const r = await fetch(`${API_BASE}/api/auth/config`);
-    const cfg = await r.json();
-    const botUsername = cfg.botUsername;
-
-    if (botUsername && botUsername !== 'YOUR_BOT_NAME' && botUsername !== 'NEW_MAMA_CXHEMA') {
-      if (webappBlock)   webappBlock.style.display   = 'none';
-      if (browserBlock)  browserBlock.style.display  = 'block';
-      if (fallbackBlock) fallbackBlock.style.display = 'none';
-
-      const wrap = document.getElementById('prof-tg-widget-wrap');
-      if (!wrap || wrap.querySelector('script')) return; // already injected
-
-      window.onTelegramWidgetAuth = async (user) => {
-        try {
-          const r = await fetch(`${API_BASE}/api/auth/telegram`, {
-            method: 'POST',
-            headers: {'Content-Type':'application/json'},
-            body: JSON.stringify(user)
-          });
-          const data = await r.json();
-          if (data.error) { showToast('❌ ' + data.error); return; }
-          _profToken = data.token;
-          try { localStorage.setItem('cc_prof_token', _profToken); } catch(e) {}
-          renderProfAuthed(data);
-          await profLoadKeys();
-          showToast('✅ Авторизован как ' + (data.telegramFirstName || 'пользователь'));
-        } catch(e) { showToast('❌ Ошибка: ' + e.message); }
-      };
-
-      const script = document.createElement('script');
-      script.async = true;
-      script.src = 'https://telegram.org/js/telegram-widget.js?22';
-      script.setAttribute('data-telegram-login', botUsername);
-      script.setAttribute('data-size', 'large');
-      script.setAttribute('data-radius', '8');
-      script.setAttribute('data-userpic', 'true');
-      script.setAttribute('data-request-access', 'write');
-      script.setAttribute('data-onauth', 'onTelegramWidgetAuth(user)');
-      wrap.innerHTML = '';
-      wrap.appendChild(script);
-    } else {
-      // Bot username not configured — show fallback instructions
-      if (webappBlock)   webappBlock.style.display   = 'none';
-      if (browserBlock)  browserBlock.style.display  = 'none';
-      if (fallbackBlock) fallbackBlock.style.display = 'block';
-    }
-  } catch(e) {
-    if (fallbackBlock) fallbackBlock.style.display = 'block';
-  }
-}
-
-// ── Override profSaveKeys with PEM support ───────────────────────────────────
-async function profSaveKeys(testnet) {
-  if (!_profToken) { showToast('Войдите в аккаунт'); return; }
-  const suffix = testnet ? 'test' : 'main';
-  const apiKey    = document.getElementById('prof-apikey-' + suffix)?.value.trim() || '';
-  const pemContent = _pemContents[suffix] || '';
-  // Fallback: server-side path (if user typed it)
-  const privPath  = document.getElementById('prof-privpath-' + suffix)?.value.trim() || '';
-
-  if (!apiKey && !pemContent && !privPath) {
-    showToast('Введите API ключ или загрузите PEM файл');
-    return;
-  }
-  try {
-    const r = await fetch(`${API_BASE}/api/profile/keys`, {
-      method: 'POST',
-      headers: {'Authorization': 'Bearer ' + _profToken, 'Content-Type': 'application/json'},
-      body: JSON.stringify({ testnet, apiKey, pemContent, privKeyPath: privPath })
-    });
-    const data = await r.json();
-    if (data.error) { showToast('❌ ' + data.error); return; }
-    const msg = data.pemSaved ? '✅ Ключи и PEM сохранены' : '✅ Ключи сохранены';
-    showToast(msg);
-    document.getElementById('prof-apikey-' + suffix).value = '';
-    if (document.getElementById('prof-privpath-' + suffix)) document.getElementById('prof-privpath-' + suffix).value = '';
-    delete _pemContents[suffix];
-    const st = document.getElementById('prof-pem-' + suffix + '-status');
-    if (st) st.style.display = 'none';
-    await profLoadKeys();
-  } catch(e) { showToast('❌ Ошибка: ' + e.message); }
-}
-
-// ── Override initProfilePage to also init widget ─────────────────────────────
-const _origInitProfilePage = initProfilePage;
-async function initProfilePage() {
-  await _origInitProfilePage();
-  // Init widget after auth state is known (only if not authed via Telegram app)
-  setTimeout(initTelegramWidget, 300);
 }
 
 // ============================================================
