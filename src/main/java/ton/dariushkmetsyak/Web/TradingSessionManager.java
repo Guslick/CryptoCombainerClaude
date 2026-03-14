@@ -567,12 +567,13 @@ public class TradingSessionManager {
 
     // ---- Delete ----
 
-    public boolean deleteSession(String sessionId) {
+    public boolean deleteSession(String sessionId) { return deleteSession(sessionId, 0L); }
+    public boolean deleteSession(String sessionId, long requesterId) {
         SessionInfo info = sessions.get(sessionId);
         if (info == null) return false;
+        if (requesterId != 0 && info.ownerId != 0 && info.ownerId != requesterId) return false;
         if ("RUNNING".equals(info.status)) return false;
         sessions.remove(sessionId);
-        // Also delete TradingState file
         new StateManager().deleteState(sessionId);
         saveSessions();
         log.info("Deleted session: {}", sessionId);
