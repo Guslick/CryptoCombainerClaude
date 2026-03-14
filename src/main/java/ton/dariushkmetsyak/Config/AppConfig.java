@@ -71,6 +71,10 @@ public class AppConfig {
         return get("telegram.bot.token", "YOUR_BOT_TOKEN_HERE");
     }
 
+    public String getBotUsername() {
+        return get("telegram.bot.username", "MamkinSchemshikTradingBot");
+    }
+
     public String getGeckoApiKey() {
         return get("gecko.api.key", "");
     }

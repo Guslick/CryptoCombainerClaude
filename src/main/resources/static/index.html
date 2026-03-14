@@ -948,7 +948,7 @@ async function startTrading() {
     chartRefreshInterval: +document.getElementById('tradeChartRefresh').value||60,
   };
   try {
-    const r = await fetch(`${API_BASE}/api/trading/start`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const r = await fetch(`${API_BASE}/api/trading/start`, {method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
     const data = await r.json();
     if (data.error) throw new Error(data.error);
     showAlert('tradeAlert','success',`✅ Сессия запущена! ID: ${data.id}`);
@@ -958,9 +958,7 @@ async function startTrading() {
 }
 
 async function stopAllTrading() {
-  await fetch(`${API_BASE}/api/trading/stop`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
-  showToast('⏹ Все сессии остановлены');
-  loadSessions();
+  showToast('⚠️ Массовая остановка сессий отключена из соображений безопасности');
 }
 
 // ============================================================
@@ -980,7 +978,7 @@ async function startResearch() {
     chartRefreshInterval: +document.getElementById('resChartRefresh').value||60,
   };
   try {
-    const r = await fetch(`${API_BASE}/api/trading/start`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const r = await fetch(`${API_BASE}/api/trading/start`,{method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
     const data = await r.json();
     if (data.error) throw new Error(data.error);
     showAlert('resAlert','success',`✅ Исследование запущено!`);
@@ -1006,7 +1004,7 @@ async function startBacktest() {
     chartType: document.getElementById('btChartType').value,
   };
   try {
-    const r = await fetch(`${API_BASE}/api/backtest/start`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const r = await fetch(`${API_BASE}/api/backtest/start`,{method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
     const sessionData = await r.json();
     if (sessionData.error) throw new Error(sessionData.error);
     showAlert('btAlert','info','⏳ Бэктест запущен...');
@@ -1015,14 +1013,14 @@ async function startBacktest() {
     const pollId = setInterval(async ()=>{
       attempts++;
       if (attempts>60) { clearInterval(pollId); showAlert('btAlert','warn','⏰ Таймаут'); btn.disabled=false; btn.innerHTML='🧪 ЗАПУСТИТЬ БЭКТЕСТ'; return; }
-      const sr = await fetch(`${API_BASE}/api/trading/sessions`).catch(()=>null);
+      const sr = await fetch(`${API_BASE}/api/trading/sessions`, { headers: authHeaders() }).catch(()=>null);
       if (!sr?.ok) return;
       const sessions = await sr.json();
       const sess = sessions.find(s=>s.id===sessionData.id);
       if (!sess) return;
       if (sess.status==='DONE') {
         clearInterval(pollId);
-        const rr = await fetch(`${API_BASE}/api/backtest/result`);
+        const rr = await fetch(`${API_BASE}/api/backtest/result`, { headers: authHeaders() });
         showBacktestResult(await rr.json());
         btn.disabled=false; btn.innerHTML='🧪 ЗАПУСТИТЬ БЭКТЕСТ';
         document.getElementById('btAlert').style.display='none';

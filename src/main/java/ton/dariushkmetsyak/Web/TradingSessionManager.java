@@ -550,7 +550,7 @@ public class TradingSessionManager {
     public boolean stopSession(String sessionId, long requesterId) {
         SessionInfo info = sessions.get(sessionId);
         if (info == null) return false;
-        if (requesterId != 0 && info.ownerId != 0 && info.ownerId != requesterId) return false;
+        if (requesterId == 0L || info.ownerId != requesterId) return false;
         if (info.thread != null && info.thread.isAlive()) info.thread.interrupt();
         info.status = "STOPPED";
         info.stoppedUnexpectedly = false;
@@ -571,7 +571,7 @@ public class TradingSessionManager {
     public boolean deleteSession(String sessionId, long requesterId) {
         SessionInfo info = sessions.get(sessionId);
         if (info == null) return false;
-        if (requesterId != 0 && info.ownerId != 0 && info.ownerId != requesterId) return false;
+        if (requesterId == 0L || info.ownerId != requesterId) return false;
         if ("RUNNING".equals(info.status)) return false;
         sessions.remove(sessionId);
         new StateManager().deleteState(sessionId);
@@ -589,21 +589,21 @@ public class TradingSessionManager {
         return result;
     }
 
-    /** Return only sessions owned by the given userId, or legacy sessions (ownerId==0). */
+    /** Return only sessions owned by the given userId. */
     public List<Map<String, Object>> getSessionsByOwner(long userId) {
         List<Map<String, Object>> result = new ArrayList<>();
         sessions.values().stream()
-            .filter(s -> s.ownerId == 0 || s.ownerId == userId)
+                        .filter(s -> s.ownerId == userId)
             .forEach(s -> result.add(s.toMap(true)));
         result.sort((a, b) -> Long.compare((Long) b.get("startedAt"), (Long) a.get("startedAt")));
         return result;
     }
 
-    /** Return session only if userId matches owner (or session is unowned). */
+    /** Return session only if userId matches owner. */
     public Map<String, Object> getSessionDetailForOwner(String sessionId, long userId) {
         SessionInfo info = sessions.get(sessionId);
         if (info == null) return Map.of("error", "Сессия не найдена");
-        if (info.ownerId != 0 && info.ownerId != userId) return Map.of("error", "Нет доступа");
+        if (info.ownerId != userId) return Map.of("error", "Нет доступа");
         return info.toMap(true);
     }
 

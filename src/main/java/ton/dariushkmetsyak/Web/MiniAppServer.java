@@ -43,7 +43,7 @@ public class MiniAppServer {
         // Bot name for Telegram Login Widget (browser auth)
         server.createContext("/api/auth/config", exchange -> handleJson(exchange, () -> {
             Map<String, Object> cfg = new LinkedHashMap<>();
-            cfg.put("botUsername", "MamkinSchemshikTradingBot");
+            cfg.put("botUsername", AppConfig.getInstance().getBotUsername());
             return cfg;
         }));
 
@@ -94,79 +94,98 @@ public class MiniAppServer {
 
         server.createContext("/api/trading/sessions", exchange -> {
             if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            Long userId = resolveUser(exchange);
+            if (userId == null || userId == 0L) {
+                handleJson(exchange, () -> errorMap("Требуется авторизация"));
+                return;
+            }
             String path = exchange.getRequestURI().getPath();
             // /api/trading/sessions/{id} → session detail with events
             if (path.matches("/api/trading/sessions/[^/]+")) {
                 String sessionId = path.substring("/api/trading/sessions/".length());
-                Long userId2 = resolveUser(exchange);
-                handleJson(exchange, () -> userId2 != null
-                    ? TradingSessionManager.getInstance().getSessionDetailForOwner(sessionId, userId2)
-                    : TradingSessionManager.getInstance().getSessionDetail(sessionId));
+                handleJson(exchange, () -> TradingSessionManager.getInstance().getSessionDetailForOwner(sessionId, userId));
             } else {
-                Long userId2 = resolveUser(exchange);
-                handleJson(exchange, () -> userId2 != null
-                    ? TradingSessionManager.getInstance().getSessionsByOwner(userId2)
-                    : TradingSessionManager.getInstance().getAllSessions());
+                handleJson(exchange, () -> TradingSessionManager.getInstance().getSessionsByOwner(userId));
             }
         });
 
         server.createContext("/api/trading/start", exchange -> {
             if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
-            final Long startOwnerId = resolveUser(exchange);
+            final Long startOwnerId = requireUser(exchange);
+            if (startOwnerId == null) {
+                handleJson(exchange, () -> errorMap("Требуется авторизация"));
+                return;
+            }
             handleJson(exchange, () -> startTradingFromRequest(exchange, startOwnerId));
         });
 
         server.createContext("/api/trading/stop", exchange -> {
             if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            final Long stopOwner = requireUser(exchange);
+            if (stopOwner == null) {
+                handleJson(exchange, () -> errorMap("Требуется авторизация"));
+                return;
+            }
             handleJson(exchange, () -> {
                 Map<String, Object> body = parseBody(exchange);
                 String sessionId = (String) body.get("sessionId");
-                if (sessionId == null) {
-                    TradingSessionManager.getInstance().stopAllSessions();
-                    return Map.of("stopped", true, "message", "Все сессии остановлены");
-                }
-                Long stopOwner = resolveUser(exchange);
-                boolean ok = TradingSessionManager.getInstance().stopSession(sessionId, stopOwner != null ? stopOwner : 0L);
-                return Map.of("stopped", ok, "sessionId", sessionId);
+                if (sessionId == null) return errorMap("sessionId обязателен");
+                boolean ok = TradingSessionManager.getInstance().stopSession(sessionId, stopOwner);
+                if (!ok) return errorMap("Нет доступа или сессия не найдена");
+                return Map.of("stopped", true, "sessionId", sessionId);
             });
         });
 
         server.createContext("/api/trading/resume", exchange -> {
             if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            final Long resumeOwner = requireUser(exchange);
+            if (resumeOwner == null) {
+                handleJson(exchange, () -> errorMap("Требуется авторизация"));
+                return;
+            }
             handleJson(exchange, () -> {
                 Map<String, Object> body = parseBody(exchange);
                 String sessionId = (String) body.get("sessionId");
                 long chatId = toLong(body.get("chatId"), AppConfig.getInstance().getDefaultChatId());
                 if (sessionId == null) return errorMap("sessionId обязателен");
-                Long resumeOwner = resolveUser(exchange);
-                // Verify ownership: getSessionDetailForOwner returns error map if not owner
-                if (resumeOwner != null && resumeOwner != 0L) {
-                    Map<String, Object> check = TradingSessionManager.getInstance().getSessionDetailForOwner(sessionId, resumeOwner);
-                    if (check.containsKey("error")) return check;
-                }
+                Map<String, Object> check = TradingSessionManager.getInstance().getSessionDetailForOwner(sessionId, resumeOwner);
+                if (check.containsKey("error")) return check;
                 return TradingSessionManager.getInstance().resumeSession(sessionId, chatId);
             });
         });
 
         server.createContext("/api/trading/delete", exchange -> {
             if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            final Long delOwner = requireUser(exchange);
+            if (delOwner == null) {
+                handleJson(exchange, () -> errorMap("Требуется авторизация"));
+                return;
+            }
             handleJson(exchange, () -> {
                 Map<String, Object> body = parseBody(exchange);
                 String sessionId = (String) body.get("sessionId");
                 if (sessionId == null) return errorMap("sessionId обязателен");
-                Long delOwner = resolveUser(exchange);
-                boolean ok = TradingSessionManager.getInstance().deleteSession(sessionId, delOwner != null ? delOwner : 0L);
-                return Map.of("deleted", ok, "sessionId", sessionId != null ? sessionId : "");
+                boolean ok = TradingSessionManager.getInstance().deleteSession(sessionId, delOwner);
+                if (!ok) return errorMap("Нет доступа, сессия запущена или не найдена");
+                return Map.of("deleted", true, "sessionId", sessionId);
             });
         });
 
         server.createContext("/api/backtest/start", exchange -> {
             if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            if (requireUser(exchange) == null) {
+                handleJson(exchange, () -> errorMap("Требуется авторизация"));
+                return;
+            }
             handleJson(exchange, () -> startBacktestFromRequest(exchange));
         });
 
         server.createContext("/api/backtest/result", exchange -> {
             if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            if (requireUser(exchange) == null) {
+                handleJson(exchange, () -> errorMap("Требуется авторизация"));
+                return;
+            }
             handleJson(exchange, () -> {
                 Map<String, Object> result = TradingSessionManager.getInstance().getLastBacktestResult();
                 return result != null ? result : Map.of("ready", false, "message", "Результатов нет");
@@ -412,7 +431,7 @@ public class MiniAppServer {
     private void addCorsHeaders(HttpExchange exchange) {
         exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
         exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        exchange.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type");
+        exchange.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type, Authorization");
     }
 
     @SuppressWarnings("unchecked")
@@ -454,6 +473,12 @@ public class MiniAppServer {
             token = getQueryParam(exchange.getRequestURI().getQuery(), "token");
         }
         return UserProfileManager.getInstance().resolveSession(token);
+    }
+
+    private Long requireUser(com.sun.net.httpserver.HttpExchange exchange) {
+        Long userId = resolveUser(exchange);
+        if (userId == null || userId == 0L) return null;
+        return userId;
     }
 
     private double toDouble(Object val, double def) {
