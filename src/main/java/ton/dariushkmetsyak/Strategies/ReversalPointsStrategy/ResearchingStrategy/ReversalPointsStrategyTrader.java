@@ -114,7 +114,10 @@ public class ReversalPointsStrategyTrader {
         this.chatID = chatID;
         this.sessionId = sessionId != null ? sessionId : "trader_" + System.currentTimeMillis();
         this.accountType = account.getClass().getSimpleName().toUpperCase();
-        this.stateManager = new StateManager();
+        // Pass userId to StateManager so state files are stored in user-namespaced directory
+        long smUserId = 0L;
+        if (savedState != null && savedState.getChatId() != null) smUserId = savedState.getChatId();
+        this.stateManager = new StateManager(smUserId);
         this.isResume = isResume;
 
         if (savedState != null && tryRestoreFromState(savedState)) {

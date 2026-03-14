@@ -317,8 +317,7 @@ public class UserProfileManager {
         }
 
         // Active session snapshots
-        List<Map<String, Object>> running = TradingSessionManager.getInstance()
-            .getSessionsByOwner(userId).stream()
+        List<Map<String, Object>> running = TradingSessionManager.forUser(userId).getAllSessions().stream()
             .filter(s -> "RUNNING".equals(s.get("status")))
             .map(s -> {
                 Map<String, Object> m = new LinkedHashMap<>();
@@ -370,7 +369,7 @@ public class UserProfileManager {
     // ── Trade Report ─────────────────────────────────────────────────────────
 
     public Map<String, Object> getTradingReport(long userId) {
-        List<Map<String, Object>> all = TradingSessionManager.getInstance().getSessionsByOwner(userId);
+        List<Map<String, Object>> all = TradingSessionManager.forUser(userId).getAllSessions();
         long buyCount = 0, sellCount = 0;
         Map<String, Integer> byType = new LinkedHashMap<>();
         for (var s : all) {

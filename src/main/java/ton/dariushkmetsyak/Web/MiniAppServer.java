@@ -99,108 +99,101 @@ public class MiniAppServer {
             handleJson(exchange, () -> getChartData(coinId, finalInterval));
         });
 
+        // ── Trading: ALL endpoints require valid auth token ──────────────────────
+
         server.createContext("/api/trading/sessions", exchange -> {
-            if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            addCorsHeaders(exchange);
+            if ("OPTIONS".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(204,-1); return; }
+            Long userId = requireUser(exchange); if (userId == null) return;
+            TradingSessionManager mgr = TradingSessionManager.forUser(userId);
             String path = exchange.getRequestURI().getPath();
-            // /api/trading/sessions/{id} → session detail with events
             if (path.matches("/api/trading/sessions/[^/]+")) {
                 String sessionId = path.substring("/api/trading/sessions/".length());
-                Long userId2 = resolveUser(exchange);
-                handleJson(exchange, () -> userId2 != null
-                    ? TradingSessionManager.getInstance().getSessionDetailForOwner(sessionId, userId2)
-                    : TradingSessionManager.getInstance().getSessionDetail(sessionId));
+                handleJson(exchange, () -> mgr.getSessionDetail(sessionId));
             } else {
-                Long userId2 = resolveUser(exchange);
-                handleJson(exchange, () -> userId2 != null
-                    ? TradingSessionManager.getInstance().getSessionsByOwner(userId2)
-                    : TradingSessionManager.getInstance().getAllSessions());
+                handleJson(exchange, () -> mgr.getAllSessions());
             }
         });
 
         server.createContext("/api/trading/start", exchange -> {
-            if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
-            final Long startOwnerId = resolveUser(exchange);
-            handleJson(exchange, () -> startTradingFromRequest(exchange, startOwnerId));
+            if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
+            Long userId = requireUser(exchange); if (userId == null) return;
+            handleJson(exchange, () -> startTradingFromRequest(exchange, userId));
         });
 
         server.createContext("/api/trading/stop", exchange -> {
-            if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
+            Long userId = requireUser(exchange); if (userId == null) return;
             handleJson(exchange, () -> {
                 Map<String, Object> body = parseBody(exchange);
                 String sessionId = (String) body.get("sessionId");
-                if (sessionId == null) {
-                    TradingSessionManager.getInstance().stopAllSessions();
-                    return Map.of("stopped", true, "message", "Все сессии остановлены");
-                }
-                Long stopOwner = resolveUser(exchange);
-                boolean ok = TradingSessionManager.getInstance().stopSession(sessionId, stopOwner != null ? stopOwner : 0L);
-                return Map.of("stopped", ok, "sessionId", sessionId);
+                if (sessionId == null) return errorMap("sessionId обязателен");
+                boolean ok = TradingSessionManager.forUser(userId).stopSession(sessionId);
+                return Map.of("stopped", ok);
             });
         });
 
         server.createContext("/api/trading/resume", exchange -> {
-            if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
+            Long userId = requireUser(exchange); if (userId == null) return;
             handleJson(exchange, () -> {
                 Map<String, Object> body = parseBody(exchange);
                 String sessionId = (String) body.get("sessionId");
-                long chatId = toLong(body.get("chatId"), AppConfig.getInstance().getDefaultChatId());
                 if (sessionId == null) return errorMap("sessionId обязателен");
-                Long resumeOwner = resolveUser(exchange);
-                // Verify ownership: getSessionDetailForOwner returns error map if not owner
-                if (resumeOwner != null && resumeOwner != 0L) {
-                    Map<String, Object> check = TradingSessionManager.getInstance().getSessionDetailForOwner(sessionId, resumeOwner);
-                    if (check.containsKey("error")) return check;
-                }
-                return TradingSessionManager.getInstance().resumeSession(sessionId, chatId);
+                long chatId = toLong(body.get("chatId"), AppConfig.getInstance().getDefaultChatId());
+                UserProfileManager.UserProfile profile = UserProfileManager.getInstance().loadProfile(userId);
+                return TradingSessionManager.forUser(userId).resumeSession(sessionId, chatId, profile);
             });
         });
 
         server.createContext("/api/trading/delete", exchange -> {
-            if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
+            Long userId = requireUser(exchange); if (userId == null) return;
             handleJson(exchange, () -> {
                 Map<String, Object> body = parseBody(exchange);
                 String sessionId = (String) body.get("sessionId");
                 if (sessionId == null) return errorMap("sessionId обязателен");
-                Long delOwner = resolveUser(exchange);
-                boolean ok = TradingSessionManager.getInstance().deleteSession(sessionId, delOwner != null ? delOwner : 0L);
-                return Map.of("deleted", ok, "sessionId", sessionId != null ? sessionId : "");
+                boolean ok = TradingSessionManager.forUser(userId).deleteSession(sessionId);
+                return Map.of("deleted", ok, "sessionId", sessionId);
             });
         });
 
         server.createContext("/api/backtest/start", exchange -> {
-            if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
-            handleJson(exchange, () -> startBacktestFromRequest(exchange));
+            if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
+            Long userId = requireUser(exchange); if (userId == null) return;
+            handleJson(exchange, () -> startBacktestFromRequest(exchange, userId));
         });
 
         server.createContext("/api/backtest/result", exchange -> {
-            if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
+            Long userId = requireUser(exchange); if (userId == null) return;
             handleJson(exchange, () -> {
-                Map<String, Object> result = TradingSessionManager.getInstance().getLastBacktestResult();
+                Map<String, Object> result = TradingSessionManager.forUser(userId).getLastBacktestResult();
                 return result != null ? result : Map.of("ready", false, "message", "Результатов нет");
             });
         });
 
-        // ---- Profile / Auth / Keys ----
+        // ── Profile / Auth ────────────────────────────────────────────────────
+
+        server.createContext("/api/auth/config", exchange -> handleJson(exchange, () -> {
+            Map<String, Object> cfg = new LinkedHashMap<>();
+            String botUsername = AppConfig.getInstance().get("telegram.bot.username", "");
+            if (botUsername.isBlank()) botUsername = "NEW_MAMA_CXHEMA";
+            cfg.put("botUsername", botUsername);
+            return cfg;
+        }));
 
         server.createContext("/api/auth/telegram", exchange -> handleJson(exchange, () -> {
             if (!"POST".equals(exchange.getRequestMethod())) return errorMap("POST required");
             Map<String, Object> body = parseBody(exchange);
-            String botToken = ton.dariushkmetsyak.Config.AppConfig.getInstance().getBotToken();
+            String botToken = AppConfig.getInstance().getBotToken();
             UserProfileManager upm = UserProfileManager.getInstance();
             Map<String, Object> tgUser = null;
-
-            // Mode 1: Telegram WebApp initData
             String initData = (String) body.get("initData");
-            if (initData != null && !initData.isBlank()) {
+            if (initData != null && !initData.isBlank())
                 tgUser = upm.verifyInitData(initData, botToken);
-            }
-
-            // Mode 2: Telegram Login Widget data (browser)
-            if (tgUser == null && body.containsKey("id") && body.containsKey("hash")) {
+            if (tgUser == null && body.containsKey("id") && body.containsKey("hash"))
                 tgUser = upm.verifyLoginWidget(body, botToken);
-            }
-
-            // Mode 3: dev bypass (localhost only)
             if (tgUser == null) {
                 String host = exchange.getRemoteAddress().getAddress().getHostAddress();
                 if ("dev_bypass".equals(initData) && (host.startsWith("127.") || host.startsWith("::1"))) {
@@ -209,8 +202,10 @@ public class MiniAppServer {
                     return errorMap("Ошибка авторизации Telegram");
                 }
             }
-
             UserProfileManager.UserProfile profile = upm.updateFromTelegram(tgUser);
+            // Load user's sessions on first login
+            TradingSessionManager userMgr = TradingSessionManager.forUser(profile.telegramUserId);
+            userMgr.loadSessions();
             String token = upm.createSession(profile.telegramUserId);
             Map<String, Object> resp = new LinkedHashMap<>(profile.toPublicMap());
             resp.put("token", token);
@@ -220,16 +215,14 @@ public class MiniAppServer {
         server.createContext("/api/profile", exchange -> handleJson(exchange, () -> {
             Long userId = resolveUser(exchange);
             if (userId == null) return errorMap("Требуется авторизация");
+            UserProfileManager.UserProfile p = UserProfileManager.getInstance().loadProfile(userId);
             if ("POST".equals(exchange.getRequestMethod())) {
                 Map<String, Object> body = parseBody(exchange);
-                UserProfileManager upm = UserProfileManager.getInstance();
-                UserProfileManager.UserProfile p = upm.loadProfile(userId);
                 if (p == null) return errorMap("Профиль не найден");
                 if (body.containsKey("telegramFirstName")) p.telegramFirstName = (String) body.get("telegramFirstName");
-                upm.saveProfile(p);
+                UserProfileManager.getInstance().saveProfile(p);
                 return p.toPublicMap();
             }
-            UserProfileManager.UserProfile p = UserProfileManager.getInstance().loadProfile(userId);
             return p != null ? p.toPublicMap() : errorMap("Профиль не найден");
         }));
 
@@ -260,147 +253,21 @@ public class MiniAppServer {
 
         server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
         server.start();
-        log.info("🚀 MiniApp сервер запущен на порту {}", port);
-        log.info("   URL: http://localhost:{}", port);
 
-        // Load persisted sessions and auto-resume unexpectedly stopped ones
-        TradingSessionManager mgr = TradingSessionManager.getInstance();
-        mgr.loadSessions();
-        long chatId = AppConfig.getInstance().getDefaultChatId();
-        mgr.autoResumeSessions(chatId);
     }
 
     public void stop() {
-        if (server != null) {
-            server.stop(0);
-            log.info("MiniApp сервер остановлен");
-        }
+        if (server != null) server.stop(1);
     }
 
-    // ---- Handlers ----
-
-    private Map<String, Object> startTradingFromRequest(HttpExchange exchange) throws Exception {
-        return startTradingFromRequest(exchange, null);
-    }
-    private Map<String, Object> startTradingFromRequest(HttpExchange exchange, Long ownerId) throws Exception {
-        Map<String, Object> body = parseBody(exchange);
-        String type = (String) body.getOrDefault("type", "tester");
-        String coinName = (String) body.getOrDefault("coin", "bitcoin");
-        double tradingSum = toDouble(body.get("tradingSum"), 100.0);
-        double startAssets = toDouble(body.get("startAssets"), 150.0);
-        double buyGap = toDouble(body.get("buyGap"), 3.5);
-        double sellWithProfitGap = toDouble(body.get("sellWithProfitGap"), 2.0);
-        double sellWithLossGap = toDouble(body.get("sellWithLossGap"), 8.0);
-        int updateTimeout = toInt(body.get("updateTimeout"), 30);
-        int chartRefreshInterval = toInt(body.get("chartRefreshInterval"), 60);
-        long chatId = toLong(body.get("chatId"), AppConfig.getInstance().getDefaultChatId());
-
-        TradingSessionManager mgr = TradingSessionManager.getInstance();
-
-        Object result;
-        switch (type.toLowerCase()) {
-            case "binance":
-            case "binance_real":
-                result = mgr.startBinanceTrading(coinName, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chartRefreshInterval, chatId);
-                break;
-            case "binance_test":
-                result = mgr.startBinanceTestTrading(coinName, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chartRefreshInterval, chatId);
-                break;
-            default: // tester
-                result = mgr.startTesterTrading(coinName, startAssets, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chartRefreshInterval, chatId);
-        }
-        if (result instanceof TradingSessionManager.SessionInfo) {
-            TradingSessionManager.SessionInfo sess = (TradingSessionManager.SessionInfo) result;
-            if (ownerId != null && ownerId != 0L) sess.ownerId = ownerId;
-            TradingSessionManager.getInstance().saveSessions();
-            return sess.toMap();
-        }
-        return (Map<String, Object>) result;
-    }
-
-    private Map<String, Object> startBacktestFromRequest(HttpExchange exchange) throws Exception {
-        Map<String, Object> body = parseBody(exchange);
-        String coinName = (String) body.getOrDefault("coin", "bitcoin");
-        double tradingSum = toDouble(body.get("tradingSum"), 100.0);
-        double buyGap = toDouble(body.get("buyGap"), 3.5);
-        double sellWithProfitGap = toDouble(body.get("sellWithProfitGap"), 2.0);
-        double sellWithLossGap = toDouble(body.get("sellWithLossGap"), 8.0);
-        String chartType = (String) body.getOrDefault("chartType", "1d");
-        TradingSessionManager.SessionInfo info = TradingSessionManager.getInstance()
-                .startBacktest(coinName, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, chartType);
-        return info.toMap();
-    }
-
-    @SuppressWarnings("unchecked")
-    private List<Map<String, Object>> searchCoins(String query) {
-        List<Coin> coins = CoinsList.getCoins();
-        String q = query == null ? "" : query.toLowerCase().trim();
-        return coins.stream()
-                .filter(c -> q.isEmpty() ||
-                        (c.getName() != null && c.getName().toLowerCase().contains(q)) ||
-                        (c.getSymbol() != null && c.getSymbol().toLowerCase().startsWith(q)))
-                .limit(20)
-                .map(c -> {
-                    Map<String, Object> m = new LinkedHashMap<>();
-                    m.put("id", c.getId());
-                    m.put("name", c.getName());
-                    m.put("symbol", c.getSymbol() != null ? c.getSymbol().toUpperCase() : "");
-                    m.put("rank", c.getMarket_cap_rank());
-                    return m;
-                })
-                .collect(Collectors.toList());
-    }
-
-    private Map<String, Object> getChartData(String coinId, String interval) {
-        try {
-            Coin coin = CoinsList.getCoinByName(coinId);
-            String geckoInterval;
-            int days;
-            switch (interval) {
-                case "7d": days = 7; geckoInterval = "daily"; break;
-                case "30d": days = 30; geckoInterval = "daily"; break;
-                case "90d": days = 90; geckoInterval = "daily"; break;
-                case "1y": days = 365; geckoInterval = "daily"; break;
-                default: days = 1; geckoInterval = ""; break; // 5-min
-            }
-
-            String json = GeckoRequests.getMarketChartByDays(coin.getId(), days);
-            Map<String, Object> result = new LinkedHashMap<>();
-            result.put("coinId", coinId);
-            result.put("coinName", coin.getName());
-            result.put("interval", interval);
-            result.put("data", parseChartJson(json));
-            return result;
-        } catch (Exception e) {
-            log.error("Chart data error for {}: {}", coinId, e.getMessage());
-            return errorMap("Ошибка получения данных: " + e.getMessage());
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private List<double[]> parseChartJson(String json) throws Exception {
-        Map<String, Object> parsed = mapper.readValue(json, Map.class);
-        List<List<Number>> prices = (List<List<Number>>) parsed.get("prices");
-        List<double[]> result = new ArrayList<>();
-        if (prices != null) {
-            for (List<Number> point : prices) {
-                result.add(new double[]{point.get(0).doubleValue(), point.get(1).doubleValue()});
-            }
-        }
-        return result;
-    }
-
-    // ---- Utils ----
+    // ── Helper: JSON response ─────────────────────────────────────────────────
 
     @FunctionalInterface
     interface JsonSupplier { Object get() throws Exception; }
 
     private void handleJson(HttpExchange exchange, JsonSupplier supplier) throws IOException {
         addCorsHeaders(exchange);
-        if ("OPTIONS".equals(exchange.getRequestMethod())) {
-            exchange.sendResponseHeaders(204, -1);
-            return;
-        }
+        if ("OPTIONS".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(204,-1); return; }
         try {
             Object result = supplier.get();
             byte[] bytes = mapper.writeValueAsBytes(result);
@@ -419,7 +286,7 @@ public class MiniAppServer {
     private void addCorsHeaders(HttpExchange exchange) {
         exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
         exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        exchange.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type");
+        exchange.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type, Authorization");
     }
 
     @SuppressWarnings("unchecked")
@@ -442,83 +309,188 @@ public class MiniAppServer {
         return null;
     }
 
-    private String getPathParam(String path, String prefix) {
-        if (path == null || !path.startsWith(prefix)) return "";
-        return path.substring(prefix.length()).replaceAll("/.*", "");
-    }
-
     private Map<String, Object> errorMap(String msg) {
         return Map.of("error", msg != null ? msg : "Неизвестная ошибка");
-    }
-
-    /** Extract bearer token from Authorization header or query param, resolve userId */
-    private Long resolveUser(com.sun.net.httpserver.HttpExchange exchange) {
-        String auth = exchange.getRequestHeaders().getFirst("Authorization");
-        String token = null;
-        if (auth != null && auth.startsWith("Bearer ")) {
-            token = auth.substring(7).trim();
-        } else {
-            token = getQueryParam(exchange.getRequestURI().getQuery(), "token");
-        }
-        return UserProfileManager.getInstance().resolveSession(token);
     }
 
     private double toDouble(Object val, double def) {
         if (val == null) return def;
         try { return Double.parseDouble(val.toString()); } catch (Exception e) { return def; }
     }
-
     private int toInt(Object val, int def) {
         if (val == null) return def;
         try { return Integer.parseInt(val.toString()); } catch (Exception e) { return def; }
     }
-
     private long toLong(Object val, long def) {
         if (val == null) return def;
         try { return Long.parseLong(val.toString()); } catch (Exception e) { return def; }
     }
 
-    // ---- Static File Handler ----
+    /** Resolve userId from Authorization header. Returns null if not authenticated. */
+    private Long resolveUser(HttpExchange exchange) {
+        String auth = exchange.getRequestHeaders().getFirst("Authorization");
+        String token = null;
+        if (auth != null && auth.startsWith("Bearer ")) token = auth.substring(7).trim();
+        else token = getQueryParam(exchange.getRequestURI().getQuery(), "token");
+        return UserProfileManager.getInstance().resolveSession(token);
+    }
+
+    /** Like resolveUser but sends 401 and returns null if not authenticated. */
+    private Long requireUser(HttpExchange exchange) throws IOException {
+        Long userId = resolveUser(exchange);
+        if (userId == null) {
+            addCorsHeaders(exchange);
+            byte[] body = mapper.writeValueAsBytes(Map.of("error", "Требуется авторизация", "code", 401));
+            exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
+            exchange.sendResponseHeaders(401, body.length);
+            try (OutputStream os = exchange.getResponseBody()) { os.write(body); }
+        }
+        return userId;
+    }
+
+    // ── Chart data ────────────────────────────────────────────────────────────
+
+    private Map<String, Object> getChartData(String coinId, String interval) {
+        try {
+            Coin coin = CoinsList.getCoinByName(coinId);
+            int days;
+            switch (interval) {
+                case "7d":  days = 7;   break;
+                case "30d": days = 30;  break;
+                case "90d": days = 90;  break;
+                case "1y":  days = 365; break;
+                default:    days = 1;   break;
+            }
+            String json = GeckoRequests.getMarketChartByDays(coin.getId(), days);
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("coinId", coinId);
+            result.put("coinName", coin.getName());
+            result.put("interval", interval);
+            result.put("data", parseChartJson(json));
+            return result;
+        } catch (Exception e) {
+            log.error("Chart data error for {}: {}", coinId, e.getMessage());
+            return errorMap("Ошибка получения данных: " + e.getMessage());
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<double[]> parseChartJson(String json) throws Exception {
+        Map<String, Object> parsed = mapper.readValue(json, Map.class);
+        List<List<Number>> prices = (List<List<Number>>) parsed.get("prices");
+        List<double[]> result = new ArrayList<>();
+        if (prices != null) for (List<Number> p : prices) {
+            if (p.size() >= 2) result.add(new double[]{p.get(0).doubleValue(), p.get(1).doubleValue()});
+        }
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> startTradingFromRequest(HttpExchange exchange, long userId) throws Exception {
+        Map<String, Object> body = parseBody(exchange);
+        String type = (String) body.getOrDefault("type", "tester");
+        String coinName = (String) body.getOrDefault("coin", "bitcoin");
+        double tradingSum  = toDouble(body.get("tradingSum"), 100.0);
+        double startAssets = toDouble(body.get("startAssets"), 150.0);
+        double buyGap = toDouble(body.get("buyGap"), 3.5);
+        double spg    = toDouble(body.get("sellWithProfitGap"), 2.0);
+        double slg    = toDouble(body.get("sellWithLossGap"), 8.0);
+        int timeout      = toInt(body.get("updateTimeout"), 30);
+        int chartRefresh = toInt(body.get("chartRefreshInterval"), 60);
+        long chatId = toLong(body.get("chatId"), AppConfig.getInstance().getDefaultChatId());
+
+        UserProfileManager.UserProfile profile = userId > 0
+            ? UserProfileManager.getInstance().loadProfile(userId) : null;
+        TradingSessionManager mgr = TradingSessionManager.forUser(userId);
+
+        Object result;
+        switch (type.toLowerCase()) {
+            case "binance": case "binance_real":
+                result = mgr.startBinanceTrading(coinName, tradingSum, buyGap, spg, slg,
+                        timeout, chartRefresh, chatId, profile);
+                break;
+            case "binance_test":
+                result = mgr.startBinanceTestTrading(coinName, tradingSum, buyGap, spg, slg,
+                        timeout, chartRefresh, chatId, profile);
+                break;
+            default:
+                result = mgr.startTesterTrading(coinName, startAssets, tradingSum, buyGap, spg, slg,
+                        timeout, chartRefresh, chatId);
+        }
+        if (result instanceof TradingSessionManager.SessionInfo)
+            return ((TradingSessionManager.SessionInfo) result).toMap();
+        return (Map<String, Object>) result;
+    }
+
+    private Map<String, Object> startBacktestFromRequest(HttpExchange exchange, long userId) throws Exception {
+        Map<String, Object> body = parseBody(exchange);
+        String coinName = (String) body.getOrDefault("coin", "bitcoin");
+        double tradingSum = toDouble(body.get("tradingSum"), 100.0);
+        double buyGap = toDouble(body.get("buyGap"), 3.5);
+        double spg = toDouble(body.get("sellWithProfitGap"), 2.0);
+        double slg = toDouble(body.get("sellWithLossGap"), 8.0);
+        String chartType = (String) body.getOrDefault("chartType", "1d");
+        TradingSessionManager.SessionInfo info = TradingSessionManager.forUser(userId)
+                .startBacktest(coinName, tradingSum, buyGap, spg, slg, chartType);
+        return info.toMap();
+    }
+
+    @SuppressWarnings("unchecked")
+    private String getPathParam(String path, String prefix) {
+        if (path == null || !path.startsWith(prefix)) return "";
+        return path.substring(prefix.length()).replaceAll("/.*", "");
+    }
+
+    private List<Map<String, Object>> searchCoins(String query) {
+        List<Coin> coins = CoinsList.getCoins();
+        String q = query == null ? "" : query.toLowerCase().trim();
+        return coins.stream()
+            .filter(c -> q.isEmpty() ||
+                (c.getName() != null && c.getName().toLowerCase().contains(q)) ||
+                (c.getSymbol() != null && c.getSymbol().toLowerCase().startsWith(q)))
+            .limit(20)
+            .map(c -> {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("id", c.getId()); m.put("name", c.getName()); m.put("symbol", c.getSymbol());
+                return m;
+            }).collect(Collectors.toList());
+    }
+
+    // ── Static file handler ───────────────────────────────────────────────────
+
+    private static void addCors(HttpExchange exchange) {
+        exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
+    }
 
     private static class StaticFileHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
             String path = exchange.getRequestURI().getPath();
-            if (path == null || path.equals("/") || path.equals("/index.html")) {
+            if (path == null || path.equals("/") || path.equals("/index.html"))
                 path = "/static/index.html";
-            } else {
+            else
                 path = "/static" + path;
-            }
             addCors(exchange);
             try (InputStream is = MiniAppServer.class.getResourceAsStream(path)) {
                 if (is == null) {
                     byte[] msg = "404 Not Found".getBytes();
                     exchange.sendResponseHeaders(404, msg.length);
                     exchange.getResponseBody().write(msg);
-                    exchange.getResponseBody().close();
                     return;
                 }
-                byte[] bytes = is.readAllBytes();
-                String ct = getContentType(path);
+                String ct = path.endsWith(".html") ? "text/html; charset=UTF-8"
+                    : path.endsWith(".js") ? "application/javascript"
+                    : path.endsWith(".css") ? "text/css"
+                    : "application/octet-stream";
                 exchange.getResponseHeaders().set("Content-Type", ct);
-                exchange.sendResponseHeaders(200, bytes.length);
-                try (OutputStream os = exchange.getResponseBody()) { os.write(bytes); }
+                byte[] data = is.readAllBytes();
+                exchange.sendResponseHeaders(200, data.length);
+                exchange.getResponseBody().write(data);
+            } catch (IOException e) {
+                exchange.sendResponseHeaders(500, 0);
+            } finally {
+                exchange.getResponseBody().close();
             }
-        }
-
-        private void addCors(HttpExchange e) {
-            e.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
-        }
-
-        private String getContentType(String path) {
-            if (path.endsWith(".html")) return "text/html; charset=UTF-8";
-            if (path.endsWith(".css")) return "text/css; charset=UTF-8";
-            if (path.endsWith(".js")) return "application/javascript; charset=UTF-8";
-            if (path.endsWith(".png")) return "image/png";
-            if (path.endsWith(".jpg")) return "image/jpeg";
-            if (path.endsWith(".svg")) return "image/svg+xml";
-            if (path.endsWith(".ico")) return "image/x-icon";
-            return "application/octet-stream";
         }
     }
 }

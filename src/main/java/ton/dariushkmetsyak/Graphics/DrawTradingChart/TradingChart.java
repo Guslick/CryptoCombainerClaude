@@ -31,19 +31,33 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Date;
-import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 
 public class TradingChart extends Application {
-    private static TimeSeries series, markedPoints;
-    private static ChartViewer chartViewer;
-    private static IntervalMarker intervalMarker;
-    private static XYPlot plot;
-    public static JFreeChart chart;
-    private static XYDotRenderer dotRenderer;
-    static  {
+    // ── Per-thread chart state via ThreadLocal ────────────────────────────────
+    // Each trading thread gets an isolated chart instance so multiple users
+    // can trade simultaneously without charts interfering with each other.
+    private static final ThreadLocal<TradingChart> THREAD_CHART = ThreadLocal.withInitial(TradingChart::new);
 
+    public static TradingChart getForCurrentThread() {
+        return THREAD_CHART.get();
+    }
+
+    /** Call in the trading thread's finally block to release resources. */
+    public static void releaseForCurrentThread() {
+        THREAD_CHART.remove();
+    }
+
+    // ── Per-instance fields ───────────────────────────────────────────────────
+    TimeSeries series;
+    TimeSeries markedPoints;
+    IntervalMarker intervalMarker;
+    XYPlot plot;
+    JFreeChart chart;
+    XYDotRenderer dotRenderer;
+
+    public TradingChart() {
         series = new TimeSeries("");
         markedPoints = new TimeSeries("");
         TimeSeriesCollection dataset = new TimeSeriesCollection();
@@ -68,26 +82,26 @@ public class TradingChart extends Application {
         plot.setRenderer(1, dotRenderer);  // Применяем рендерер для второй серии (только точки)
 
         XYLineAndShapeRenderer lineRenderer = new XYLineAndShapeRenderer();
-        lineRenderer.setSeriesLinesVisible(1, false);  // Для первой серии линии видимы
-        lineRenderer.setSeriesShapesVisible(0, false); // Для первой серии точки видимы
-        lineRenderer.setSeriesPaint(0, Color.BLACK);  // Цвет для первой серии
-        plot.setRenderer(0, lineRenderer);  // Применяем рендерер для первой серии
-
-       // chartViewer = new ChartViewer(chart);
-
+        lineRenderer.setSeriesLinesVisible(1, false);
+        lineRenderer.setSeriesShapesVisible(0, false);
+        lineRenderer.setSeriesPaint(0, Color.BLACK);
+        plot.setRenderer(0, lineRenderer);
     }
 
 
 
-    public static void addSimplePoint (double timestamp, double price){            //добавляем на график промежуточную точку (время, цена)
-//        System.out.println("Timestamp: "+timestamp+ " Price: "+ price);
-//        System.out.println(series.getMaximumItemAge());  // будем делать проверку на то что таймстамп последний, а не более ранний
-        series.addOrUpdate(new Millisecond(Date.from(Instant.ofEpochMilli((long)timestamp))),price);
-
+    public static void addSimplePoint(double timestamp, double price) {
+        getForCurrentThread().addSimplePointI(timestamp, price);
     }
-    public static void addBuyIntervalMarker(double timestamp, double price) {            //добавляем на график точку покупки (время, цена)
-        addSimplePoint(timestamp,price);
-        intervalMarker = new IntervalMarker(timestamp,timestamp);
+    void addSimplePointI(double timestamp, double price) {
+        series.addOrUpdate(new Millisecond(Date.from(Instant.ofEpochMilli((long)timestamp))), price);
+    }
+    public static void addBuyIntervalMarker(double timestamp, double price) {
+        getForCurrentThread().addBuyIntervalMarkerI(timestamp, price);
+    }
+    void addBuyIntervalMarkerI(double timestamp, double price) {
+        addSimplePointI(timestamp, price);
+        intervalMarker = new IntervalMarker(timestamp, timestamp);
         intervalMarker.setPaint(Color.decode("#F0E68C"));
         ValueMarker valueMarker = new ValueMarker(timestamp);
         valueMarker.setPaint(Color.GREEN);
@@ -99,7 +113,10 @@ public class TradingChart extends Application {
         plot.addDomainMarker(valueMarker);
         plot.addDomainMarker(intervalMarker);
     }
-    public static void addSimplePriceMarker(double timestamp, double price) {            //добавляем на график точку продажи (время, цена)
+    public static void addSimplePriceMarker(double timestamp, double price) {
+        getForCurrentThread().addSimplePriceMarkerI(timestamp, price);
+    }
+    void addSimplePriceMarkerI(double timestamp, double price) {            //добавляем на график
 //        XYLineAndShapeRenderer renderer = new XYLineAndShapeRenderer();
 //      //  renderer.setSeriesLinesVisible(0, true);  // Показывать линии
 //        renderer.setSeriesShapesVisible(0, true); // Показывать точки
@@ -108,32 +125,20 @@ public class TradingChart extends Application {
 //        renderer.setSeriesPaint(0, Color.BLACK);   // Цвет точек
       //  plot.setRenderer(renderer);
 
-        markedPoints.addOrUpdate(new Millisecond(Date.from(Instant.ofEpochMilli((long)timestamp))),price);
-
-//        Shape redPoint = new Ellipse2D.Double(timestamp , price , 3,3);
-//        XYShapeAnnotation redPointAnnotation = new XYShapeAnnotation(redPoint,new BasicStroke(3,BasicStroke.CAP_BUTT, BasicStroke.CAP_BUTT),Color.RED, Color.RED);
-
-
-
-
-        //addSimplePoint(timestamp,price);
-
+        markedPoints.addOrUpdate(new Millisecond(Date.from(Instant.ofEpochMilli((long)timestamp))), price);
         XYTextAnnotation annotation = new XYTextAnnotation("", timestamp, price);
         annotation.setPaint(Color.RED);
         annotation.setFont(new Font("Verdana", Font.BOLD, 15));
         annotation.setTextAnchor(TextAnchor.TOP_CENTER);
-//        plot.addAnnotation(annotation);
-
-        //plot.addAnnotation(redPointAnnotation);
         ValueMarker valueMarker = new ValueMarker(timestamp);
         valueMarker.setPaint(Color.BLACK);
         valueMarker.setStroke(new BasicStroke(0));
-        //plot.addDomainMarker(valueMarker);
-       // intervalMarker=null;
     }
-    public static void addSellIntervalMarker(double timestamp, double price) {            //добавляем на график точку продажи (время, цена)
-        addSimplePoint(timestamp,price);
-        // intervalMarker may be null after state restore — guard to avoid NPE
+    public static void addSellIntervalMarker(double timestamp, double price) {
+        getForCurrentThread().addSellIntervalMarkerI(timestamp, price);
+    }
+    void addSellIntervalMarkerI(double timestamp, double price) {
+        addSimplePointI(timestamp, price);
         if (intervalMarker == null) {
             intervalMarker = new IntervalMarker(timestamp, timestamp);
             intervalMarker.setPaint(Color.decode("#F0E68C"));
@@ -148,57 +153,51 @@ public class TradingChart extends Application {
         valueMarker.setPaint(Color.RED);
         valueMarker.setStroke(new BasicStroke(5));
         plot.addDomainMarker(valueMarker);
-        intervalMarker=null;
+        intervalMarker = null;
     }
 
-    public static void extendInBuyArea(double timestamp){                          // расширяем зону "В покупке"
-        if (Optional.ofNullable(intervalMarker).isPresent()) {intervalMarker.setEndValue(timestamp);}
+    public static void extendInBuyArea(double timestamp) {
+        getForCurrentThread().extendInBuyAreaI(timestamp);
+    }
+    void extendInBuyAreaI(double timestamp) {
+        if (intervalMarker != null) intervalMarker.setEndValue(timestamp);
     }
 
-    public static void makeScreenShot (String path){
+    public static void makeScreenShot(String path) {
+        getForCurrentThread().makeScreenShotI(path);
+    }
+    void makeScreenShotI(String path) {
         File file = new File(path);
         try {
             ChartUtils.saveChartAsPNG(file, chart, 1920, 1080);
         } catch (IOException e) {
-            System.err.println("Не получилось сохранить скриншот графика на диск. Возможно нет доступа к диску или не достаточно свободного места");
+            System.err.println("Не получилось сохранить скриншот");
             e.printStackTrace();
         }
     }
-    public static void clearChart (){
-        series.clear();
-        markedPoints.clear();
+    public static void clearChart() {
+        getForCurrentThread().clearChartI();
+    }
+    void clearChartI() {
+        // Re-initialize this instance's chart (same as constructor)
         series = new TimeSeries("");
         markedPoints = new TimeSeries("");
         TimeSeriesCollection dataset = new TimeSeriesCollection();
         dataset.addSeries(series);
         dataset.addSeries(markedPoints);
-        chart = ChartFactory.createTimeSeriesChart(
-                "PriceChart",
-                "Time",
-                "Price",
-                dataset,
-                true,
-                true,
-                true);
+        chart = ChartFactory.createTimeSeriesChart("PriceChart", "Time", "Price", dataset, true, true, true);
         plot = chart.getXYPlot();
-
-
-        // Рендерер для выделенных точек (без линий)
         dotRenderer = new XYDotRenderer();
-        dotRenderer.setDotWidth(1);  // Размер точек
+        dotRenderer.setDotWidth(1);
         dotRenderer.setDotHeight(1);
-        dotRenderer.setSeriesPaint(1, Color.RED);  // Красный цвет для выделенных точек
-        plot.setRenderer(1, dotRenderer);  // Применяем рендерер для второй серии (только точки)
-
+        dotRenderer.setSeriesPaint(1, Color.RED);
+        plot.setRenderer(1, dotRenderer);
         XYLineAndShapeRenderer lineRenderer = new XYLineAndShapeRenderer();
-        lineRenderer.setSeriesLinesVisible(1, false);  // Для первой серии линии видимы
-        lineRenderer.setSeriesShapesVisible(0, false); // Для первой серии точки видимы
-        lineRenderer.setSeriesPaint(0, Color.BLACK);  // Цвет для первой серии
-        plot.setRenderer(0, lineRenderer);  // Применяем рендерер для первой серии
-
-        //  chartViewer = new ChartViewer(chart);
-
-
+        lineRenderer.setSeriesLinesVisible(1, false);
+        lineRenderer.setSeriesShapesVisible(0, false);
+        lineRenderer.setSeriesPaint(0, Color.BLACK);
+        plot.setRenderer(0, lineRenderer);
+        intervalMarker = null;
     }
 
     public static void drawChart (Chart chart){

@@ -17,7 +17,12 @@ import java.nio.charset.StandardCharsets;
 public class ImageAndMessageSender {
 
     private static volatile String BOT_TOKEN = null;
-    private static String chatId;
+
+    /**
+     * ThreadLocal chatId — each trading thread carries its own target chat.
+     * Eliminates the static-field race condition where thread B overwrites thread A's chatId.
+     */
+    private static final ThreadLocal<String> CHAT_ID_TL = new ThreadLocal<>();
 
     private static String getToken() {
         if (BOT_TOKEN == null) {
@@ -31,8 +36,18 @@ public class ImageAndMessageSender {
         return token != null && !token.isBlank() && !token.equals("YOUR_BOT_TOKEN_HERE");
     }
 
+    /** Sets chatId for the CURRENT thread only. Call once per trading thread on startup. */
     public static void setChatId(long chatId) {
-        ImageAndMessageSender.chatId = String.valueOf(chatId);
+        CHAT_ID_TL.set(String.valueOf(chatId));
+    }
+
+    /** Clear the current thread's chatId (call in finally block of trading thread). */
+    public static void clearChatId() {
+        CHAT_ID_TL.remove();
+    }
+
+    private static String getChatId() {
+        return CHAT_ID_TL.get();
     }
 
     public static void sendPhoto(String filePath, String caption, long chatId) {
@@ -41,7 +56,7 @@ public class ImageAndMessageSender {
     }
 
     public static int sendPhoto(String filePath, String caption) {
-        if (!isConfigured() || chatId == null) return 0;
+        if (!isConfigured() || getChatId() == null) return 0;
         try {
             String apiUrl = "https://api.telegram.org/bot" + getToken() + "/sendPhoto";
             URL url = new URL(apiUrl);
@@ -53,7 +68,7 @@ public class ImageAndMessageSender {
             OutputStream outputStream = conn.getOutputStream();
             outputStream.write(("--boundary\r\n").getBytes());
             outputStream.write(("Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n").getBytes());
-            outputStream.write((chatId + "\r\n").getBytes());
+            outputStream.write((getChatId() + "\r\n").getBytes());
 
             if (caption != null) {
                 outputStream.write(("--boundary\r\n").getBytes());
@@ -96,7 +111,7 @@ public class ImageAndMessageSender {
     }
 
     public static void deleteMessage(int messageID) {
-        if (!isConfigured() || chatId == null) return;
+        if (!isConfigured() || getChatId() == null) return;
         try {
             String deleteUrlString = "https://api.telegram.org/bot" + getToken() + "/deleteMessage";
             URL deleteUrl = new URL(deleteUrlString);
@@ -104,7 +119,7 @@ public class ImageAndMessageSender {
             deleteConnection.setRequestMethod("POST");
             deleteConnection.setRequestProperty("Content-Type", "application/json; utf-8");
             deleteConnection.setDoOutput(true);
-            String deleteJson = "{\"chat_id\": \"" + chatId + "\", \"message_id\": " + messageID + "}";
+            String deleteJson = "{\"chat_id\": \"" + getChatId() + "\", \"message_id\": " + messageID + "}";
             try (OutputStream os = deleteConnection.getOutputStream()) {
                 os.write(deleteJson.getBytes(StandardCharsets.UTF_8));
             }
@@ -118,7 +133,7 @@ public class ImageAndMessageSender {
         // Always log to session (even if Telegram isn't configured)
         try { TradingSessionManager.logEventFromCurrentThread(message); } catch (Exception ignored) {}
 
-        if (!isConfigured() || chatId == null) return 0;
+        if (!isConfigured() || getChatId() == null) return 0;
         try {
             String urlString = "https://api.telegram.org/bot" + getToken() + "/sendMessage";
             URL url = new URL(urlString);
@@ -128,7 +143,7 @@ public class ImageAndMessageSender {
             connection.setRequestProperty("Accept", "application/json");
             connection.setDoOutput(true);
 
-            String jsonInputString = "{\"chat_id\": \"" + chatId + "\", \"text\": \"" + escapeJson(message) + "\"}";
+            String jsonInputString = "{\"chat_id\": \"" + getChatId() + "\", \"text\": \"" + escapeJson(message) + "\"}";
             try (OutputStream os = connection.getOutputStream()) {
                 os.write(jsonInputString.getBytes(StandardCharsets.UTF_8));
             }

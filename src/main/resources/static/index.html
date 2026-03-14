@@ -1002,14 +1002,14 @@ async function startBacktest() {
     const pollId = setInterval(async ()=>{
       attempts++;
       if (attempts>60) { clearInterval(pollId); showAlert('btAlert','warn','⏰ Таймаут'); btn.disabled=false; btn.innerHTML='🧪 ЗАПУСТИТЬ БЭКТЕСТ'; return; }
-      const sr = await fetch(`${API_BASE}/api/trading/sessions`).catch(()=>null);
+      const sr = await fetch(`${API_BASE}/api/trading/sessions`, {headers:authHeaders()}).catch(()=>null);
       if (!sr?.ok) return;
       const sessions = await sr.json();
       const sess = sessions.find(s=>s.id===sessionData.id);
       if (!sess) return;
       if (sess.status==='DONE') {
         clearInterval(pollId);
-        const rr = await fetch(`${API_BASE}/api/backtest/result`);
+        const rr = await fetch(`${API_BASE}/api/backtest/result`, {headers:authHeaders()});
         showBacktestResult(await rr.json());
         btn.disabled=false; btn.innerHTML='🧪 ЗАПУСТИТЬ БЭКТЕСТ';
         document.getElementById('btAlert').style.display='none';
