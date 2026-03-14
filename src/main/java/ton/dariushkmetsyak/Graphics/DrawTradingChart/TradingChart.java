@@ -194,16 +194,14 @@ public class TradingChart {
         intervalMarker = null;
     }
 
-    public static void drawChart (Chart chartData){
-        TradingChart.chart.setTitle(chartData.getCoinName());
-        for (double[] priceTimestamp: chartData.getPrices()){
-            TradingChart.addSimplePoint(priceTimestamp[0],priceTimestamp[1]);
-        }
+    public static void drawChart(Chart chartData) {
+        getForCurrentThread().chart.setTitle(chartData.getCoinName());
+        for (double[] p : chartData.getPrices())
+            TradingChart.addSimplePoint(p[0], p[1]);
     }
-    public static void drawChart (ArrayList<double[]> chartData, String chartTitle){
-        TradingChart.chart.setTitle(chartTitle);
-        for (double[] priceTimestamp: chartData){
-            TradingChart.addSimplePriceMarker(priceTimestamp[0],priceTimestamp[1]);
-        }
+    public static void drawChart(ArrayList<double[]> chartData, String chartTitle) {
+        getForCurrentThread().chart.setTitle(chartTitle);
+        for (double[] p : chartData)
+            TradingChart.addSimplePriceMarker(p[0], p[1]);
     }
 }

@@ -1,6 +1,5 @@
 package ton.dariushkmetsyak.Strategies.ReversalPointsStrategy.ResearchingStrategy;
 
-import javafx.application.Application;
 import ton.dariushkmetsyak.Graphics.DrawTradingChart.TradingChart;
 import ton.dariushkmetsyak.Telegram.ImageAndMessageSender;
 import ton.dariushkmetsyak.Util.Prices;
@@ -112,12 +111,7 @@ public class ReversalPointsStrategyResearcher {
 
     public static Map<String, Double> startResearchingChartArray(Path researchedChartsPath){
         final String chartName = "Yearlychart.json";
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                Application.launch(TradingChart.class);
-            }
-        }).start();
+        // JavaFX removed — TradingChart runs headless
         ArrayList<Chart> charts = new ArrayList<>();
             try (DirectoryStream<Path> stream = Files.newDirectoryStream(Path.of(researchedChartsPath.toString()))) {
                 for (Path entry : stream) {
