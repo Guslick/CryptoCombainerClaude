@@ -181,7 +181,7 @@ public class UserProfileManager {
         try {
             long ts = Long.parseLong(authDate.toString());
             long now = System.currentTimeMillis() / 1000;
-            return ts <= now && now - ts <= maxAgeSec;
+            return ts <= now + 300 && now - ts <= maxAgeSec;
         } catch (Exception e) {
             return false;
         }

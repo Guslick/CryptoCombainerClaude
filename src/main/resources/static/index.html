@@ -2105,6 +2105,20 @@ function renderProfNotAuthed() {
   document.getElementById('prof-keys-card').style.display = 'none';
   document.getElementById('prof-wallet-card').style.display = 'none';
   document.getElementById('prof-report-card').style.display = 'none';
+
+  // Safe defaults: always show at least one auth option immediately
+  const webappBlock   = document.getElementById('prof-login-webapp');
+  const browserBlock  = document.getElementById('prof-login-browser');
+  const fallbackBlock = document.getElementById('prof-login-fallback');
+  if (tg?.initData) {
+    if (webappBlock) webappBlock.style.display = 'block';
+    if (browserBlock) browserBlock.style.display = 'none';
+    if (fallbackBlock) fallbackBlock.style.display = 'none';
+  } else {
+    if (webappBlock) webappBlock.style.display = 'none';
+    if (browserBlock) browserBlock.style.display = 'none';
+    if (fallbackBlock) fallbackBlock.style.display = 'block';
+  }
 }
 
 function profSelectNet(net) {
@@ -2288,6 +2302,7 @@ async function initProfilePage() {
     await profDoAuth(initData);
   } else {
     renderProfNotAuthed();
+    await initTelegramWidget();
   }
 }
 
@@ -2354,6 +2369,7 @@ async function initTelegramWidget() {
           _profToken = data.token;
           try { localStorage.setItem('cc_prof_token', _profToken); } catch(e) {}
           renderProfAuthed(data);
+          refreshTabAccess();
           await profLoadKeys();
           showToast('✅ Авторизован как ' + (data.telegramFirstName || 'пользователь'));
         } catch(e) { showToast('❌ Ошибка: ' + e.message); }
@@ -2417,8 +2433,8 @@ async function profSaveKeys(testnet) {
 const _origInitProfilePage = initProfilePage;
 async function initProfilePage() {
   await _origInitProfilePage();
-  // Init widget after auth state is known (only if not authed via Telegram app)
-  setTimeout(initTelegramWidget, 300);
+  // Init widget after auth state is known (only for guests)
+  if (!isAuthed()) setTimeout(initTelegramWidget, 300);
 }
 
 // ============================================================
