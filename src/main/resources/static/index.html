@@ -2043,8 +2043,9 @@ async function profileLogin() {
     await profDoAuth(initData);
     return;
   }
-  // Fallback: dev bypass when running locally
-  showToast('⚠️ Открывайте приложение через Telegram для авторизации');
+  // In browser, try to initialize Telegram widget explicitly
+  await initTelegramWidget();
+  showToast('ℹ️ Используйте кнопку Telegram Widget ниже');
 }
 
 async function profDoAuth(initData) {
@@ -2055,7 +2056,12 @@ async function profDoAuth(initData) {
       body: JSON.stringify({ initData })
     });
     const data = await r.json();
-    if (data.error) { showToast('❌ ' + data.error); return; }
+    if (data.error) {
+      showToast('❌ ' + data.error);
+      renderProfNotAuthed();
+      if (!tg?.initData) await initTelegramWidget();
+      return false;
+    }
     _profToken = data.token;
     try { localStorage.setItem('cc_prof_token', _profToken); } catch(e) {}
     renderProfAuthed(data);
@@ -2065,8 +2071,12 @@ async function profDoAuth(initData) {
     // Refresh any protected page that may be currently shown
     const curPage = document.querySelector('.page.active')?.id?.replace('page-', '');
     if (curPage && AUTH_REQUIRED_PAGES.has(curPage)) showPage(curPage);
+    return true;
   } catch(e) {
     showToast('❌ Ошибка авторизации: ' + e.message);
+    renderProfNotAuthed();
+    if (!tg?.initData) await initTelegramWidget();
+    return false;
   }
 }
 
@@ -2299,7 +2309,8 @@ async function initProfilePage() {
   // Try auto-login with Telegram initData
   const initData = tg?.initData || '';
   if (initData) {
-    await profDoAuth(initData);
+    const ok = await profDoAuth(initData);
+    if (!ok) renderProfNotAuthed();
   } else {
     renderProfNotAuthed();
     await initTelegramWidget();

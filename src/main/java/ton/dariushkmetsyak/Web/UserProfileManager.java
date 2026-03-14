@@ -94,8 +94,8 @@ public class UserProfileManager {
             for (String part : initData.split("&")) {
                 String[] kv = part.split("=", 2);
                 if (kv.length != 2) continue;
-                String key = urlDecodePreservePlus(kv[0]);
-                String val = urlDecodePreservePlus(kv[1]);
+                String key = java.net.URLDecoder.decode(kv[0], "UTF-8");
+                String val = java.net.URLDecoder.decode(kv[1], "UTF-8");
                 if ("hash".equals(key)) hash = val;
                 else params.put(key, val);
             }
@@ -185,11 +185,6 @@ public class UserProfileManager {
         } catch (Exception e) {
             return false;
         }
-    }
-
-    private String urlDecodePreservePlus(String s) throws java.io.UnsupportedEncodingException {
-        if (s == null) return "";
-        return java.net.URLDecoder.decode(s.replace("+", "%2B"), "UTF-8");
     }
 
     private String bytesToHex(byte[] b) {
