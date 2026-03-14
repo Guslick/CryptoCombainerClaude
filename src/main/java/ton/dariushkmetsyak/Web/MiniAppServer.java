@@ -40,6 +40,13 @@ public class MiniAppServer {
         server.createContext("/", new StaticFileHandler());
 
         // API routes
+        // Bot name for Telegram Login Widget (browser auth)
+        server.createContext("/api/auth/config", exchange -> handleJson(exchange, () -> {
+            Map<String, Object> cfg = new LinkedHashMap<>();
+            cfg.put("botUsername", "NEW_MAMA_CXHEMA");
+            return cfg;
+        }));
+
         server.createContext("/api/health", exchange -> handleJson(exchange, () -> {
             Map<String, Object> r = new LinkedHashMap<>();
             r.put("status", "ok");
@@ -91,15 +98,22 @@ public class MiniAppServer {
             // /api/trading/sessions/{id} → session detail with events
             if (path.matches("/api/trading/sessions/[^/]+")) {
                 String sessionId = path.substring("/api/trading/sessions/".length());
-                handleJson(exchange, () -> TradingSessionManager.getInstance().getSessionDetail(sessionId));
+                Long userId2 = resolveUser(exchange);
+                handleJson(exchange, () -> userId2 != null
+                    ? TradingSessionManager.getInstance().getSessionDetailForOwner(sessionId, userId2)
+                    : TradingSessionManager.getInstance().getSessionDetail(sessionId));
             } else {
-                handleJson(exchange, () -> TradingSessionManager.getInstance().getAllSessions());
+                Long userId2 = resolveUser(exchange);
+                handleJson(exchange, () -> userId2 != null
+                    ? TradingSessionManager.getInstance().getSessionsByOwner(userId2)
+                    : TradingSessionManager.getInstance().getAllSessions());
             }
         });
 
         server.createContext("/api/trading/start", exchange -> {
             if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
-            handleJson(exchange, () -> startTradingFromRequest(exchange));
+            final Long startOwnerId = resolveUser(exchange);
+            handleJson(exchange, () -> startTradingFromRequest(exchange, startOwnerId));
         });
 
         server.createContext("/api/trading/stop", exchange -> {
@@ -111,7 +125,8 @@ public class MiniAppServer {
                     TradingSessionManager.getInstance().stopAllSessions();
                     return Map.of("stopped", true, "message", "Все сессии остановлены");
                 }
-                boolean ok = TradingSessionManager.getInstance().stopSession(sessionId);
+                Long stopOwner = resolveUser(exchange);
+                boolean ok = TradingSessionManager.getInstance().stopSession(sessionId, stopOwner != null ? stopOwner : 0L);
                 return Map.of("stopped", ok, "sessionId", sessionId);
             });
         });
@@ -133,7 +148,8 @@ public class MiniAppServer {
                 Map<String, Object> body = parseBody(exchange);
                 String sessionId = (String) body.get("sessionId");
                 if (sessionId == null) return errorMap("sessionId обязателен");
-                boolean ok = TradingSessionManager.getInstance().deleteSession(sessionId);
+                Long delOwner = resolveUser(exchange);
+                boolean ok = TradingSessionManager.getInstance().deleteSession(sessionId, delOwner != null ? delOwner : 0L);
                 return Map.of("deleted", ok, "sessionId", sessionId != null ? sessionId : "");
             });
         });
@@ -156,17 +172,31 @@ public class MiniAppServer {
         server.createContext("/api/auth/telegram", exchange -> handleJson(exchange, () -> {
             if (!"POST".equals(exchange.getRequestMethod())) return errorMap("POST required");
             Map<String, Object> body = parseBody(exchange);
-            String initData = (String) body.get("initData");
             String botToken = ton.dariushkmetsyak.Config.AppConfig.getInstance().getBotToken();
             UserProfileManager upm = UserProfileManager.getInstance();
-            Map<String, Object> tgUser = upm.verifyInitData(initData, botToken);
+            Map<String, Object> tgUser = null;
+
+            // Mode 1: Telegram WebApp initData
+            String initData = (String) body.get("initData");
+            if (initData != null && !initData.isBlank()) {
+                tgUser = upm.verifyInitData(initData, botToken);
+            }
+
+            // Mode 2: Telegram Login Widget data (browser)
+            if (tgUser == null && body.containsKey("id") && body.containsKey("hash")) {
+                tgUser = upm.verifyLoginWidget(body, botToken);
+            }
+
+            // Mode 3: dev bypass (localhost only)
             if (tgUser == null) {
                 String host = exchange.getRemoteAddress().getAddress().getHostAddress();
-                if (!"dev_bypass".equals(initData) || (!host.startsWith("127.") && !host.startsWith("::1"))) {
+                if ("dev_bypass".equals(initData) && (host.startsWith("127.") || host.startsWith("::1"))) {
+                    tgUser = new java.util.HashMap<>(Map.of("id", 0L, "first_name", "Dev", "username", "dev"));
+                } else {
                     return errorMap("Ошибка авторизации Telegram");
                 }
-                tgUser = new java.util.HashMap<>(Map.of("id", 0L, "first_name", "Dev", "username", "dev"));
             }
+
             UserProfileManager.UserProfile profile = upm.updateFromTelegram(tgUser);
             String token = upm.createSession(profile.telegramUserId);
             Map<String, Object> resp = new LinkedHashMap<>(profile.toPublicMap());
@@ -196,7 +226,9 @@ public class MiniAppServer {
             if ("POST".equals(exchange.getRequestMethod())) {
                 Map<String, Object> body = parseBody(exchange);
                 boolean testnet = Boolean.TRUE.equals(body.get("testnet"));
-                return UserProfileManager.getInstance().updateBinanceKeys(userId, body, testnet);
+                String apiKey    = (String) body.getOrDefault("apiKey", "");
+                String pemContent = (String) body.getOrDefault("pemContent", "");
+                return UserProfileManager.getInstance().saveBinanceKeys(userId, apiKey, pemContent, testnet);
             }
             return UserProfileManager.getInstance().getBinanceKeysStatus(userId);
         }));
@@ -210,46 +242,7 @@ public class MiniAppServer {
         server.createContext("/api/profile/wallet", exchange -> handleJson(exchange, () -> {
             Long userId = resolveUser(exchange);
             if (userId == null) return errorMap("Требуется авторизация");
-            UserProfileManager upm = UserProfileManager.getInstance();
-            UserProfileManager.UserProfile profile = upm.loadProfile(userId);
-            if (profile == null) return errorMap("Профиль не найден");
-            Map<String, Object> result = new LinkedHashMap<>();
-            if (profile.binanceApiKey != null && !profile.binanceApiKey.isBlank()
-                    && profile.binancePrivKeyPath != null && !profile.binancePrivKeyPath.isBlank()) {
-                try {
-                    char[] apiKey = profile.binanceApiKey.toCharArray();
-                    char[] privKey = ton.dariushkmetsyak.Config.AppConfig.getInstance()
-                        .resolvePrivateKeyPath(profile.binancePrivKeyPath).toCharArray();
-                    ton.dariushkmetsyak.TradingApi.ApiService.Account acc =
-                        ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder.createNewBinance(
-                            apiKey, privKey,
-                            ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder.BINANCE_BASE_URL.MAINNET);
-                    result.put("mainnet", acc.wallet().getAllAssets().toString());
-                } catch (Exception e) { result.put("mainnet_error", "Ошибка: " + e.getMessage()); }
-            }
-            if (profile.binanceTestApiKey != null && !profile.binanceTestApiKey.isBlank()
-                    && profile.binanceTestPrivKeyPath != null && !profile.binanceTestPrivKeyPath.isBlank()) {
-                try {
-                    char[] apiKey = profile.binanceTestApiKey.toCharArray();
-                    char[] privKey = ton.dariushkmetsyak.Config.AppConfig.getInstance()
-                        .resolvePrivateKeyPath(profile.binanceTestPrivKeyPath).toCharArray();
-                    ton.dariushkmetsyak.TradingApi.ApiService.Account acc =
-                        ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder.createNewBinance(
-                            apiKey, privKey,
-                            ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder.BINANCE_BASE_URL.TESTNET);
-                    result.put("testnet", acc.wallet().getAllAssets().toString());
-                } catch (Exception e) { result.put("testnet_error", "Ошибка: " + e.getMessage()); }
-            }
-            java.util.List<Map<String, Object>> running = TradingSessionManager.getInstance().getAllSessions()
-                .stream().filter(s -> "RUNNING".equals(s.get("status")))
-                .map(s -> {
-                    Map<String, Object> m = new LinkedHashMap<>();
-                    m.put("id", s.get("id")); m.put("coin", s.get("coinName"));
-                    m.put("coinBalance", s.get("coinBalance")); m.put("usdtBalance", s.get("usdtBalance"));
-                    return m;
-                }).collect(java.util.stream.Collectors.toList());
-            result.put("active_sessions", running);
-            return result;
+            return UserProfileManager.getInstance().getWallet(userId);
         }));
 
         server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
@@ -274,6 +267,9 @@ public class MiniAppServer {
     // ---- Handlers ----
 
     private Map<String, Object> startTradingFromRequest(HttpExchange exchange) throws Exception {
+        return startTradingFromRequest(exchange, null);
+    }
+    private Map<String, Object> startTradingFromRequest(HttpExchange exchange, Long ownerId) throws Exception {
         Map<String, Object> body = parseBody(exchange);
         String type = (String) body.getOrDefault("type", "tester");
         String coinName = (String) body.getOrDefault("coin", "bitcoin");
@@ -300,7 +296,12 @@ public class MiniAppServer {
             default: // tester
                 result = mgr.startTesterTrading(coinName, startAssets, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chartRefreshInterval, chatId);
         }
-        if (result instanceof TradingSessionManager.SessionInfo) return ((TradingSessionManager.SessionInfo) result).toMap();
+        if (result instanceof TradingSessionManager.SessionInfo) {
+            TradingSessionManager.SessionInfo sess = (TradingSessionManager.SessionInfo) result;
+            if (ownerId != null && ownerId != 0L) sess.ownerId = ownerId;
+            TradingSessionManager.getInstance().saveSessions();
+            return sess.toMap();
+        }
         return (Map<String, Object>) result;
     }
 

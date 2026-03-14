@@ -62,6 +62,8 @@ public class TradingSessionManager {
         public String id;
         public SessionType type;
         public String coinName;
+        /** Telegram userId of the session owner. 0 = legacy/unowned (visible to all) */
+        public long ownerId = 0;
         public Map<String, Object> params;
         public volatile String status;
         public volatile String lastMessage;
@@ -83,6 +85,9 @@ public class TradingSessionManager {
 
         public SessionInfo() {}
         SessionInfo(String id, SessionType type, String coinName, Map<String, Object> params) {
+            this(id, type, coinName, params, 0L);
+        }
+        SessionInfo(String id, SessionType type, String coinName, Map<String, Object> params, long ownerId) {
             this.id = id;
             this.type = type;
             this.coinName = coinName;
@@ -90,6 +95,7 @@ public class TradingSessionManager {
             this.status = "RUNNING";
             this.startedAt = System.currentTimeMillis();
             this.lastMessage = "Запущено";
+            this.ownerId = ownerId;
         }
 
         public Map<String, Object> toMap() { return toMap(false); }
@@ -114,6 +120,7 @@ public class TradingSessionManager {
             m.put("sellProfitPrice", sellProfitPrice);
             m.put("sellLossPrice", sellLossPrice);
             m.put("stoppedUnexpectedly", stoppedUnexpectedly);
+            m.put("ownerId", ownerId);
             if (includeEvents) {
                 m.put("events", events.stream().map(SessionEvent::toMap).collect(Collectors.toList()));
             }
@@ -260,6 +267,7 @@ public class TradingSessionManager {
                 info.startedAt = toLong(m.get("startedAt"));
                 info.endedAt = toLong(m.get("endedAt"));
                 info.stoppedUnexpectedly = (Boolean) m.getOrDefault("stoppedUnexpectedly", false);
+                info.ownerId = toLong(m.getOrDefault("ownerId", 0L));
                 info.coinBalance = toDouble(m.get("coinBalance"));
                 info.usdtBalance = toDouble(m.get("usdtBalance"));
                 info.isTrading = (Boolean) m.getOrDefault("isTrading", false);
@@ -382,9 +390,11 @@ public class TradingSessionManager {
 
                 Account account = AccountBuilder.createNewTester(assets);
                 try { ImageAndMessageSender.setChatId(chatId); } catch (Exception ignored) {}
+                boolean resume = savedState != null || info.events.stream()
+                    .anyMatch(e -> "START".equals(e.type) && e.message != null && e.message.contains("возобновлена"));
                 new ReversalPointsStrategyTrader(account, coin, tradingSum,
                         buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chatId,
-                        savedState, info.id)
+                        savedState, info.id, resume)
                         .startTrading();
                 setFinalStatus(info, false);
             } catch (Exception e) {
@@ -457,9 +467,11 @@ public class TradingSessionManager {
                 Account account = AccountBuilder.createNewBinance(apiKey, privKeyPath,
                         testnet ? AccountBuilder.BINANCE_BASE_URL.TESTNET : AccountBuilder.BINANCE_BASE_URL.MAINNET);
                 try { ImageAndMessageSender.setChatId(chatId); } catch (Exception ignored) {}
+                boolean resume = savedState != null || info.events.stream()
+                    .anyMatch(e -> "START".equals(e.type) && e.message != null && e.message.contains("возобновлена"));
                 new ReversalPointsStrategyTrader(account, coin, tradingSum,
                         buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chatId,
-                        savedState, info.id)
+                        savedState, info.id, resume)
                         .startTrading();
                 setFinalStatus(info, false);
             } catch (Exception e) {
@@ -534,9 +546,11 @@ public class TradingSessionManager {
 
     // ---- Stop ----
 
-    public boolean stopSession(String sessionId) {
+    public boolean stopSession(String sessionId) { return stopSession(sessionId, 0L); }
+    public boolean stopSession(String sessionId, long requesterId) {
         SessionInfo info = sessions.get(sessionId);
         if (info == null) return false;
+        if (requesterId != 0 && info.ownerId != 0 && info.ownerId != requesterId) return false;
         if (info.thread != null && info.thread.isAlive()) info.thread.interrupt();
         info.status = "STOPPED";
         info.stoppedUnexpectedly = false;
@@ -572,6 +586,24 @@ public class TradingSessionManager {
         sessions.values().forEach(s -> result.add(s.toMap(false)));
         result.sort((a, b) -> Long.compare((Long) b.get("startedAt"), (Long) a.get("startedAt")));
         return result;
+    }
+
+    /** Return only sessions owned by the given userId, or legacy sessions (ownerId==0). */
+    public List<Map<String, Object>> getSessionsByOwner(long userId) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        sessions.values().stream()
+            .filter(s -> s.ownerId == 0 || s.ownerId == userId)
+            .forEach(s -> result.add(s.toMap(true)));
+        result.sort((a, b) -> Long.compare((Long) b.get("startedAt"), (Long) a.get("startedAt")));
+        return result;
+    }
+
+    /** Return session only if userId matches owner (or session is unowned). */
+    public Map<String, Object> getSessionDetailForOwner(String sessionId, long userId) {
+        SessionInfo info = sessions.get(sessionId);
+        if (info == null) return Map.of("error", "Сессия не найдена");
+        if (info.ownerId != 0 && info.ownerId != userId) return Map.of("error", "Нет доступа");
+        return info.toMap(true);
     }
 
     public Map<String, Object> getSessionDetail(String sessionId) {

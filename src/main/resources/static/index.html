@@ -143,7 +143,7 @@
   .session-card-actions{display:flex;flex-wrap:wrap;gap:5px;padding:0 12px 10px}
   .session-card-actions .btn{flex:0 0 auto;min-width:80px}
   /* Target prices */
-  .target-prices{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;padding:7px 12px;background:rgba(0,0,0,0.25);border-top:1px solid rgba(255,255,255,0.05);font-size:11px}
+  .target-prices{display:grid;grid-template-columns:auto 1fr auto;gap:3px 8px;padding:7px 12px;background:rgba(0,0,0,0.25);border-top:1px solid rgba(255,255,255,0.05);font-size:11px;align-items:center}
   .tp-label{color:var(--muted);white-space:nowrap}
   .tp-val{color:var(--text);font-weight:600;font-family:var(--font-head)}
   .tp-val.green{color:var(--green)}
@@ -488,7 +488,11 @@
         <div class="card-title">👤 ЛИЧНЫЙ КАБИНЕТ</div>
         <div id="prof-not-authed">
           <div style="color:var(--muted);font-size:12px;margin-bottom:14px;line-height:1.6">Авторизуйтесь через Telegram для доступа к настройкам API ключей и истории торговли.</div>
-          <button class="btn btn-primary" onclick="profileLogin()" style="width:100%">🔑 Войти через Telegram</button>
+          <button class="btn btn-primary" onclick="profileLogin()" style="width:100%;margin-bottom:8px">🔑 Войти через Telegram (приложение)</button>
+          <div id="prof-tg-widget-wrap" style="margin-bottom:4px">
+            <!-- Telegram Login Widget rendered here for browser auth -->
+          </div>
+          <div style="font-size:10px;color:var(--muted);text-align:center">или через виджет, если открыто в браузере</div>
         </div>
         <div id="prof-authed" style="display:none">
           <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
@@ -516,15 +520,27 @@
           <div style="font-size:10px;color:var(--muted);margin-bottom:6px">testnet.binance.vision</div>
           <div id="prof-hint-test" style="font-size:11px;color:var(--accent);margin-bottom:8px;font-family:monospace;word-break:break-all"></div>
           <input type="text" id="prof-apikey-test" placeholder="API Key" autocomplete="off" style="width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:var(--radius-sm);font-size:12px;margin-bottom:8px;outline:none">
-          <input type="text" id="prof-privpath-test" placeholder="Путь к .pem файлу на сервере" autocomplete="off" style="width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:var(--radius-sm);font-size:12px;margin-bottom:4px;outline:none">
-          <div style="font-size:10px;color:var(--muted);margin-bottom:10px">Пример: /opt/cryptotrader/test-prv-key.pem</div>
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
+            <input type="text" id="prof-privpath-test" placeholder="Путь к .pem на сервере (опц.)" autocomplete="off" style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:var(--radius-sm);font-size:12px;outline:none">
+            <label style="cursor:pointer;background:var(--bg3);border:1px solid var(--border);padding:9px 10px;border-radius:var(--radius-sm);font-size:11px;color:var(--accent);white-space:nowrap" title="Загрузить .pem файл">
+              📎 PEM<input type="file" id="prof-pem-test" accept=".pem,.key,.txt" style="display:none" onchange="profReadPem('test',this)">
+            </label>
+          </div>
+          <div id="prof-pem-test-status" style="font-size:10px;color:var(--green);margin-bottom:6px;display:none"></div>
+          <div style="font-size:10px;color:var(--muted);margin-bottom:10px">Загрузите Ed25519 .pem файл с вашего устройства</div>
           <button class="btn btn-primary btn-sm" onclick="profSaveKeys(true)" style="width:100%">💾 Сохранить Testnet ключи</button>
         </div>
         <div id="prof-keys-main-panel" style="display:none">
           <div style="font-size:10px;color:var(--muted);margin-bottom:6px">api.binance.com — реальные средства</div>
           <div id="prof-hint-main" style="font-size:11px;color:var(--accent);margin-bottom:8px;font-family:monospace;word-break:break-all"></div>
           <input type="text" id="prof-apikey-main" placeholder="API Key" autocomplete="off" style="width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:var(--radius-sm);font-size:12px;margin-bottom:8px;outline:none">
-          <input type="text" id="prof-privpath-main" placeholder="Путь к .pem файлу на сервере" autocomplete="off" style="width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:var(--radius-sm);font-size:12px;margin-bottom:4px;outline:none">
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">
+            <input type="text" id="prof-privpath-main" placeholder="Путь к .pem на сервере (опц.)" autocomplete="off" style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:var(--radius-sm);font-size:12px;outline:none">
+            <label style="cursor:pointer;background:var(--bg3);border:1px solid var(--border);padding:9px 10px;border-radius:var(--radius-sm);font-size:11px;color:var(--accent);white-space:nowrap" title="Загрузить .pem файл">
+              📎 PEM<input type="file" id="prof-pem-main" accept=".pem,.key,.txt" style="display:none" onchange="profReadPem('main',this)">
+            </label>
+          </div>
+          <div id="prof-pem-main-status" style="font-size:10px;color:var(--green);margin-bottom:6px;display:none"></div>
           <div style="background:rgba(255,23,68,0.08);border:1px solid rgba(255,23,68,0.25);border-radius:var(--radius-sm);padding:8px;font-size:10px;color:var(--red);margin-bottom:10px">⚠️ Реальные ключи. Хранятся только на вашем сервере.</div>
           <button class="btn btn-danger btn-sm" onclick="profSaveKeys(false)" style="width:100%">⚠️ Сохранить Mainnet ключи</button>
         </div>
@@ -1113,10 +1129,22 @@ function buildTargetPricesHtml(s) {
 
   if (!s.isTrading) {
     if (!s.maxPrice && !s.buyTargetPrice && !curVal) return '';
+    // Also show drop% from max wave
+    const dropFromMax = (s.maxPrice && curVal)
+      ? ((1 - curVal / s.maxPrice) * 100).toFixed(2) : null;
+    const dropStr = dropFromMax !== null
+      ? `<span style="font-size:9px;color:#ffea00">-${dropFromMax}%</span>` : '<span></span>';
+    const buyParams = s.params;
+    const buyGapPct = buyParams?.buyGap ?? null;
+    const leftToBuy = (buyGapPct !== null && dropFromMax !== null)
+      ? (parseFloat(buyGapPct) - parseFloat(dropFromMax)).toFixed(2) : null;
+    const leftToBuyStr = leftToBuy !== null
+      ? `<span style="font-size:9px;color:${parseFloat(leftToBuy)<=0?PC.buy:'#ffea00'}">${parseFloat(leftToBuy)<=0?'🎯 сигнал!':'осталось '+leftToBuy+'%'}</span>`
+      : '<span></span>';
     return `<div class="target-prices">
-      <span class="tp-label">🔭 Макс. волна:</span><span class="tp-val" style="color:${PC.max}">${s.maxPrice ? '$' + formatPrice(s.maxPrice) : '—'}</span>
-      <span class="tp-label">💹 Текущая:</span>${curStr}
-      <span class="tp-label">🎯 Цена покупки:</span><span class="tp-val" style="color:${PC.buy}">${s.buyTargetPrice ? '$' + formatPrice(s.buyTargetPrice) : '—'}</span>
+      <span class="tp-label">🔭 Макс. волна:</span><span class="tp-val" style="color:${PC.max}">${s.maxPrice ? '$' + formatPrice(s.maxPrice) : '—'}</span><span></span>
+      <span class="tp-label">💹 Текущая:</span>${curStr}${dropStr}
+      <span class="tp-label">🎯 Цена покупки:</span><span class="tp-val" style="color:${PC.buy}">${s.buyTargetPrice ? '$' + formatPrice(s.buyTargetPrice) : '—'}</span>${leftToBuyStr}
     </div>`;
   } else {
     // Calculate remaining % to profit/loss targets from current price
@@ -1124,15 +1152,24 @@ function buildTargetPricesHtml(s) {
       ? ((s.sellProfitPrice - curVal) / curVal * 100).toFixed(2) : null;
     const remLoss = (s.sellLossPrice && curVal)
       ? ((curVal - s.sellLossPrice) / curVal * 100).toFixed(2) : null;
-    const remProfitStr = remProfit !== null
-      ? `<span style="font-size:9px;color:${parseFloat(remProfit)<=0?PC.buy:'#ffea00'};margin-left:4px">${parseFloat(remProfit)<=0?'✅':'осталось +'+remProfit+'%'}</span>` : '';
-    const remLossStr = remLoss !== null
-      ? `<span style="font-size:9px;color:${parseFloat(remLoss)<=0?PC.sold:'#ffea00'};margin-left:4px">${parseFloat(remLoss)<=0?'🔴':'осталось −'+remLoss+'%'}</span>` : '';
+    // 3rd column: remaining % aligned to price value
+    const remProfitCol = remProfit !== null
+      ? `<span style="font-size:9px;color:${parseFloat(remProfit)<=0?PC.buy:'#ffea00'}">${parseFloat(remProfit)<=0?'✅':'осталось +'+remProfit+'%'}</span>`
+      : '<span></span>';
+    const remLossCol = remLoss !== null
+      ? `<span style="font-size:9px;color:${parseFloat(remLoss)<=0?PC.sold:'#ffea00'}">${parseFloat(remLoss)<=0?'🔴':'осталось −'+remLoss+'%'}</span>`
+      : '<span></span>';
+    // Change % from buy price
+    const changePct = (s.boughtAtPrice && curVal)
+      ? ((curVal - s.boughtAtPrice) / s.boughtAtPrice * 100).toFixed(2) : null;
+    const changeCol = changePct !== null
+      ? `<span style="font-size:9px;color:${parseFloat(changePct)>=0?PC.buy:PC.sold}">${parseFloat(changePct)>=0?'+':''}${changePct}%</span>`
+      : '<span></span>';
     return `<div class="target-prices">
-      <span class="tp-label">💰 Куплено за:</span><span class="tp-val" style="color:var(--muted)">${s.boughtAtPrice ? '$' + formatPrice(s.boughtAtPrice) : '—'}</span>
-      <span class="tp-label">💹 Текущая:</span>${curStr}
-      <span class="tp-label">📈 Продажа+:</span><span class="tp-val" style="color:${PC.buy}">${s.sellProfitPrice ? '$' + formatPrice(s.sellProfitPrice) : '—'}</span>${remProfitStr}
-      <span class="tp-label">📉 Продажа−:</span><span class="tp-val" style="color:${PC.sold}">${s.sellLossPrice ? '$' + formatPrice(s.sellLossPrice) : '—'}</span>${remLossStr}
+      <span class="tp-label">💰 Куплено за:</span><span class="tp-val" style="color:var(--muted)">${s.boughtAtPrice ? '$' + formatPrice(s.boughtAtPrice) : '—'}</span><span></span>
+      <span class="tp-label">💹 Текущая:</span>${curStr}${changeCol}
+      <span class="tp-label">📈 Продажа+:</span><span class="tp-val" style="color:${PC.buy}">${s.sellProfitPrice ? '$' + formatPrice(s.sellProfitPrice) : '—'}</span>${remProfitCol}
+      <span class="tp-label">📉 Продажа−:</span><span class="tp-val" style="color:${PC.sold}">${s.sellLossPrice ? '$' + formatPrice(s.sellLossPrice) : '—'}</span>${remLossCol}
     </div>`;
   }
 }
@@ -2024,10 +2061,28 @@ async function profSaveKeys(testnet) {
   } catch(e) { showToast('❌ Ошибка: ' + e.message); }
 }
 
+function renderBalanceTable(balances, netLabel, color) {
+  if (!balances) return '';
+  if (balances.error) {
+    return `<div style="margin-bottom:14px">
+      <div style="font-family:var(--font-head);font-size:9px;color:${color};margin-bottom:6px">${netLabel}</div>
+      <div style="color:var(--red);font-size:11px">${escHtml(balances.error)}</div></div>`;
+  }
+  if (!Array.isArray(balances) || !balances.length) return '';
+  let rows = balances.map(b => `
+    <div style="display:grid;grid-template-columns:52px 1fr;gap:4px;padding:5px 0;border-bottom:1px solid rgba(42,53,96,0.4);align-items:center">
+      <span style="font-family:var(--font-head);font-size:10px;color:${color}">${escHtml(b.symbol)}</span>
+      <span style="font-size:11px;color:var(--text);text-align:right">${fmtNum(b.amount)}</span>
+    </div>`).join('');
+  return `<div style="margin-bottom:16px">
+    <div style="font-family:var(--font-head);font-size:9px;color:${color};margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid ${color}44">${netLabel} — ${balances.length} актив(ов)</div>
+    <div style="max-height:200px;overflow-y:auto;-webkit-overflow-scrolling:touch">${rows}</div></div>`;
+}
+
 async function profLoadWallet() {
   if (!_profToken) { showToast('Войдите в аккаунт'); return; }
   const el = document.getElementById('prof-wallet-content');
-  el.innerHTML = '<div class="empty-state"><div class="spinner" style="margin:0 auto 8px"></div></div>';
+  el.innerHTML = '<div class="empty-state"><div class="spinner" style="margin:0 auto 8px"></div>Загрузка балансов...</div>';
   try {
     const r = await fetch(`${API_BASE}/api/profile/wallet`, {
       headers: {'Authorization': 'Bearer ' + _profToken}
@@ -2036,31 +2091,20 @@ async function profLoadWallet() {
     if (data.error) { el.innerHTML = `<div style="color:var(--red);font-size:12px">${escHtml(data.error)}</div>`; return; }
 
     let html = '';
-    if (data.mainnet) {
-      html += `<div style="margin-bottom:12px"><div style="font-family:var(--font-head);font-size:9px;color:var(--green);margin-bottom:6px">MAINNET</div>
-        <pre style="font-size:11px;color:var(--text);white-space:pre-wrap;word-break:break-all;background:var(--bg3);padding:8px;border-radius:var(--radius-sm)">${escHtml(data.mainnet)}</pre></div>`;
-    }
-    if (data.mainnet_error) {
-      html += `<div style="margin-bottom:12px"><div style="font-family:var(--font-head);font-size:9px;color:var(--green);margin-bottom:4px">MAINNET</div><div style="color:var(--red);font-size:11px">${escHtml(data.mainnet_error)}</div></div>`;
-    }
-    if (data.testnet) {
-      html += `<div style="margin-bottom:12px"><div style="font-family:var(--font-head);font-size:9px;color:var(--accent);margin-bottom:6px">TESTNET</div>
-        <pre style="font-size:11px;color:var(--text);white-space:pre-wrap;word-break:break-all;background:var(--bg3);padding:8px;border-radius:var(--radius-sm)">${escHtml(data.testnet)}</pre></div>`;
-    }
-    if (data.testnet_error) {
-      html += `<div style="margin-bottom:12px"><div style="font-family:var(--font-head);font-size:9px;color:var(--accent);margin-bottom:4px">TESTNET</div><div style="color:var(--red);font-size:11px">${escHtml(data.testnet_error)}</div></div>`;
-    }
-    if (data.active_sessions?.length) {
-      html += `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
-        <div style="font-family:var(--font-head);font-size:9px;color:var(--muted);margin-bottom:6px">АКТИВНЫЕ СЕССИИ</div>`;
-      for (const s of data.active_sessions) {
-        html += `<div style="display:flex;justify-content:space-between;font-size:11px;padding:4px 0;border-bottom:1px solid rgba(42,53,96,0.5)">
-          <span style="color:var(--muted)">${escHtml(String(s.coin))}</span>
-          <span>${fmtNum(s.coinBalance)} ${escHtml(String(s.coin))} / ${fmtNum(s.usdtBalance)} USDT</span></div>`;
+    html += renderBalanceTable(data.mainnet,  'MAINNET',  'var(--green)');
+    html += renderBalanceTable(data.testnet,  'TESTNET',  'var(--accent)');
+
+    if (data.activeSessions?.length) {
+      html += `<div style="padding-top:10px;border-top:1px solid var(--border)">
+        <div style="font-family:var(--font-head);font-size:9px;color:var(--muted);margin-bottom:8px">АКТИВНЫЕ СЕССИИ</div>`;
+      for (const s of data.activeSessions) {
+        html += `<div style="display:flex;justify-content:space-between;font-size:11px;padding:5px 0;border-bottom:1px solid rgba(42,53,96,0.4)">
+          <span style="color:var(--muted);font-family:var(--font-head);font-size:10px">${escHtml(String(s.coin))}</span>
+          <span>${fmtNum(s.coinBalance)} ${escHtml(String(s.coin))} + ${fmtNum(s.usdtBalance)} USDT</span></div>`;
       }
       html += '</div>';
     }
-    if (!html) html = '<div style="color:var(--muted);font-size:12px">Нет данных. Добавьте API ключи.</div>';
+    if (!html) html = '<div style="color:var(--muted);font-size:12px;padding:12px 0">Нет данных. Добавьте API ключи Binance.</div>';
     el.innerHTML = html;
   } catch(e) { el.innerHTML = `<div style="color:var(--red);font-size:12px">Ошибка: ${escHtml(e.message)}</div>`; }
 }
@@ -2146,6 +2190,114 @@ async function initProfilePage() {
   } else {
     renderProfNotAuthed();
   }
+}
+
+// ── PEM file reader ─────────────────────────────────────────────────────────
+const _pemContents = {}; // 'test' | 'main' → pem string
+
+function profReadPem(suffix, input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    _pemContents[suffix] = ev.target.result;
+    const statusEl = document.getElementById('prof-pem-' + suffix + '-status');
+    if (statusEl) {
+      statusEl.textContent = '✅ Файл загружен: ' + file.name;
+      statusEl.style.display = 'block';
+    }
+  };
+  reader.readAsText(file);
+}
+
+// Override profSaveKeys to include PEM content
+const _origProfSaveKeys = profSaveKeys;
+// Redefine to send pemContent
+// (defined below inline to access _pemContents)
+
+// ── Browser Telegram Login Widget ───────────────────────────────────────────
+async function initTelegramWidget() {
+  // Only show widget if NOT inside Telegram WebApp
+  if (tg?.initData) return;
+  try {
+    const r = await fetch(`${API_BASE}/api/auth/config`);
+    const cfg = await r.json();
+    const botUsername = cfg.botUsername;
+    if (!botUsername || botUsername === 'YOUR_BOT_NAME') return;
+
+    const wrap = document.getElementById('prof-tg-widget-wrap');
+    if (!wrap) return;
+
+    // Inject Telegram Login Widget script
+    const script = document.createElement('script');
+    script.async = true;
+    script.src = 'https://telegram.org/js/telegram-widget.js?22';
+    script.setAttribute('data-telegram-login', botUsername);
+    script.setAttribute('data-size', 'large');
+    script.setAttribute('data-radius', '8');
+    script.setAttribute('data-userpic', 'true');
+    script.setAttribute('data-request-access', 'write');
+    // Callback must be global
+    window.onTelegramWidgetAuth = async (user) => {
+      try {
+        const r = await fetch(`${API_BASE}/api/auth/telegram`, {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(user)   // contains id, first_name, username, hash, auth_date etc.
+        });
+        const data = await r.json();
+        if (data.error) { showToast('❌ ' + data.error); return; }
+        _profToken = data.token;
+        try { localStorage.setItem('cc_prof_token', _profToken); } catch(e) {}
+        renderProfAuthed(data);
+        await profLoadKeys();
+        showToast('✅ Авторизован как ' + (data.telegramFirstName || 'пользователь'));
+      } catch(e) { showToast('❌ Ошибка: ' + e.message); }
+    };
+    script.setAttribute('data-onauth', 'onTelegramWidgetAuth(user)');
+    wrap.innerHTML = '';
+    wrap.appendChild(script);
+  } catch(e) { /* silently fail */ }
+}
+
+// ── Override profSaveKeys with PEM support ───────────────────────────────────
+async function profSaveKeys(testnet) {
+  if (!_profToken) { showToast('Войдите в аккаунт'); return; }
+  const suffix = testnet ? 'test' : 'main';
+  const apiKey    = document.getElementById('prof-apikey-' + suffix)?.value.trim() || '';
+  const pemContent = _pemContents[suffix] || '';
+  // Fallback: server-side path (if user typed it)
+  const privPath  = document.getElementById('prof-privpath-' + suffix)?.value.trim() || '';
+
+  if (!apiKey && !pemContent && !privPath) {
+    showToast('Введите API ключ или загрузите PEM файл');
+    return;
+  }
+  try {
+    const r = await fetch(`${API_BASE}/api/profile/keys`, {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer ' + _profToken, 'Content-Type': 'application/json'},
+      body: JSON.stringify({ testnet, apiKey, pemContent, privKeyPath: privPath })
+    });
+    const data = await r.json();
+    if (data.error) { showToast('❌ ' + data.error); return; }
+    const msg = data.pemSaved ? '✅ Ключи и PEM сохранены' : '✅ Ключи сохранены';
+    showToast(msg);
+    document.getElementById('prof-apikey-' + suffix).value = '';
+    if (document.getElementById('prof-privpath-' + suffix)) document.getElementById('prof-privpath-' + suffix).value = '';
+    delete _pemContents[suffix];
+    const st = document.getElementById('prof-pem-' + suffix + '-status');
+    if (st) st.style.display = 'none';
+    await profLoadKeys();
+  } catch(e) { showToast('❌ Ошибка: ' + e.message); }
+}
+
+// ── Override initProfilePage to also init widget ─────────────────────────────
+const _origInitProfilePage = initProfilePage;
+async function initProfilePage() {
+  await _origInitProfilePage();
+  // Init widget after auth state is known (only if not authed via Telegram app)
+  setTimeout(initTelegramWidget, 300);
 }
 
 // ============================================================

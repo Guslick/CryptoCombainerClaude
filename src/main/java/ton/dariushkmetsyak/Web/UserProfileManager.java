@@ -12,53 +12,54 @@ import java.nio.file.*;
 import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
- * Manages user profiles stored in profiles/<telegramUserId>.json.
- * Provides Telegram WebApp initData verification and Binance API key storage.
+ * Manages user profiles, Telegram auth, Binance key storage (incl. PEM upload),
+ * and per-user data isolation.
  */
 public class UserProfileManager {
     private static final Logger log = LoggerFactory.getLogger(UserProfileManager.class);
     private static final String PROFILES_DIR = "profiles";
+    private static final String PEMS_DIR     = "profiles/pems";
     private static final ObjectMapper mapper = new ObjectMapper();
     private static UserProfileManager instance;
 
-    // In-memory session tokens: token → telegramUserId
-    private final ConcurrentHashMap<String, Long> sessionTokens = new ConcurrentHashMap<>();
-    // Token expiry: token → expiresAt millis
-    private final ConcurrentHashMap<String, Long> tokenExpiry = new ConcurrentHashMap<>();
-    private static final long TOKEN_TTL_MS = 7L * 24 * 3600 * 1000; // 7 days
+    // token → userId
+    private final ConcurrentHashMap<String, Long>   sessionTokens = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Long>   tokenExpiry   = new ConcurrentHashMap<>();
+    private static final long TOKEN_TTL_MS = 7L * 24 * 3600 * 1000;
+
+    // ── UserProfile ──────────────────────────────────────────────────────────
 
     public static class UserProfile {
-        public long telegramUserId;
-        public String telegramUsername;
-        public String telegramFirstName;
-        public String telegramPhotoUrl;
-        // Binance keys stored as plain text (server-local, no external exposure)
-        public String binanceApiKey = "";
-        public String binanceSecretKey = "";   // for HMAC accounts
-        public String binancePrivKeyPath = ""; // for Ed25519 accounts
-        public String binanceTestApiKey = "";
-        public String binanceTestSecretKey = "";
+        public long   telegramUserId;
+        public String telegramUsername   = "";
+        public String telegramFirstName  = "";
+        public String telegramPhotoUrl   = "";
+        // Binance keys — stored as API key string; PEM stored as file reference
+        public String binanceApiKey         = "";
+        public String binancePrivKeyPath    = "";   // path to pem file in PEMS_DIR
+        public String binanceTestApiKey     = "";
         public String binanceTestPrivKeyPath = "";
         public long createdAt;
         public long updatedAt;
 
         public UserProfile() {}
         public UserProfile(long uid, String username, String firstName) {
-            this.telegramUserId = uid;
-            this.telegramUsername = username;
-            this.telegramFirstName = firstName;
+            this.telegramUserId  = uid;
+            this.telegramUsername  = username != null ? username : "";
+            this.telegramFirstName = firstName != null ? firstName : "";
             this.createdAt = this.updatedAt = System.currentTimeMillis();
         }
 
         public Map<String, Object> toPublicMap() {
             Map<String, Object> m = new LinkedHashMap<>();
-            m.put("telegramUserId", telegramUserId);
-            m.put("telegramUsername", telegramUsername);
+            m.put("telegramUserId",    telegramUserId);
+            m.put("telegramUsername",  telegramUsername);
             m.put("telegramFirstName", telegramFirstName);
-            m.put("telegramPhotoUrl", telegramPhotoUrl);
-            m.put("hasBinanceKeys", binanceApiKey != null && !binanceApiKey.isBlank());
+            m.put("telegramPhotoUrl",  telegramPhotoUrl);
+            m.put("hasBinanceKeys",     binanceApiKey     != null && !binanceApiKey.isBlank());
             m.put("hasBinanceTestKeys", binanceTestApiKey != null && !binanceTestApiKey.isBlank());
             m.put("createdAt", createdAt);
             m.put("updatedAt", updatedAt);
@@ -67,7 +68,10 @@ public class UserProfileManager {
     }
 
     private UserProfileManager() {
-        try { Files.createDirectories(Paths.get(PROFILES_DIR)); } catch (IOException ignored) {}
+        try {
+            Files.createDirectories(Paths.get(PROFILES_DIR));
+            Files.createDirectories(Paths.get(PEMS_DIR));
+        } catch (IOException ignored) {}
     }
 
     public static synchronized UserProfileManager getInstance() {
@@ -75,18 +79,16 @@ public class UserProfileManager {
         return instance;
     }
 
-    // ---- Telegram Auth ----
+    // ── Telegram Auth ────────────────────────────────────────────────────────
 
     /**
-     * Verify Telegram WebApp initData using HMAC-SHA256.
-     * Returns parsed user map if valid, null if invalid.
-     * Bot token is read from AppConfig.
+     * Verify Telegram WebApp initData (HMAC-SHA256).
+     * Returns parsed user map on success, null on failure.
      */
     @SuppressWarnings("unchecked")
     public Map<String, Object> verifyInitData(String initData, String botToken) {
         if (initData == null || initData.isBlank()) return null;
         try {
-            // Parse query string
             Map<String, String> params = new LinkedHashMap<>();
             String hash = null;
             for (String part : initData.split("&")) {
@@ -100,30 +102,19 @@ public class UserProfileManager {
             }
             if (hash == null) return null;
 
-            // Build data-check-string: sorted key=value pairs joined by \n
             StringBuilder sb = new StringBuilder();
-            params.entrySet().stream()
-                .sorted(Map.Entry.comparingByKey())
+            params.entrySet().stream().sorted(Map.Entry.comparingByKey())
                 .forEach(e -> { if (sb.length() > 0) sb.append('\n'); sb.append(e.getKey()).append('=').append(e.getValue()); });
 
-            // Compute HMAC-SHA256
             Mac mac = Mac.getInstance("HmacSHA256");
-            // Secret key = HMAC-SHA256("WebAppData", botToken)
             SecretKeySpec webAppData = new SecretKeySpec("WebAppData".getBytes(StandardCharsets.UTF_8), "HmacSHA256");
             mac.init(webAppData);
             byte[] secretKey = mac.doFinal(botToken.getBytes(StandardCharsets.UTF_8));
-
             mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(secretKey, "HmacSHA256"));
-            byte[] computedHash = mac.doFinal(sb.toString().getBytes(StandardCharsets.UTF_8));
-            String computedHex = bytesToHex(computedHash);
+            byte[] computed = mac.doFinal(sb.toString().getBytes(StandardCharsets.UTF_8));
+            if (!MessageDigest.isEqual(bytesToHex(computed).getBytes(), hash.getBytes())) return null;
 
-            if (!MessageDigest.isEqual(computedHex.getBytes(), hash.getBytes())) {
-                log.warn("Telegram initData verification failed");
-                return null;
-            }
-
-            // Parse user JSON
             String userJson = params.get("user");
             if (userJson == null) return null;
             Map<String, Object> user = mapper.readValue(userJson, Map.class);
@@ -135,29 +126,71 @@ public class UserProfileManager {
         }
     }
 
-    private String bytesToHex(byte[] bytes) {
+    /**
+     * Verify Telegram Login Widget callback data (HMAC-SHA256 with SHA256(botToken) as key).
+     * Used for browser-based login via widget.
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> verifyLoginWidget(Map<String, Object> data, String botToken) {
+        if (data == null || !data.containsKey("hash")) return null;
+        try {
+            String hash = (String) data.get("hash");
+            // Build check string: sorted key=value, excluding hash
+            StringBuilder sb = new StringBuilder();
+            data.entrySet().stream()
+                .filter(e -> !"hash".equals(e.getKey()))
+                .sorted(Map.Entry.comparingByKey())
+                .forEach(e -> { if (sb.length() > 0) sb.append('\n'); sb.append(e.getKey()).append('=').append(e.getValue()); });
+
+            // Secret key = SHA256(botToken)
+            MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
+            byte[] secretKey = sha256.digest(botToken.getBytes(StandardCharsets.UTF_8));
+
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(secretKey, "HmacSHA256"));
+            byte[] computed = mac.doFinal(sb.toString().getBytes(StandardCharsets.UTF_8));
+            if (!MessageDigest.isEqual(bytesToHex(computed).getBytes(), hash.getBytes())) {
+                log.warn("Login widget verification failed");
+                return null;
+            }
+
+            // Check auth_date not older than 1 day
+            Object authDate = data.get("auth_date");
+            if (authDate != null) {
+                long ts = Long.parseLong(authDate.toString());
+                if (System.currentTimeMillis() / 1000 - ts > 86400) {
+                    log.warn("Login widget data expired");
+                    return null;
+                }
+            }
+            return data;
+        } catch (Exception e) {
+            log.error("Error verifying login widget", e);
+            return null;
+        }
+    }
+
+    private String bytesToHex(byte[] b) {
         StringBuilder sb = new StringBuilder();
-        for (byte b : bytes) sb.append(String.format("%02x", b));
+        for (byte x : b) sb.append(String.format("%02x", x));
         return sb.toString();
     }
 
-    /** Create session token for verified user, return token string */
     public String createSession(long userId) {
         String token = UUID.randomUUID().toString().replace("-", "") + Long.toHexString(userId);
-        long expires = System.currentTimeMillis() + TOKEN_TTL_MS;
         sessionTokens.put(token, userId);
-        tokenExpiry.put(token, expires);
-        // Cleanup expired tokens
-        tokenExpiry.entrySet().removeIf(e -> e.getValue() < System.currentTimeMillis());
+        tokenExpiry.put(token, System.currentTimeMillis() + TOKEN_TTL_MS);
+        // Cleanup
+        long now = System.currentTimeMillis();
+        tokenExpiry.entrySet().removeIf(e -> e.getValue() < now);
         sessionTokens.keySet().retainAll(tokenExpiry.keySet());
         return token;
     }
 
-    /** Resolve userId from token, return null if invalid/expired */
     public Long resolveSession(String token) {
         if (token == null || token.isBlank()) return null;
-        Long expires = tokenExpiry.get(token);
-        if (expires == null || expires < System.currentTimeMillis()) {
+        Long exp = tokenExpiry.get(token);
+        if (exp == null || exp < System.currentTimeMillis()) {
             sessionTokens.remove(token);
             tokenExpiry.remove(token);
             return null;
@@ -165,7 +198,7 @@ public class UserProfileManager {
         return sessionTokens.get(token);
     }
 
-    // ---- Profile CRUD ----
+    // ── Profile CRUD ─────────────────────────────────────────────────────────
 
     private String profilePath(long userId) {
         return Paths.get(PROFILES_DIR, userId + ".json").toString();
@@ -176,122 +209,197 @@ public class UserProfileManager {
             File f = new File(profilePath(userId));
             if (!f.exists()) return null;
             return mapper.readValue(f, UserProfile.class);
-        } catch (Exception e) {
-            log.error("Failed to load profile for {}", userId, e);
-            return null;
-        }
+        } catch (Exception e) { log.error("Load profile {}", userId, e); return null; }
     }
 
-    public void saveProfile(UserProfile profile) {
+    public void saveProfile(UserProfile p) {
         try {
-            profile.updatedAt = System.currentTimeMillis();
-            mapper.writerWithDefaultPrettyPrinter()
-                .writeValue(new File(profilePath(profile.telegramUserId)), profile);
-        } catch (Exception e) {
-            log.error("Failed to save profile for {}", profile.telegramUserId, e);
-        }
+            p.updatedAt = System.currentTimeMillis();
+            mapper.writerWithDefaultPrettyPrinter().writeValue(new File(profilePath(p.telegramUserId)), p);
+        } catch (Exception e) { log.error("Save profile {}", p.telegramUserId, e); }
     }
 
-    public UserProfile getOrCreateProfile(long userId, String username, String firstName) {
-        UserProfile p = loadProfile(userId);
-        if (p == null) {
-            p = new UserProfile(userId, username, firstName);
-            saveProfile(p);
-        }
+    public UserProfile getOrCreate(long uid, String username, String firstName) {
+        UserProfile p = loadProfile(uid);
+        if (p == null) { p = new UserProfile(uid, username, firstName); saveProfile(p); }
         return p;
     }
 
-    /** Update profile fields from login data */
     public UserProfile updateFromTelegram(Map<String, Object> tgUser) {
-        long uid = toLong(tgUser.get("id"));
-        String username = (String) tgUser.getOrDefault("username", "");
-        String firstName = (String) tgUser.getOrDefault("first_name", "");
-        String photoUrl  = (String) tgUser.getOrDefault("photo_url", "");
-        UserProfile p = getOrCreateProfile(uid, username, firstName);
+        long uid       = toLong(tgUser.get("id"));
+        String username   = str(tgUser.get("username"));
+        String firstName  = str(tgUser.get("first_name"));
+        String photoUrl   = str(tgUser.get("photo_url"));
+        UserProfile p = getOrCreate(uid, username, firstName);
         p.telegramUsername  = username;
         p.telegramFirstName = firstName;
-        if (photoUrl != null && !photoUrl.isBlank()) p.telegramPhotoUrl = photoUrl;
+        if (!photoUrl.isBlank()) p.telegramPhotoUrl = photoUrl;
         saveProfile(p);
         return p;
     }
 
-    // ---- Binance keys ----
+    // ── Binance Keys ─────────────────────────────────────────────────────────
 
-    public Map<String, Object> updateBinanceKeys(long userId, Map<String, Object> body, boolean testnet) {
+    /**
+     * Save API key text and (optional) PEM file content for a user.
+     * pemContent is the raw PEM string uploaded from browser.
+     * If pemContent is provided, it is written to profiles/pems/<userId>_<net>.pem
+     * and the path is stored. resolvePrivateKeyPath() can then read it directly.
+     */
+    public Map<String, Object> saveBinanceKeys(long userId, String apiKey, String pemContent, boolean testnet) {
         UserProfile p = loadProfile(userId);
         if (p == null) return Map.of("error", "Профиль не найден");
-        String apiKey   = (String) body.getOrDefault("apiKey", "");
-        String privPath = (String) body.getOrDefault("privKeyPath", "");
-        if (testnet) {
-            if (!apiKey.isBlank()) p.binanceTestApiKey = apiKey;
-            if (!privPath.isBlank()) p.binanceTestPrivKeyPath = privPath;
-        } else {
-            if (!apiKey.isBlank()) p.binanceApiKey = apiKey;
-            if (!privPath.isBlank()) p.binancePrivKeyPath = privPath;
-        }
-        saveProfile(p);
-        return Map.of("ok", true, "testnet", testnet);
-    }
 
-    /** Return Binance keys suitable for AccountBuilder (masks secret in response) */
-    public Map<String, Object> getBinanceKeysStatus(long userId) {
-        UserProfile p = loadProfile(userId);
-        if (p == null) return Map.of("error", "Профиль не найден");
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("mainnet", Map.of(
-            "hasApiKey",   p.binanceApiKey != null && !p.binanceApiKey.isBlank(),
-            "hasPrivKey",  p.binancePrivKeyPath != null && !p.binancePrivKeyPath.isBlank(),
-            "apiKeyHint",  maskKey(p.binanceApiKey),
-            "privKeyPath", p.binancePrivKeyPath != null ? p.binancePrivKeyPath : ""
-        ));
-        m.put("testnet", Map.of(
-            "hasApiKey",   p.binanceTestApiKey != null && !p.binanceTestApiKey.isBlank(),
-            "hasPrivKey",  p.binanceTestPrivKeyPath != null && !p.binanceTestPrivKeyPath.isBlank(),
-            "apiKeyHint",  maskKey(p.binanceTestApiKey),
-            "privKeyPath", p.binanceTestPrivKeyPath != null ? p.binanceTestPrivKeyPath : ""
-        ));
-        return m;
-    }
-
-    private String maskKey(String key) {
-        if (key == null || key.length() < 8) return "—";
-        return key.substring(0, 4) + "••••" + key.substring(key.length() - 4);
-    }
-
-    /** Build trade history summary from all sessions for this user */
-    public Map<String, Object> getTradingReport(long userId) {
-        var mgr = TradingSessionManager.getInstance();
-        var all = mgr.getAllSessions();
-
-        Map<String, Object> report = new LinkedHashMap<>();
-        int totalSessions = all.size();
-        long buyCount = 0, sellCount = 0;
-        Map<String, Integer> sessionsByType = new LinkedHashMap<>();
-        Map<String, Double> profitByType = new LinkedHashMap<>();
-
-        for (Map<String, Object> s : all) {
-            String type = (String) s.getOrDefault("type", "UNKNOWN");
-            sessionsByType.merge(type, 1, Integer::sum);
-            // Count BUY/SELL events
-            @SuppressWarnings("unchecked")
-            var events = (java.util.List<Map<String, Object>>) s.get("events");
-            if (events != null) {
-                for (var e : events) {
-                    String etype = (String) e.get("type");
-                    if ("BUY".equals(etype)) buyCount++;
-                    if ("SELL".equals(etype)) sellCount++;
+        String pemPath = null;
+        if (pemContent != null && !pemContent.isBlank()) {
+            String suffix = testnet ? "test" : "main";
+            pemPath = Paths.get(PEMS_DIR, userId + "_" + suffix + ".pem").toString();
+            try {
+                // Normalise — ensure PEM headers exist
+                String content = pemContent.replace("\\n", "\n").trim();
+                if (!content.contains("-----BEGIN")) {
+                    content = "-----BEGIN PRIVATE KEY-----\n" + content + "\n-----END PRIVATE KEY-----\n";
                 }
+                Files.writeString(Paths.get(pemPath), content, StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                log.error("Failed to write PEM for user {}", userId, e);
+                return Map.of("error", "Ошибка сохранения PEM: " + e.getMessage());
             }
         }
 
-        report.put("totalSessions", totalSessions);
-        report.put("buyCount", buyCount);
-        report.put("sellCount", sellCount);
-        report.put("sessionsByType", sessionsByType);
-        report.put("sessions", all);
-        return report;
+        if (testnet) {
+            if (apiKey  != null && !apiKey.isBlank())  p.binanceTestApiKey      = apiKey;
+            if (pemPath != null) p.binanceTestPrivKeyPath = pemPath;
+        } else {
+            if (apiKey  != null && !apiKey.isBlank())  p.binanceApiKey      = apiKey;
+            if (pemPath != null) p.binancePrivKeyPath = pemPath;
+        }
+        saveProfile(p);
+        return Map.of("ok", true, "testnet", testnet, "pemSaved", pemPath != null);
     }
 
+    public Map<String, Object> getBinanceKeysStatus(long userId) {
+        UserProfile p = loadProfile(userId);
+        if (p == null) return Map.of("error", "Профиль не найден");
+        return Map.of(
+            "mainnet", Map.of(
+                "hasApiKey",  !blank(p.binanceApiKey),
+                "hasPem",     !blank(p.binancePrivKeyPath) && new File(p.binancePrivKeyPath).exists(),
+                "apiKeyHint", mask(p.binanceApiKey)
+            ),
+            "testnet", Map.of(
+                "hasApiKey",  !blank(p.binanceTestApiKey),
+                "hasPem",     !blank(p.binanceTestPrivKeyPath) && new File(p.binanceTestPrivKeyPath).exists(),
+                "apiKeyHint", mask(p.binanceTestApiKey)
+            )
+        );
+    }
+
+    // ── Wallet (structured) ───────────────────────────────────────────────────
+
+    /**
+     * Fetch live wallet balances from Binance.
+     * Returns list of {symbol, name, amount} for all non-zero assets.
+     */
+    public Map<String, Object> getWallet(long userId) {
+        UserProfile p = loadProfile(userId);
+        if (p == null) return Map.of("error", "Профиль не найден");
+
+        Map<String, Object> result = new LinkedHashMap<>();
+
+        // Mainnet
+        if (!blank(p.binanceApiKey) && !blank(p.binancePrivKeyPath)) {
+            result.put("mainnet", fetchBinanceBalances(p.binanceApiKey, p.binancePrivKeyPath, false));
+        }
+        // Testnet
+        if (!blank(p.binanceTestApiKey) && !blank(p.binanceTestPrivKeyPath)) {
+            result.put("testnet", fetchBinanceBalances(p.binanceTestApiKey, p.binanceTestPrivKeyPath, true));
+        }
+
+        // Active session snapshots
+        List<Map<String, Object>> running = TradingSessionManager.getInstance()
+            .getSessionsByOwner(userId).stream()
+            .filter(s -> "RUNNING".equals(s.get("status")))
+            .map(s -> {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("sessionId", s.get("id")); m.put("coin", s.get("coinName"));
+                m.put("coinBalance", s.get("coinBalance")); m.put("usdtBalance", s.get("usdtBalance"));
+                return m;
+            }).collect(Collectors.toList());
+        result.put("activeSessions", running);
+        return result;
+    }
+
+    private Object fetchBinanceBalances(String apiKey, String privKeyPath, boolean testnet) {
+        try {
+            char[] key  = apiKey.toCharArray();
+            char[] pem  = ton.dariushkmetsyak.Config.AppConfig.getInstance()
+                .resolvePrivateKeyPath(privKeyPath).toCharArray();
+            ton.dariushkmetsyak.TradingApi.ApiService.Account acc =
+                ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder.createNewBinance(
+                    key, pem,
+                    testnet
+                        ? ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder.BINANCE_BASE_URL.TESTNET
+                        : ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder.BINANCE_BASE_URL.MAINNET);
+
+            Map<ton.dariushkmetsyak.GeckoApiService.geckoEntities.Coin, Double> assets =
+                acc.wallet().getAllAssets();
+
+            List<Map<String, Object>> balances = new ArrayList<>();
+            for (var entry : assets.entrySet()) {
+                if (entry.getValue() == null || entry.getValue() == 0) continue;
+                Map<String, Object> b = new LinkedHashMap<>();
+                b.put("symbol", entry.getKey().getSymbol());
+                b.put("name",   entry.getKey().getName());
+                b.put("amount", entry.getValue());
+                balances.add(b);
+            }
+            // Sort: USDT first, then by amount desc
+            balances.sort((a, b2) -> {
+                boolean aUsdt = "USDT".equalsIgnoreCase((String)a.get("symbol"));
+                boolean bUsdt = "USDT".equalsIgnoreCase((String)b2.get("symbol"));
+                if (aUsdt) return -1; if (bUsdt) return 1;
+                return Double.compare((Double)b2.get("amount"), (Double)a.get("amount"));
+            });
+            return balances;
+        } catch (Exception e) {
+            return Map.of("error", e.getMessage());
+        }
+    }
+
+    // ── Trade Report ─────────────────────────────────────────────────────────
+
+    public Map<String, Object> getTradingReport(long userId) {
+        List<Map<String, Object>> all = TradingSessionManager.getInstance().getSessionsByOwner(userId);
+        long buyCount = 0, sellCount = 0;
+        Map<String, Integer> byType = new LinkedHashMap<>();
+        for (var s : all) {
+            byType.merge((String) s.getOrDefault("type", "?"), 1, Integer::sum);
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> evts = (List<Map<String, Object>>) s.get("events");
+            if (evts != null) for (var e : evts) {
+                if ("BUY".equals(e.get("type")))  buyCount++;
+                if ("SELL".equals(e.get("type"))) sellCount++;
+            }
+        }
+        Map<String, Object> r = new LinkedHashMap<>();
+        r.put("totalSessions", all.size());
+        r.put("buyCount",  buyCount);
+        r.put("sellCount", sellCount);
+        r.put("sessionsByType", byType);
+        r.put("sessions", all);
+        return r;
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private boolean blank(String s) { return s == null || s.isBlank(); }
+    private String  str(Object v)   { return v == null ? "" : v.toString(); }
+    private String  mask(String k)  {
+        if (blank(k)) return "—";
+        if (k.length() < 8) return "••••";
+        return k.substring(0, 4) + "••••" + k.substring(k.length() - 4);
+    }
     private long toLong(Object v) {
         if (v == null) return 0L;
         if (v instanceof Number) return ((Number) v).longValue();
