@@ -43,7 +43,7 @@ public class MiniAppServer {
         // Bot name for Telegram Login Widget (browser auth)
         server.createContext("/api/auth/config", exchange -> handleJson(exchange, () -> {
             Map<String, Object> cfg = new LinkedHashMap<>();
-            cfg.put("botUsername", "NEW_MAMA_CXHEMA");
+            cfg.put("botUsername", "MamkinSchemshikTradingBot");
             return cfg;
         }));
 
