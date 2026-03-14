@@ -82,6 +82,15 @@ public class ReversalPointsStrategyTrader {
              updateTimeout, chatID, null, null);
     }
 
+    /** Backward-compat: 9-arg constructor without sessionId (used by MenuHandler). */
+    public ReversalPointsStrategyTrader(Account account, Coin coin, double tradingSum,
+                                        double buyGap, double sellWithProfitGap,
+                                        double sellWithLossGap, int updateTimeout, Long chatID,
+                                        TradingState savedState) {
+        this(account, coin, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap,
+             updateTimeout, chatID, savedState, null);
+    }
+
     /**
      * Full constructor. savedState != null → restore from saved state instead of fresh start.
      * sessionId must match the MiniApp session ID for state file naming.
@@ -102,13 +111,15 @@ public class ReversalPointsStrategyTrader {
             String tradingStatus = trading
                 ? "В торговле, куплено за $" + Prices.round(boughtFor)
                 : "Ищет точку входа (макс.волна: " + (currentMaxPrice[0] > 0 ? "$" + Prices.round(currentMaxPrice[0]) : "—") + ")";
-            ImageAndMessageSender.sendTelegramMessage(
-                "✅ Состояние восстановлено!\n" +
+            String restoreMsg = "✅ Состояние восстановлено!\n" +
                 "Монета: " + this.coin.getName() + "\n" +
                 "Сохранено: " + new Date(savedState.getTimestamp()) + "\n" +
                 "Статус: " + tradingStatus + "\n" +
                 "Параметры: buy=" + this.buyGap + "%, profit=" + this.sellWithProfitGap +
-                "%, loss=" + this.sellWithLossGap + "%", chatID);
+                "%, loss=" + this.sellWithLossGap + "%";
+            ImageAndMessageSender.sendTelegramMessage(restoreMsg, chatID);
+            // Use explicit INFO type so detectEventType doesn't misclassify as BUY/SELL
+            ton.dariushkmetsyak.Web.TradingSessionManager.logTypedEventFromCurrentThread("INFO", restoreMsg);
             log.info("[Trader] Restored state for session {}: isTrading={}, boughtFor={}",
                     this.sessionId, trading, boughtFor);
         } else {
@@ -266,6 +277,24 @@ public class ReversalPointsStrategyTrader {
                 TradingChart.addSellIntervalMarker(pointTimestamp, soldFor);
                 isSold = true;
                 chartScreenshotMessage = "Продано в ПРИБЫЛЬ";
+                double profitUsd = (soldFor - boughtFor) * (tradingSum / boughtFor);
+                double profitPct = (soldFor - boughtFor) / boughtFor * 100;
+                double coinAmtSell = 0;
+                try { coinAmtSell = account.wallet().getAmountOfCoin(coin); } catch (Exception ignored) {}
+                double usdtAmtSell = 0;
+                try { usdtAmtSell = account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin()); } catch (Exception ignored) {}
+                String sellProfitMsg = String.format(
+                    "📈 ПРОДАЖА В ПРИБЫЛЬ\nМонета: %s\nКуплено за: $%s\nПродано за: $%s\n" +
+                    "Прибыль: +%.2f%% (+$%.2f)\nКоличество: %.6f %s\n" +
+                    "Баланс после: %.6f %s, %.2f USDT",
+                    coin.getName(), Prices.round(boughtFor), Prices.round(soldFor),
+                    profitPct, profitUsd,
+                    tradingSum / boughtFor, coin.getSymbol(),
+                    coinAmtSell, coin.getSymbol(), usdtAmtSell
+                );
+                ImageAndMessageSender.sendTelegramMessage(sellProfitMsg, chatID);
+                ton.dariushkmetsyak.Web.TradingSessionManager.logTypedEventFromCurrentThread("SELL", sellProfitMsg);
+                log.info("[Trader] SELL (profit): {} @ ${}, profit=+{:.2f}%", coin.getSymbol(), Prices.round(soldFor), profitPct);
                 sendPhotoToTelegram();
                 prevMessageId = 0;
                 TradingChart.clearChart();
@@ -286,6 +315,24 @@ public class ReversalPointsStrategyTrader {
                 TradingChart.addSellIntervalMarker(pointTimestamp, soldFor);
                 isSold = true;
                 chartScreenshotMessage = "Продано в УБЫТОК";
+                double lossUsd = (soldFor - boughtFor) * (tradingSum / boughtFor);
+                double lossPct = (soldFor - boughtFor) / boughtFor * 100;
+                double coinAmtLoss = 0;
+                try { coinAmtLoss = account.wallet().getAmountOfCoin(coin); } catch (Exception ignored) {}
+                double usdtAmtLoss = 0;
+                try { usdtAmtLoss = account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin()); } catch (Exception ignored) {}
+                String sellLossMsg = String.format(
+                    "📉 ПРОДАЖА В УБЫТОК\nМонета: %s\nКуплено за: $%s\nПродано за: $%s\n" +
+                    "Убыток: %.2f%% ($%.2f)\nКоличество: %.6f %s\n" +
+                    "Баланс после: %.6f %s, %.2f USDT",
+                    coin.getName(), Prices.round(boughtFor), Prices.round(soldFor),
+                    lossPct, lossUsd,
+                    tradingSum / boughtFor, coin.getSymbol(),
+                    coinAmtLoss, coin.getSymbol(), usdtAmtLoss
+                );
+                ImageAndMessageSender.sendTelegramMessage(sellLossMsg, chatID);
+                ton.dariushkmetsyak.Web.TradingSessionManager.logTypedEventFromCurrentThread("SELL", sellLossMsg);
+                log.info("[Trader] SELL (loss): {} @ ${}, loss={:.2f}%", coin.getSymbol(), Prices.round(soldFor), lossPct);
                 sendPhotoToTelegram();
                 prevMessageId = 0;
                 TradingChart.clearChart();
@@ -367,6 +414,27 @@ public class ReversalPointsStrategyTrader {
             buyPrice = boughtFor;
             trading = true;
             currentMaxPrice[0] = boughtFor;
+            double coinAmt = 0;
+            try { coinAmt = account.wallet().getAmountOfCoin(coin); } catch (Exception ignored) {}
+            double usdtAmt = 0;
+            try { usdtAmt = account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin()); } catch (Exception ignored) {}
+            String buyMsg = String.format(
+                "✅ ПОКУПКА СОВЕРШЕНА\nМонета: %s\nЦена покупки: $%s\nКоличество: %.6f %s\n" +
+                "Сумма сделки: %.2f USDT\nМакс. волна была: $%s\nПадение от макс.: %.2f%%\n" +
+                "Цена продажи+: $%s\nЦена продажи-: $%s\n" +
+                "Баланс после: %.6f %s, %.2f USDT",
+                coin.getName(),
+                Prices.round(boughtFor), coinAmt, coin.getSymbol(),
+                tradingSum,
+                Prices.round(currentMaxPrice[0]),
+                getDropFromMaxPercent(boughtFor),
+                Prices.round(boughtFor * (1 + sellWithProfitGap / 100.0)),
+                Prices.round(boughtFor * (1 - sellWithLossGap / 100.0)),
+                coinAmt, coin.getSymbol(), usdtAmt
+            );
+            ImageAndMessageSender.sendTelegramMessage(buyMsg, chatID);
+            ton.dariushkmetsyak.Web.TradingSessionManager.logTypedEventFromCurrentThread("BUY", buyMsg);
+            log.info("[Trader] BUY executed: {} @ ${}", coin.getSymbol(), Prices.round(boughtFor));
             persistState(); // Immediate save on buy — most critical moment
             return;
         }
@@ -452,6 +520,8 @@ public class ReversalPointsStrategyTrader {
 
                 // Push live state to MiniApp (includes currentPrice)
                 pushLiveState(currentPrice);
+                // Log per-tick info event (every tick)
+                logTickEvent(currentPrice);
 
                 consecutiveErrors = 0;
 
@@ -518,6 +588,32 @@ public class ReversalPointsStrategyTrader {
             ImageAndMessageSender.sendTelegramMessage(
                 "⛔ Торговля остановлена из-за критических ошибок\nСостояние сохранено.");
         } catch (Exception ignored) {}
+    }
+
+    /** Log event with explicit type — bypasses keyword auto-detection */
+    /** Log a periodic INFO tick event with key trading data */
+    private void logTickEvent(double currentPrice) {
+        if (trading && boughtFor != null) {
+            double changePct = (currentPrice - boughtFor) / boughtFor * 100;
+            String msg = String.format(
+                "📊 Тик: %s $%s | Куплено: $%s | Изменение: %+.2f%% | До продажи+: %.2f%% | До стоп: %.2f%%",
+                coin.getSymbol(), Prices.round(currentPrice),
+                Prices.round(boughtFor), changePct,
+                sellWithProfitGap - changePct,
+                sellWithLossGap + changePct
+            );
+            ton.dariushkmetsyak.Web.TradingSessionManager.logTypedEventFromCurrentThread("INFO", msg);
+        } else if (!trading) {
+            double dropPct = getDropFromMaxPercent(currentPrice);
+            double leftPct = buyGap - dropPct;
+            String msg = String.format(
+                "🔍 Тик: %s $%s | Макс. волна: $%s | Падение: %.2f%% | До покупки: %.2f%%",
+                coin.getSymbol(), Prices.round(currentPrice),
+                (currentMaxPrice[0] > 0 ? Prices.round(currentMaxPrice[0]) : "—"),
+                dropPct, leftPct
+            );
+            ton.dariushkmetsyak.Web.TradingSessionManager.logTypedEventFromCurrentThread("INFO", msg);
+        }
     }
 
     /** Push all live fields to TradingSessionManager */

@@ -143,9 +143,7 @@ public class MenuHandler extends TelegramLongPollingBot {
                         return;
                     } else if (messageText.equals("🆕 Начать заново")) {
                         // Удалить старое состояние и запросить новые параметры
-                        StateManager sm = new StateManager();
                         if (savedState != null) {
-                            sm.deleteState(savedState.getCoinName(), savedState.getAccountType());
                             savedState = null;
                         }
                         currentState = UserState.BEFORE_BINANCE_TRADING;
@@ -171,9 +169,7 @@ public class MenuHandler extends TelegramLongPollingBot {
                         return;
                     } else if (messageText.equals("🆕 Начать заново")) {
                         // Удалить старое состояние и запросить новые параметры
-                        StateManager sm = new StateManager();
                         if (savedState != null) {
-                            sm.deleteState(savedState.getCoinName(), savedState.getAccountType());
                             savedState = null;
                         }
                         currentState = UserState.BEFORE_BINANCE_TEST_TRADING;
@@ -858,8 +854,7 @@ private void conducting_real_time_research (Update update, long chatId, String m
      * Проверяет наличие сохранённого состояния и показывает кнопки выбора
      */
     private void checkSavedStateAndPrompt(long chatId, String accountType) {
-        StateManager stateManager = new StateManager();
-        savedState = stateManager.findAnyState(accountType);
+        savedState = findAnyLegacyState(accountType);
         
         if (savedState != null) {
             // Есть сохранённое состояние - показать выбор
@@ -979,7 +974,7 @@ private void conducting_real_time_research (Update update, long chatId, String m
                         currentState = UserState.CONDUCTING_BINANCE_TRADING;
                         // Передаём savedState в конструктор трейдера
                         new ReversalPointsStrategyTrader(
-                                finalAccount, coin, 0, 0, 0, 0, 0, chatId, state
+                                finalAccount, coin, 0, 0, 0, 0, 0, chatId, state, null
                         ).startTrading();
                     } catch (Exception e) {
                         log.error("Error during resumed Binance trading", e);
@@ -1067,7 +1062,7 @@ private void conducting_real_time_research (Update update, long chatId, String m
                         currentState = UserState.CONDUCTING_BINANCE_TEST_TRADING;
                         // Передаём savedState в конструктор трейдера
                         new ReversalPointsStrategyTrader(
-                                finalAccount, coin, 0, 0, 0, 0, 0, chatId, state
+                                finalAccount, coin, 0, 0, 0, 0, 0, chatId, state, null
                         ).startTrading();
                     } catch (Exception e) {
                         log.error("Error during resumed Binance test trading", e);
@@ -1086,6 +1081,31 @@ private void conducting_real_time_research (Update update, long chatId, String m
         } finally {
             savedState = null;
         }
+    }
+
+    /**
+     * Scan trading_states/ for any state file matching the account type suffix.
+     * Replaces the removed StateManager.findAnyState() for legacy Telegram-bot flows.
+     */
+    private TradingState findAnyLegacyState(String accountType) {
+        java.io.File dir = new java.io.File("trading_states");
+        if (!dir.exists() || !dir.isDirectory()) return null;
+        // Files are named <sessionId>.json — scan all and match by accountType inside
+        java.io.File[] files = dir.listFiles((d, n) -> n.endsWith(".json") && !n.contains(".bak."));
+        if (files == null || files.length == 0) return null;
+        // Sort newest first
+        java.util.Arrays.sort(files, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+        for (java.io.File f : files) {
+            try {
+                TradingState state = TradingState.loadFromFile(f.getPath());
+                if (state == null || state.getAccountType() == null) continue;
+                if (!state.getAccountType().equalsIgnoreCase(accountType)) continue;
+                long ageMs = System.currentTimeMillis() - state.getTimestamp();
+                if (ageMs > java.util.concurrent.TimeUnit.HOURS.toMillis(24)) continue;
+                return state;
+            } catch (Exception ignored) {}
+        }
+        return null;
     }
 
 }
