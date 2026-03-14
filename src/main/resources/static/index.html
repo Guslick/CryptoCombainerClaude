@@ -33,6 +33,7 @@
   .tab{flex-shrink:0;padding:8px 14px;font-family:var(--font-head);font-size:10px;font-weight:600;letter-spacing:0.5px;color:var(--muted);border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;transition:all 0.2s;display:flex;align-items:center;gap:5px}
   .tab.active{color:var(--accent);border-bottom-color:var(--accent)}
   .tab:hover:not(.active){color:var(--text)}
+  .tab.locked{opacity:.45;pointer-events:none;filter:grayscale(.4)}
   .content{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;padding:12px;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
   .content::-webkit-scrollbar{width:4px}
   .content::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
@@ -665,8 +666,24 @@ async function checkHealth() {
 // NAVIGATION
 // ============================================================
 const AUTH_REQUIRED_PAGES = new Set(['trade', 'research', 'backtest', 'sessions']);
+const PUBLIC_PAGES = new Set(['dashboard', 'chart', 'profile']);
+
+function refreshTabAccess() {
+  document.querySelectorAll('.tab').forEach(tab => {
+    const id = (tab.id || '').replace('tab-', '');
+    const isPublic = PUBLIC_PAGES.has(id);
+    const shouldLock = !isAuthed() && !isPublic;
+    tab.classList.toggle('locked', shouldLock);
+    if (shouldLock) {
+      tab.title = 'Доступно после авторизации';
+    } else {
+      tab.removeAttribute('title');
+    }
+  });
+}
 
 function showPage(pageId) {
+  refreshTabAccess();
   // Auth gate — protected pages require login
   if (AUTH_REQUIRED_PAGES.has(pageId) && !isAuthed()) {
     // Activate the page so the lock screen shows
@@ -948,7 +965,7 @@ async function startTrading() {
     chartRefreshInterval: +document.getElementById('tradeChartRefresh').value||60,
   };
   try {
-    const r = await fetch(`${API_BASE}/api/trading/start`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const r = await fetch(`${API_BASE}/api/trading/start`, {method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
     const data = await r.json();
     if (data.error) throw new Error(data.error);
     showAlert('tradeAlert','success',`✅ Сессия запущена! ID: ${data.id}`);
@@ -958,9 +975,7 @@ async function startTrading() {
 }
 
 async function stopAllTrading() {
-  await fetch(`${API_BASE}/api/trading/stop`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
-  showToast('⏹ Все сессии остановлены');
-  loadSessions();
+  showToast('⚠️ Массовая остановка сессий отключена из соображений безопасности');
 }
 
 // ============================================================
@@ -980,7 +995,7 @@ async function startResearch() {
     chartRefreshInterval: +document.getElementById('resChartRefresh').value||60,
   };
   try {
-    const r = await fetch(`${API_BASE}/api/trading/start`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const r = await fetch(`${API_BASE}/api/trading/start`,{method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
     const data = await r.json();
     if (data.error) throw new Error(data.error);
     showAlert('resAlert','success',`✅ Исследование запущено!`);
@@ -1006,7 +1021,7 @@ async function startBacktest() {
     chartType: document.getElementById('btChartType').value,
   };
   try {
-    const r = await fetch(`${API_BASE}/api/backtest/start`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const r = await fetch(`${API_BASE}/api/backtest/start`,{method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
     const sessionData = await r.json();
     if (sessionData.error) throw new Error(sessionData.error);
     showAlert('btAlert','info','⏳ Бэктест запущен...');
@@ -1015,14 +1030,14 @@ async function startBacktest() {
     const pollId = setInterval(async ()=>{
       attempts++;
       if (attempts>60) { clearInterval(pollId); showAlert('btAlert','warn','⏰ Таймаут'); btn.disabled=false; btn.innerHTML='🧪 ЗАПУСТИТЬ БЭКТЕСТ'; return; }
-      const sr = await fetch(`${API_BASE}/api/trading/sessions`).catch(()=>null);
+      const sr = await fetch(`${API_BASE}/api/trading/sessions`, { headers: authHeaders() }).catch(()=>null);
       if (!sr?.ok) return;
       const sessions = await sr.json();
       const sess = sessions.find(s=>s.id===sessionData.id);
       if (!sess) return;
       if (sess.status==='DONE') {
         clearInterval(pollId);
-        const rr = await fetch(`${API_BASE}/api/backtest/result`);
+        const rr = await fetch(`${API_BASE}/api/backtest/result`, { headers: authHeaders() });
         showBacktestResult(await rr.json());
         btn.disabled=false; btn.innerHTML='🧪 ЗАПУСТИТЬ БЭКТЕСТ';
         document.getElementById('btAlert').style.display='none';
@@ -2021,6 +2036,18 @@ function showAuthRequired(containerId, msg) {
 /** True if user has a valid auth token */
 function isAuthed() { return !!_profToken; }
 
+function collectUnsafeTelegramUser() {
+  const u = tg?.initDataUnsafe?.user;
+  if (!u || !u.id) return null;
+  return {
+    id: u.id,
+    username: u.username || '',
+    first_name: u.first_name || '',
+    last_name: u.last_name || '',
+    photo_url: u.photo_url || ''
+  };
+}
+
 async function profileLogin() {
   // Try Telegram WebApp initData first
   const initData = tg?.initData || '';
@@ -2028,8 +2055,9 @@ async function profileLogin() {
     await profDoAuth(initData);
     return;
   }
-  // Fallback: dev bypass when running locally
-  showToast('⚠️ Открывайте приложение через Telegram для авторизации');
+  // In browser, try to initialize Telegram widget explicitly
+  await initTelegramWidget();
+  showToast('ℹ️ Используйте Telegram Widget ниже или откройте MiniApp из кнопки WebApp в боте');
 }
 
 async function profDoAuth(initData) {
@@ -2037,20 +2065,30 @@ async function profDoAuth(initData) {
     const r = await fetch(`${API_BASE}/api/auth/telegram`, {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ initData })
+      body: JSON.stringify({ initData, unsafeUser: collectUnsafeTelegramUser(), client: 'telegram_webapp' })
     });
     const data = await r.json();
-    if (data.error) { showToast('❌ ' + data.error); return; }
+    if (data.error) {
+      showToast('❌ ' + data.error);
+      renderProfNotAuthed();
+      if (!tg?.initData) await initTelegramWidget();
+      return false;
+    }
     _profToken = data.token;
     try { localStorage.setItem('cc_prof_token', _profToken); } catch(e) {}
     renderProfAuthed(data);
+    refreshTabAccess();
     await profLoadKeys();
     showToast('✅ Авторизован как ' + (data.telegramFirstName || data.telegramUsername || 'пользователь'));
     // Refresh any protected page that may be currently shown
     const curPage = document.querySelector('.page.active')?.id?.replace('page-', '');
     if (curPage && AUTH_REQUIRED_PAGES.has(curPage)) showPage(curPage);
+    return true;
   } catch(e) {
     showToast('❌ Ошибка авторизации: ' + e.message);
+    renderProfNotAuthed();
+    if (!tg?.initData) await initTelegramWidget();
+    return false;
   }
 }
 
@@ -2058,6 +2096,7 @@ function profileLogout() {
   _profToken = null;
   try { localStorage.removeItem('cc_prof_token'); } catch(e) {}
   renderProfNotAuthed();
+  refreshTabAccess();
   showToast('Выход выполнен');
   // Clear session data and redirect to safe page
   _sessionsData = {};
@@ -2083,10 +2122,25 @@ function renderProfAuthed(profile) {
 
 function renderProfNotAuthed() {
   document.getElementById('prof-not-authed').style.display = 'block';
+  refreshTabAccess();
   document.getElementById('prof-authed').style.display = 'none';
   document.getElementById('prof-keys-card').style.display = 'none';
   document.getElementById('prof-wallet-card').style.display = 'none';
   document.getElementById('prof-report-card').style.display = 'none';
+
+  // Safe defaults: always show at least one auth option immediately
+  const webappBlock   = document.getElementById('prof-login-webapp');
+  const browserBlock  = document.getElementById('prof-login-browser');
+  const fallbackBlock = document.getElementById('prof-login-fallback');
+  if (tg) {
+    if (webappBlock) webappBlock.style.display = 'block';
+    if (browserBlock) browserBlock.style.display = 'none';
+    if (fallbackBlock) fallbackBlock.style.display = 'none';
+  } else {
+    if (webappBlock) webappBlock.style.display = 'none';
+    if (browserBlock) browserBlock.style.display = 'none';
+    if (fallbackBlock) fallbackBlock.style.display = 'block';
+  }
 }
 
 function profSelectNet(net) {
@@ -2254,6 +2308,7 @@ async function initProfilePage() {
       const data = await r.json();
       if (!data.error) {
         renderProfAuthed(data);
+        refreshTabAccess();
         await profLoadKeys();
         return;
       }
@@ -2265,10 +2320,13 @@ async function initProfilePage() {
 
   // Try auto-login with Telegram initData
   const initData = tg?.initData || '';
-  if (initData) {
-    await profDoAuth(initData);
+  const unsafeUser = collectUnsafeTelegramUser();
+  if (initData || unsafeUser) {
+    const ok = await profDoAuth(initData || '');
+    if (!ok) renderProfNotAuthed();
   } else {
     renderProfNotAuthed();
+    await initTelegramWidget();
   }
 }
 
@@ -2302,7 +2360,7 @@ async function initTelegramWidget() {
   const fallbackBlock = document.getElementById('prof-login-fallback');
 
   // Inside Telegram WebApp — show simple button
-  if (tg?.initData) {
+  if (tg) {
     if (webappBlock)  webappBlock.style.display  = 'block';
     if (browserBlock) browserBlock.style.display = 'none';
     if (fallbackBlock) fallbackBlock.style.display = 'none';
@@ -2335,6 +2393,7 @@ async function initTelegramWidget() {
           _profToken = data.token;
           try { localStorage.setItem('cc_prof_token', _profToken); } catch(e) {}
           renderProfAuthed(data);
+          refreshTabAccess();
           await profLoadKeys();
           showToast('✅ Авторизован как ' + (data.telegramFirstName || 'пользователь'));
         } catch(e) { showToast('❌ Ошибка: ' + e.message); }
@@ -2398,8 +2457,8 @@ async function profSaveKeys(testnet) {
 const _origInitProfilePage = initProfilePage;
 async function initProfilePage() {
   await _origInitProfilePage();
-  // Init widget after auth state is known (only if not authed via Telegram app)
-  setTimeout(initTelegramWidget, 300);
+  // Init widget after auth state is known (only for guests)
+  if (!isAuthed()) setTimeout(initTelegramWidget, 300);
 }
 
 // ============================================================
@@ -2408,6 +2467,7 @@ async function initProfilePage() {
 (async function init() {
   restoreFields();
   updateTradeForm();
+  refreshTabAccess();
   const ok = await checkHealth();
   if (!ok) {
     document.getElementById('tickerGrid').innerHTML='<div style="grid-column:1/-1;" class="alert alert-error">❌ Сервер недоступен</div>';
