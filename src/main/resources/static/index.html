@@ -935,7 +935,7 @@ async function startTrading() {
     chartRefreshInterval: +document.getElementById('tradeChartRefresh').value||60,
   };
   try {
-    const r = await fetch(`${API_BASE}/api/trading/start`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const r = await fetch(`${API_BASE}/api/trading/start`, {method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
     const data = await r.json();
     if (data.error) throw new Error(data.error);
     showAlert('tradeAlert','success',`✅ Сессия запущена! ID: ${data.id}`);
@@ -945,7 +945,7 @@ async function startTrading() {
 }
 
 async function stopAllTrading() {
-  await fetch(`${API_BASE}/api/trading/stop`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+  await fetch(`${API_BASE}/api/trading/stop`,{method:'POST',headers:authHeaders(),body:'{}'});
   showToast('⏹ Все сессии остановлены');
   loadSessions();
 }
@@ -967,7 +967,7 @@ async function startResearch() {
     chartRefreshInterval: +document.getElementById('resChartRefresh').value||60,
   };
   try {
-    const r = await fetch(`${API_BASE}/api/trading/start`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const r = await fetch(`${API_BASE}/api/trading/start`,{method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
     const data = await r.json();
     if (data.error) throw new Error(data.error);
     showAlert('resAlert','success',`✅ Исследование запущено!`);
@@ -993,7 +993,7 @@ async function startBacktest() {
     chartType: document.getElementById('btChartType').value,
   };
   try {
-    const r = await fetch(`${API_BASE}/api/backtest/start`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const r = await fetch(`${API_BASE}/api/backtest/start`,{method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
     const sessionData = await r.json();
     if (sessionData.error) throw new Error(sessionData.error);
     showAlert('btAlert','info','⏳ Бэктест запущен...');
