@@ -533,31 +533,46 @@
         </div>
         <div id="prof-keys-test-panel">
           <div style="font-size:10px;color:var(--muted);margin-bottom:6px">testnet.binance.vision</div>
-          <div id="prof-hint-test" style="font-size:11px;color:var(--accent);margin-bottom:8px;font-family:monospace;word-break:break-all"></div>
-          <input type="text" id="prof-apikey-test" placeholder="API Key" autocomplete="off" style="width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:var(--radius-sm);font-size:12px;margin-bottom:8px;outline:none">
+          <div id="prof-hint-test" style="font-size:11px;color:var(--accent);margin-bottom:6px;font-family:monospace;word-break:break-all"></div>
+          <div id="prof-status-test" style="display:none;margin-bottom:8px"></div>
+          <div style="background:rgba(0,229,255,0.06);border:1px solid rgba(0,229,255,0.15);border-radius:var(--radius-sm);padding:8px;font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.6">
+            ⚠️ Необходимо указать <b style="color:var(--text)">API Key</b> и загрузить <b style="color:var(--text)">Ed25519 .pem файл</b> — оба параметра обязательны для работы.
+          </div>
+          <input type="text" id="prof-apikey-test" placeholder="API Key (обязательно)" autocomplete="off" style="width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:var(--radius-sm);font-size:12px;margin-bottom:8px;outline:none">
           <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
-            <input type="text" id="prof-privpath-test" placeholder="Путь к .pem на сервере (опц.)" autocomplete="off" style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:var(--radius-sm);font-size:12px;outline:none">
-            <label style="cursor:pointer;background:var(--bg3);border:1px solid var(--border);padding:9px 10px;border-radius:var(--radius-sm);font-size:11px;color:var(--accent);white-space:nowrap" title="Загрузить .pem файл">
-              📎 PEM<input type="file" id="prof-pem-test" accept=".pem,.key,.txt" style="display:none" onchange="profReadPem('test',this)">
+            <div id="prof-pem-test-status" style="flex:1;font-size:11px;color:var(--green);padding:9px 0;display:none">✅ PEM файл загружен</div>
+            <div id="prof-pem-test-empty" style="flex:1;font-size:11px;color:var(--muted);padding:9px 0">Ed25519 .pem файл не загружен</div>
+            <label style="cursor:pointer;background:var(--accent);color:#000;border:none;padding:9px 14px;border-radius:var(--radius-sm);font-size:11px;font-family:var(--font-head);white-space:nowrap">
+              📎 ЗАГРУЗИТЬ PEM<input type="file" id="prof-pem-test" accept=".pem,.key,.p8,.txt,*" style="display:none" onchange="profReadPem('test',this)">
             </label>
           </div>
-          <div id="prof-pem-test-status" style="font-size:10px;color:var(--green);margin-bottom:6px;display:none"></div>
-          <div style="font-size:10px;color:var(--muted);margin-bottom:10px">Загрузите Ed25519 .pem файл с вашего устройства</div>
-          <button class="btn btn-primary btn-sm" onclick="profSaveKeys(true)" style="width:100%">💾 Сохранить Testnet ключи</button>
+          <div style="font-size:10px;color:var(--muted);margin-bottom:10px">Формат: .pem, .key, .p8 или текстовый файл с приватным ключом Ed25519</div>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-primary btn-sm" onclick="profSaveKeys(true)" style="flex:1">💾 Сохранить Testnet ключи</button>
+            <button class="btn btn-sm" onclick="profDeleteKeys(true)" style="background:rgba(255,23,68,0.15);color:var(--red);border:1px solid rgba(255,23,68,0.3)" title="Удалить ключи">🗑</button>
+          </div>
         </div>
         <div id="prof-keys-main-panel" style="display:none">
           <div style="font-size:10px;color:var(--muted);margin-bottom:6px">api.binance.com — реальные средства</div>
-          <div id="prof-hint-main" style="font-size:11px;color:var(--accent);margin-bottom:8px;font-family:monospace;word-break:break-all"></div>
-          <input type="text" id="prof-apikey-main" placeholder="API Key" autocomplete="off" style="width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:var(--radius-sm);font-size:12px;margin-bottom:8px;outline:none">
-          <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">
-            <input type="text" id="prof-privpath-main" placeholder="Путь к .pem на сервере (опц.)" autocomplete="off" style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:var(--radius-sm);font-size:12px;outline:none">
-            <label style="cursor:pointer;background:var(--bg3);border:1px solid var(--border);padding:9px 10px;border-radius:var(--radius-sm);font-size:11px;color:var(--accent);white-space:nowrap" title="Загрузить .pem файл">
-              📎 PEM<input type="file" id="prof-pem-main" accept=".pem,.key,.txt" style="display:none" onchange="profReadPem('main',this)">
+          <div id="prof-hint-main" style="font-size:11px;color:var(--accent);margin-bottom:6px;font-family:monospace;word-break:break-all"></div>
+          <div id="prof-status-main" style="display:none;margin-bottom:8px"></div>
+          <div style="background:rgba(0,229,255,0.06);border:1px solid rgba(0,229,255,0.15);border-radius:var(--radius-sm);padding:8px;font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.6">
+            ⚠️ Необходимо указать <b style="color:var(--text)">API Key</b> и загрузить <b style="color:var(--text)">Ed25519 .pem файл</b> — оба параметра обязательны для работы.
+          </div>
+          <input type="text" id="prof-apikey-main" placeholder="API Key (обязательно)" autocomplete="off" style="width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:var(--radius-sm);font-size:12px;margin-bottom:8px;outline:none">
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
+            <div id="prof-pem-main-status" style="flex:1;font-size:11px;color:var(--green);padding:9px 0;display:none">✅ PEM файл загружен</div>
+            <div id="prof-pem-main-empty" style="flex:1;font-size:11px;color:var(--muted);padding:9px 0">Ed25519 .pem файл не загружен</div>
+            <label style="cursor:pointer;background:var(--accent);color:#000;border:none;padding:9px 14px;border-radius:var(--radius-sm);font-size:11px;font-family:var(--font-head);white-space:nowrap">
+              📎 ЗАГРУЗИТЬ PEM<input type="file" id="prof-pem-main" accept=".pem,.key,.p8,.txt,*" style="display:none" onchange="profReadPem('main',this)">
             </label>
           </div>
-          <div id="prof-pem-main-status" style="font-size:10px;color:var(--green);margin-bottom:6px;display:none"></div>
-          <div style="background:rgba(255,23,68,0.08);border:1px solid rgba(255,23,68,0.25);border-radius:var(--radius-sm);padding:8px;font-size:10px;color:var(--red);margin-bottom:10px">⚠️ Реальные ключи. Хранятся только на вашем сервере.</div>
-          <button class="btn btn-danger btn-sm" onclick="profSaveKeys(false)" style="width:100%">⚠️ Сохранить Mainnet ключи</button>
+          <div style="font-size:10px;color:var(--muted);margin-bottom:8px">Формат: .pem, .key, .p8 или текстовый файл с приватным ключом Ed25519</div>
+          <div style="background:rgba(255,23,68,0.08);border:1px solid rgba(255,23,68,0.25);border-radius:var(--radius-sm);padding:8px;font-size:10px;color:var(--red);margin-bottom:10px">⚠️ Реальные ключи. Хранятся только на вашем сервере в зашифрованной директории.</div>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-danger btn-sm" onclick="profSaveKeys(false)" style="flex:1">⚠️ Сохранить Mainnet ключи</button>
+            <button class="btn btn-sm" onclick="profDeleteKeys(false)" style="background:rgba(255,23,68,0.15);color:var(--red);border:1px solid rgba(255,23,68,0.3)" title="Удалить ключи">🗑</button>
+          </div>
         </div>
       </div>
 
@@ -1569,6 +1584,9 @@ function openFullscreenChart(sessionId, coinName) {
   });
 }
 
+// Fullscreen chart extra series for session range coloring
+let _fsBefore = null, _fsAfter = null;
+
 async function loadInlineChartDataInto(sess, lineSeries, chart) {
   try {
     const interval = getChartIntervalForSession(sess);
@@ -1576,14 +1594,27 @@ async function loadInlineChartDataInto(sess, lineSeries, chart) {
     const json = await r.json();
     if (json.error || !json.data) return;
     const data = dedupeChartData(json.data);
-    lineSeries.setData(data);
+
+    // Clean up old dim series
+    if (_fsBefore) { try { chart.removeSeries(_fsBefore); } catch(e){} _fsBefore = null; }
+    if (_fsAfter)  { try { chart.removeSeries(_fsAfter);  } catch(e){} _fsAfter  = null; }
 
     const sr = await fetch(`${API_BASE}/api/trading/sessions/${sess.id}`, { headers: authHeaders() }).catch(() => null);
     const live = sr?.ok ? await sr.json() : sess;
 
+    // Apply session range coloring — same as inline chart
+    const fsEntry = {
+      chart, line: lineSeries,
+      get lineBefore() { return _fsBefore; },
+      set lineBefore(v) { _fsBefore = v; },
+      get lineAfter()  { return _fsAfter;  },
+      set lineAfter(v) { _fsAfter  = v;  },
+    };
+    applySessionRangeColoring(fsEntry, data, live || sess);
+
     const lines = [];
     applyChartPriceLines(lineSeries, lines, live);
-    applyChartMarkers(lineSeries, data, live.events || []);
+    applyChartMarkers(lineSeries, data, (live || sess).events || []);
     chart.timeScale().fitContent();
   } catch(e) { console.error('FS chart error', e); }
 }
@@ -1591,6 +1622,7 @@ async function loadInlineChartDataInto(sess, lineSeries, chart) {
 function closeFullscreenChart() {
   document.getElementById('chartFullscreen').classList.remove('open');
   if (_fsChart) { try { _fsChart.remove(); } catch(e) {} _fsChart = null; _fsLine = null; }
+  _fsBefore = null; _fsAfter = null;
   _fsSessionId = null;
 }
 
@@ -2277,7 +2309,9 @@ async function profSaveKeys(testnet) {
   const apiKey     = document.getElementById('prof-apikey-' + suffix)?.value.trim() || '';
   const pemContent = (_pemContents || {})[suffix] || '';
   const privPath   = document.getElementById('prof-privpath-' + suffix)?.value.trim() || '';
-  if (!apiKey && !pemContent && !privPath) { showToast('Введите API ключ или загрузите PEM файл'); return; }
+  // Both API key and PEM are required (either uploaded PEM or server path)
+  if (!apiKey) { showToast('⚠️ Введите API Key'); return; }
+  if (!pemContent && !privPath) { showToast('⚠️ Загрузите .pem файл (нажмите кнопку ЗАГРУЗИТЬ PEM)'); return; }
   try {
     const r = await fetch(`${API_BASE}/api/profile/keys`, {
       method: 'POST', headers: authHeaders(),
@@ -2363,6 +2397,33 @@ async function profLoadReport() {
   } catch(e) { el.innerHTML = `<div style="color:var(--red);font-size:12px">Ошибка: ${escHtml(e.message)}</div>`; }
 }
 
+// ── Delete keys ──────────────────────────────────────────────────────────────
+async function profDeleteKeys(testnet) {
+  if (!_profToken) { showToast('Войдите в аккаунт'); return; }
+  const net = testnet ? 'Testnet' : 'Mainnet';
+  if (!confirm(`Удалить ${net} ключи? Все файлы ключей будут уничтожены без возможности восстановления.`)) return;
+  try {
+    const r = await fetch(`${API_BASE}/api/profile/keys/delete`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ testnet })
+    });
+    const data = await r.json();
+    if (data.error) { showToast('❌ ' + data.error); return; }
+    showToast(`🗑 ${net} ключи удалены`);
+    // Reset UI
+    const suffix = testnet ? 'test' : 'main';
+    const st    = document.getElementById('prof-pem-' + suffix + '-status');
+    const empty = document.getElementById('prof-pem-' + suffix + '-empty');
+    const hint  = document.getElementById('prof-hint-' + suffix);
+    if (st)    { st.textContent = ''; st.style.display = 'none'; }
+    if (empty) empty.style.display = 'block';
+    if (hint)  hint.textContent = '';
+    delete (_pemContents||{})[suffix];
+    await profLoadKeys();
+  } catch(e) { showToast('❌ ' + e.message); }
+}
+
 // ── PEM file reader ───────────────────────────────────────────────────────────
 const _pemContents = {};
 function profReadPem(suffix, input) {
@@ -2371,8 +2432,10 @@ function profReadPem(suffix, input) {
   const reader = new FileReader();
   reader.onload = ev => {
     _pemContents[suffix] = ev.target.result;
-    const st = document.getElementById('prof-pem-' + suffix + '-status');
-    if (st) { st.textContent = '✅ Файл загружен: ' + file.name; st.style.display = 'block'; }
+    const st    = document.getElementById('prof-pem-' + suffix + '-status');
+    const empty = document.getElementById('prof-pem-' + suffix + '-empty');
+    if (st)    { st.textContent = '✅ ' + file.name; st.style.display = 'block'; }
+    if (empty) empty.style.display = 'none';
   };
   reader.readAsText(file);
 }

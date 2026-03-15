@@ -249,8 +249,18 @@ public class MiniAppServer {
             Long userId = resolveUser(exchange);
             if (userId == null) return errorMap("Требуется авторизация");
             String net = getQueryParam(exchange.getRequestURI().getQuery(), "net");
-            boolean testnet = !"main".equalsIgnoreCase(net); // default testnet
+            boolean testnet = !"main".equalsIgnoreCase(net);
             return UserProfileManager.getInstance().getWallet(userId, testnet);
+        }));
+
+        server.createContext("/api/profile/keys/delete", exchange -> handleJson(exchange, () -> {
+            Long userId = resolveUser(exchange);
+            if (userId == null) return errorMap("Требуется авторизация");
+            if (!"POST".equals(exchange.getRequestMethod())) return errorMap("POST required");
+            Map<String, Object> body = parseBody(exchange);
+            boolean testnet = Boolean.TRUE.equals(body.get("testnet"));
+            UserProfileManager.getInstance().deleteKeys(userId, testnet);
+            return Map.of("deleted", true, "testnet", testnet);
         }));
 
         server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());

@@ -322,27 +322,21 @@ public class TradingSessionManager {
      * Reads from secure per-user key store (profiles/keys/<userId>/).
      * Falls back to global AppConfig if user has no keys configured.
      */
+    /**
+     * Resolve Binance API key ONLY from user's personal key store.
+     * No fallback to global config.properties — each user must configure their own keys.
+     */
     private char[] resolveApiKey(UserProfileManager.UserProfile profile, boolean testnet) {
-        if (userId > 0) {
-            String k = UserProfileManager.getInstance().getBinanceApiKey(userId, testnet);
-            if (k != null && !k.isBlank()) return k.toCharArray();
-        }
-        // Fallback: global config.properties (server-level keys)
-        AppConfig cfg = AppConfig.getInstance();
-        String k = testnet ? cfg.getBinanceTestApiKey() : cfg.getBinanceApiKey();
-        return k != null ? k.toCharArray() : new char[0];
+        String k = UserProfileManager.getInstance().getBinanceApiKey(userId, testnet);
+        if (k != null && !k.isBlank()) return k.toCharArray();
+        return new char[0]; // empty = not configured
     }
 
     private char[] resolvePrivKeyPath(UserProfileManager.UserProfile profile, boolean testnet) {
-        if (userId > 0) {
-            String p = UserProfileManager.getInstance().getBinancePrivKeyPath(userId, testnet);
-            if (p != null && !p.isBlank()) {
-                return AppConfig.getInstance().resolvePrivateKeyPath(p).toCharArray();
-            }
-        }
-        AppConfig cfg = AppConfig.getInstance();
-        String p = testnet ? cfg.getBinanceTestPrivateKeyPath() : cfg.getBinancePrivateKeyPath();
-        return AppConfig.getInstance().resolvePrivateKeyPath(p).toCharArray();
+        String p = UserProfileManager.getInstance().getBinancePrivKeyPath(userId, testnet);
+        if (p != null && !p.isBlank())
+            return AppConfig.getInstance().resolvePrivateKeyPath(p).toCharArray();
+        return new char[0]; // empty = not configured
     }
 
     private static void setFinalStatus(SessionInfo info) {
@@ -468,7 +462,10 @@ public class TradingSessionManager {
                 char[] apiKey   = resolveApiKey(profile, testnet);
                 char[] privKey  = resolvePrivKeyPath(profile, testnet);
                 if (apiKey.length == 0) throw new IllegalStateException(
-                    "Binance API ключ не настроен. Добавьте ключи в Кабинете → Binance API.");
+                    "Binance API ключ не настроен. Перейдите в 👤 Кабинет → 🔑 Binance API ключи и добавьте " +
+                    (testnet ? "Testnet" : "Mainnet") + " ключи.");
+                if (privKey.length == 0) throw new IllegalStateException(
+                    "Ed25519 .pem файл не загружен. Перейдите в 👤 Кабинет → 🔑 Binance API ключи и загрузите .pem файл.");
                 Coin coin = CoinsList.getCoinByName(info.coinName);
                 Account account = AccountBuilder.createNewBinance(apiKey, privKey,
                         testnet ? AccountBuilder.BINANCE_BASE_URL.TESTNET : AccountBuilder.BINANCE_BASE_URL.MAINNET);

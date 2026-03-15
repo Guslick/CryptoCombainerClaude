@@ -330,6 +330,38 @@ public class UserProfileManager {
         return loadKeys(userId, testnet).privKeyPath;
     }
 
+    /**
+     * Completely delete all key files for a user (testnet or mainnet).
+     * Overwrites with zeros before deletion to prevent recovery.
+     */
+    public void deleteKeys(long userId, boolean testnet) {
+        try {
+            Path keysPath = keysFilePath(userId, testnet);
+            Path pemPath  = pemFilePath(userId, testnet);
+            // Overwrite with garbage before delete
+            for (Path p : List.of(keysPath, pemPath)) {
+                if (Files.exists(p)) {
+                    try {
+                        byte[] zeros = new byte[(int) Files.size(p)];
+                        java.util.Arrays.fill(zeros, (byte) 0);
+                        Files.write(p, zeros);
+                    } catch (Exception ignored) {}
+                    Files.delete(p);
+                }
+            }
+            // Update profile flags
+            UserProfile profile = loadProfile(userId);
+            if (profile != null) {
+                if (testnet) profile.hasBinanceTestnet = false;
+                else         profile.hasBinanceMainnet = false;
+                saveProfile(profile);
+            }
+            log.info("Deleted {} keys for user {}", testnet ? "testnet" : "mainnet", userId);
+        } catch (Exception e) {
+            log.error("Failed to delete keys for user {}", userId, e);
+        }
+    }
+
     // ── Wallet ────────────────────────────────────────────────────────────────
 
     /** Return balances for the specified network (testnet/mainnet) */
@@ -359,32 +391,48 @@ public class UserProfileManager {
     }
 
     private List<Map<String, Object>> fetchBinanceBalances(String apiKey, String privKeyPath, boolean testnet) {
+        if (blank(apiKey)) {
+            List<Map<String, Object>> err = new ArrayList<>();
+            err.add(Map.of("error", "API ключ не настроен"));
+            return err;
+        }
+        if (blank(privKeyPath) || !new java.io.File(privKeyPath).exists()) {
+            List<Map<String, Object>> err = new ArrayList<>();
+            err.add(Map.of("error", "PEM файл не найден. Загрузите .pem файл в настройках ключей."));
+            return err;
+        }
         try {
             char[] key = apiKey.toCharArray();
-            char[] pem = ton.dariushkmetsyak.Config.AppConfig.getInstance()
-                    .resolvePrivateKeyPath(privKeyPath).toCharArray();
+            String resolvedPem = ton.dariushkmetsyak.Config.AppConfig.getInstance()
+                    .resolvePrivateKeyPath(privKeyPath);
+            char[] pem = resolvedPem.toCharArray();
             ton.dariushkmetsyak.TradingApi.ApiService.Account acc =
                 ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder.createNewBinance(key, pem,
                     testnet
                         ? ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder.BINANCE_BASE_URL.TESTNET
                         : ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder.BINANCE_BASE_URL.MAINNET);
+            // getAllAssets() returns only assets with balance > 0
             Map<ton.dariushkmetsyak.GeckoApiService.geckoEntities.Coin, Double> assets =
                 acc.wallet().getAllAssets();
             List<Map<String, Object>> list = new ArrayList<>();
             for (var e : assets.entrySet()) {
-                if (e.getValue() == null || e.getValue() == 0) continue;
+                Double amount = e.getValue();
+                if (amount == null || amount <= 0) continue;
                 Map<String, Object> b = new LinkedHashMap<>();
-                b.put("symbol", e.getKey().getSymbol());
-                b.put("name",   e.getKey().getName());
-                b.put("amount", e.getValue());
+                b.put("symbol", e.getKey().getSymbol() != null ? e.getKey().getSymbol() : "???");
+                b.put("name",   e.getKey().getName()   != null ? e.getKey().getName()   : "Unknown");
+                b.put("amount", amount);
                 list.add(b);
             }
+            // Sort: USDT first, then by amount descending
             list.sort((a, b) -> {
                 boolean aU = "USDT".equalsIgnoreCase((String)a.get("symbol"));
                 boolean bU = "USDT".equalsIgnoreCase((String)b.get("symbol"));
                 if (aU) return -1; if (bU) return 1;
                 return Double.compare((Double)b.get("amount"), (Double)a.get("amount"));
             });
+            log.info("Fetched {} assets for {} ({} balances > 0)",
+                assets.size(), testnet ? "testnet" : "mainnet", list.size());
             return list;
         } catch (Exception e) {
             log.error("Failed to fetch Binance balances (testnet={}): {}", testnet, e.getMessage());
