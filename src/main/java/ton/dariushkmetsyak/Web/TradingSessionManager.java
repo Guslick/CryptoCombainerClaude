@@ -326,17 +326,21 @@ public class TradingSessionManager {
      * Resolve Binance API key ONLY from user's personal key store.
      * No fallback to global config.properties — each user must configure their own keys.
      */
+    /** Reads ONLY from user's personal key store — no AppConfig fallback. */
     private char[] resolveApiKey(UserProfileManager.UserProfile profile, boolean testnet) {
+        if (userId <= 0) return new char[0]; // anonymous users cannot trade on Binance
         String k = UserProfileManager.getInstance().getBinanceApiKey(userId, testnet);
-        if (k != null && !k.isBlank()) return k.toCharArray();
-        return new char[0]; // empty = not configured
+        return (k != null && !k.isBlank()) ? k.toCharArray() : new char[0];
     }
 
     private char[] resolvePrivKeyPath(UserProfileManager.UserProfile profile, boolean testnet) {
+        if (userId <= 0) return new char[0];
         String p = UserProfileManager.getInstance().getBinancePrivKeyPath(userId, testnet);
-        if (p != null && !p.isBlank())
-            return AppConfig.getInstance().resolvePrivateKeyPath(p).toCharArray();
-        return new char[0]; // empty = not configured
+        if (p != null && !p.isBlank()) {
+            String resolved = AppConfig.getInstance().resolvePrivateKeyPath(p);
+            if (resolved != null && !resolved.isBlank()) return resolved.toCharArray();
+        }
+        return new char[0];
     }
 
     private static void setFinalStatus(SessionInfo info) {

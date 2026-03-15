@@ -543,7 +543,7 @@
             <div id="prof-pem-test-status" style="flex:1;font-size:11px;color:var(--green);padding:9px 0;display:none">✅ PEM файл загружен</div>
             <div id="prof-pem-test-empty" style="flex:1;font-size:11px;color:var(--muted);padding:9px 0">Ed25519 .pem файл не загружен</div>
             <label style="cursor:pointer;background:var(--accent);color:#000;border:none;padding:9px 14px;border-radius:var(--radius-sm);font-size:11px;font-family:var(--font-head);white-space:nowrap">
-              📎 ЗАГРУЗИТЬ PEM<input type="file" id="prof-pem-test" accept=".pem,.key,.p8,.txt,*" style="display:none" onchange="profReadPem('test',this)">
+              📎 ЗАГРУЗИТЬ PEM<input type="file" id="prof-pem-test" accept="*" style="display:none" onchange="profReadPem('test',this)">
             </label>
           </div>
           <div style="font-size:10px;color:var(--muted);margin-bottom:10px">Формат: .pem, .key, .p8 или текстовый файл с приватным ключом Ed25519</div>
@@ -564,7 +564,7 @@
             <div id="prof-pem-main-status" style="flex:1;font-size:11px;color:var(--green);padding:9px 0;display:none">✅ PEM файл загружен</div>
             <div id="prof-pem-main-empty" style="flex:1;font-size:11px;color:var(--muted);padding:9px 0">Ed25519 .pem файл не загружен</div>
             <label style="cursor:pointer;background:var(--accent);color:#000;border:none;padding:9px 14px;border-radius:var(--radius-sm);font-size:11px;font-family:var(--font-head);white-space:nowrap">
-              📎 ЗАГРУЗИТЬ PEM<input type="file" id="prof-pem-main" accept=".pem,.key,.p8,.txt,*" style="display:none" onchange="profReadPem('main',this)">
+              📎 ЗАГРУЗИТЬ PEM<input type="file" id="prof-pem-main" accept="*" style="display:none" onchange="profReadPem('main',this)">
             </label>
           </div>
           <div style="font-size:10px;color:var(--muted);margin-bottom:8px">Формат: .pem, .key, .p8 или текстовый файл с приватным ключом Ed25519</div>
@@ -1595,9 +1595,11 @@ async function loadInlineChartDataInto(sess, lineSeries, chart) {
     if (json.error || !json.data) return;
     const data = dedupeChartData(json.data);
 
-    // Clean up old dim series
+    // Clean up old dim series before rebuilding
     if (_fsBefore) { try { chart.removeSeries(_fsBefore); } catch(e){} _fsBefore = null; }
     if (_fsAfter)  { try { chart.removeSeries(_fsAfter);  } catch(e){} _fsAfter  = null; }
+    // Also reset main line data before applySessionRangeColoring rebuilds it
+    lineSeries.setData([]);
 
     const sr = await fetch(`${API_BASE}/api/trading/sessions/${sess.id}`, { headers: authHeaders() }).catch(() => null);
     const live = sr?.ok ? await sr.json() : sess;
@@ -2287,6 +2289,8 @@ function profSelectNet(net) {
   profLoadWallet();
 }
 
+let _keysStatus = { mainnet: {}, testnet: {} }; // cached key status
+
 async function profLoadKeys() {
   if (!_profToken) return;
   try {
@@ -2294,13 +2298,40 @@ async function profLoadKeys() {
     const data = await r.json();
     if (data.error) return;
     const mn = data.mainnet || {}, tn = data.testnet || {};
-    document.getElementById('prof-hint-test').textContent = tn.hasApiKey ? 'Текущий ключ: ' + tn.apiKeyHint : '';
-    document.getElementById('prof-hint-main').textContent = mn.hasApiKey ? 'Текущий ключ: ' + mn.apiKeyHint : '';
-    if (tn.privKeyPath) document.getElementById('prof-privpath-test').placeholder = tn.privKeyPath;
-    if (mn.privKeyPath) document.getElementById('prof-privpath-main').placeholder = mn.privKeyPath;
-    document.getElementById('prof-key-badge-main').style.display = mn.hasApiKey ? 'inline' : 'none';
-    document.getElementById('prof-key-badge-test').style.display = tn.hasApiKey ? 'inline' : 'none';
+    _keysStatus = { mainnet: mn, testnet: tn };
+
+    document.getElementById('prof-hint-test').textContent =
+      (tn.hasApiKey && tn.hasPem) ? '✅ Ключ: ' + tn.apiKeyHint + ' | PEM загружен' :
+      tn.hasApiKey ? '⚠️ Ключ: ' + tn.apiKeyHint + ' — PEM файл отсутствует' : '';
+    document.getElementById('prof-hint-main').textContent =
+      (mn.hasApiKey && mn.hasPem) ? '✅ Ключ: ' + mn.apiKeyHint + ' | PEM загружен' :
+      mn.hasApiKey ? '⚠️ Ключ: ' + mn.apiKeyHint + ' — PEM файл отсутствует' : '';
+
+    document.getElementById('prof-key-badge-main').style.display = (mn.hasApiKey && mn.hasPem) ? 'inline' : 'none';
+    document.getElementById('prof-key-badge-test').style.display = (tn.hasApiKey && tn.hasPem) ? 'inline' : 'none';
+
+    // Update trade type options — warn if Binance keys missing
+    updateTradeTypeOptions();
   } catch(e) {}
+}
+
+function updateTradeTypeOptions() {
+  const sel = document.getElementById('tradeType');
+  if (!sel) return;
+  for (const opt of sel.options) {
+    const isTestnet = opt.value === 'binance_test';
+    const isMainnet = opt.value === 'binance' || opt.value === 'binance_real';
+    if (isTestnet) {
+      const ok = _keysStatus.testnet?.hasApiKey && _keysStatus.testnet?.hasPem;
+      opt.disabled = !ok;
+      opt.text = ok ? 'Binance Testnet' : 'Binance Testnet ⚠️ (настройте ключи в Кабинете)';
+    }
+    if (isMainnet) {
+      const ok = _keysStatus.mainnet?.hasApiKey && _keysStatus.mainnet?.hasPem;
+      opt.disabled = !ok;
+      opt.text = ok ? 'Binance Mainnet' : 'Binance Mainnet ⚠️ (настройте ключи в Кабинете)';
+    }
+  }
 }
 
 async function profSaveKeys(testnet) {
@@ -2333,10 +2364,23 @@ async function profSaveKeys(testnet) {
 
 function renderBalanceTable(balances, netLabel, color) {
   if (!balances) return '';
-  if (balances.error) return `<div style="margin-bottom:14px"><div style="font-family:var(--font-head);font-size:9px;color:${color};margin-bottom:6px">${netLabel}</div><div style="color:var(--red);font-size:11px">${escHtml(balances.error)}</div></div>`;
+  // Handle top-level error (from backend returning {error:...} object)
+  if (balances.error) return `<div style="margin-bottom:14px"><div style="font-family:var(--font-head);font-size:9px;color:${color};margin-bottom:6px">${netLabel}</div><div style="color:var(--red);font-size:11px">⚠️ ${escHtml(balances.error)}</div></div>`;
   if (!Array.isArray(balances) || !balances.length) return '';
-  const rows = balances.map(b => `<div style="display:grid;grid-template-columns:52px 1fr;gap:4px;padding:5px 0;border-bottom:1px solid rgba(42,53,96,0.4);align-items:center"><span style="font-family:var(--font-head);font-size:10px;color:${color}">${escHtml(b.symbol)}</span><span style="font-size:11px;color:var(--text);text-align:right">${fmtNum(b.amount)}</span></div>`).join('');
-  return `<div style="margin-bottom:16px"><div style="font-family:var(--font-head);font-size:9px;color:${color};margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid ${color}44">${netLabel} — ${balances.length} актив(ов)</div><div style="max-height:200px;overflow-y:auto;-webkit-overflow-scrolling:touch">${rows}</div></div>`;
+  // Handle error item inside array (e.g. [{error: "PEM не найден"}])
+  if (balances[0]?.error) return `<div style="margin-bottom:14px"><div style="font-family:var(--font-head);font-size:9px;color:${color};margin-bottom:6px">${netLabel}</div><div style="color:var(--red);font-size:11px">⚠️ ${escHtml(balances[0].error)}</div></div>`;
+  // Normal balance rows
+  const rows = balances.map(b => {
+    if (!b.symbol) return '';
+    return `<div style="display:grid;grid-template-columns:52px 1fr;gap:4px;padding:5px 0;border-bottom:1px solid rgba(42,53,96,0.4);align-items:center">
+      <span style="font-family:var(--font-head);font-size:10px;color:${color}">${escHtml(b.symbol)}</span>
+      <span style="font-size:11px;color:var(--text);text-align:right">${fmtNum(b.amount)}</span>
+    </div>`;
+  }).join('');
+  return `<div style="margin-bottom:16px">
+    <div style="font-family:var(--font-head);font-size:9px;color:${color};margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid ${color}44">${netLabel} — ${balances.length} актив(ов)</div>
+    <div style="max-height:240px;overflow-y:auto;-webkit-overflow-scrolling:touch">${rows}</div>
+  </div>`;
 }
 
 async function profLoadWallet() {
