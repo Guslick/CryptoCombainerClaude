@@ -317,22 +317,25 @@ public class TradingSessionManager {
         return state;
     }
 
-    /** Get Binance API key: prefer user profile, fall back to AppConfig */
+    /**
+     * Get Binance API key for this user.
+     * Reads from secure per-user key store (profiles/keys/<userId>/).
+     * Falls back to global AppConfig if user has no keys configured.
+     */
     private char[] resolveApiKey(UserProfileManager.UserProfile profile, boolean testnet) {
-        if (profile != null) {
-            String k = testnet ? profile.binanceTestApiKey : profile.binanceApiKey;
+        if (userId > 0) {
+            String k = UserProfileManager.getInstance().getBinanceApiKey(userId, testnet);
             if (k != null && !k.isBlank()) return k.toCharArray();
         }
-        // Fall back to global config.properties
+        // Fallback: global config.properties (server-level keys)
         AppConfig cfg = AppConfig.getInstance();
         String k = testnet ? cfg.getBinanceTestApiKey() : cfg.getBinanceApiKey();
         return k != null ? k.toCharArray() : new char[0];
     }
 
-    /** Get Binance private key path: prefer user profile, fall back to AppConfig */
     private char[] resolvePrivKeyPath(UserProfileManager.UserProfile profile, boolean testnet) {
-        if (profile != null) {
-            String p = testnet ? profile.binanceTestPrivKeyPath : profile.binancePrivKeyPath;
+        if (userId > 0) {
+            String p = UserProfileManager.getInstance().getBinancePrivKeyPath(userId, testnet);
             if (p != null && !p.isBlank()) {
                 return AppConfig.getInstance().resolvePrivateKeyPath(p).toCharArray();
             }

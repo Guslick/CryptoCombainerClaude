@@ -248,7 +248,9 @@ public class MiniAppServer {
         server.createContext("/api/profile/wallet", exchange -> handleJson(exchange, () -> {
             Long userId = resolveUser(exchange);
             if (userId == null) return errorMap("Требуется авторизация");
-            return UserProfileManager.getInstance().getWallet(userId);
+            String net = getQueryParam(exchange.getRequestURI().getQuery(), "net");
+            boolean testnet = !"main".equalsIgnoreCase(net); // default testnet
+            return UserProfileManager.getInstance().getWallet(userId, testnet);
         }));
 
         server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());

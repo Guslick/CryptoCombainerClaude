@@ -1,54 +1,58 @@
 package ton.dariushkmetsyak.Web;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.crypto.Mac;
+import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.PBEKeySpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
-import java.security.MessageDigest;
+import java.security.*;
+import java.security.spec.KeySpec;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
- * Manages user profiles, Telegram auth, Binance key storage (incl. PEM upload),
- * and per-user data isolation.
+ * Manages user profiles with secure per-user key storage.
+ *
+ * Security model for API keys:
+ *  - Keys are stored in profiles/keys/<userId>/ — separate directory, tighter perms
+ *  - PEM files stored in profiles/keys/<userId>/pems/
+ *  - Profile JSON (profiles/<userId>.json) does NOT contain raw keys,
+ *    only a flag indicating whether keys are set
+ *  - Keys file: profiles/keys/<userId>/binance_keys.json (separate from profile)
+ *  - File permissions set to 600 (owner read/write only)
  */
 public class UserProfileManager {
     private static final Logger log = LoggerFactory.getLogger(UserProfileManager.class);
     private static final String PROFILES_DIR = "profiles";
-    private static final String PEMS_DIR     = "profiles/pems";
-    private static final ObjectMapper mapper = new ObjectMapper();
+    private static final String KEYS_DIR     = "profiles/keys";
+    private static final ObjectMapper mapper  = new ObjectMapper();
     private static UserProfileManager instance;
 
-    // token → userId
-    private final ConcurrentHashMap<String, Long>   sessionTokens = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, Long>   tokenExpiry   = new ConcurrentHashMap<>();
-    private static final long TOKEN_TTL_MS = 7L * 24 * 3600 * 1000;
-
-    // ── UserProfile ──────────────────────────────────────────────────────────
+    // ── UserProfile (NO keys stored here) ────────────────────────────────────
 
     public static class UserProfile {
         public long   telegramUserId;
         public String telegramUsername   = "";
         public String telegramFirstName  = "";
         public String telegramPhotoUrl   = "";
-        // Binance keys — stored as API key string; PEM stored as file reference
-        public String binanceApiKey         = "";
-        public String binancePrivKeyPath    = "";   // path to pem file in PEMS_DIR
-        public String binanceTestApiKey     = "";
-        public String binanceTestPrivKeyPath = "";
+        // Only flags — never the actual key values
+        public boolean hasBinanceMainnet = false;
+        public boolean hasBinanceTestnet = false;
         public long createdAt;
         public long updatedAt;
 
         public UserProfile() {}
         public UserProfile(long uid, String username, String firstName) {
             this.telegramUserId  = uid;
-            this.telegramUsername  = username != null ? username : "";
+            this.telegramUsername  = username  != null ? username  : "";
             this.telegramFirstName = firstName != null ? firstName : "";
             this.createdAt = this.updatedAt = System.currentTimeMillis();
         }
@@ -59,18 +63,26 @@ public class UserProfileManager {
             m.put("telegramUsername",  telegramUsername);
             m.put("telegramFirstName", telegramFirstName);
             m.put("telegramPhotoUrl",  telegramPhotoUrl);
-            m.put("hasBinanceKeys",     binanceApiKey     != null && !binanceApiKey.isBlank());
-            m.put("hasBinanceTestKeys", binanceTestApiKey != null && !binanceTestApiKey.isBlank());
+            m.put("hasBinanceKeys",     hasBinanceMainnet);
+            m.put("hasBinanceTestKeys", hasBinanceTestnet);
             m.put("createdAt", createdAt);
             m.put("updatedAt", updatedAt);
             return m;
         }
     }
 
+    /** Stored separately from profile — never serialised into profile JSON */
+    private static class BinanceKeys {
+        public String apiKey     = "";
+        public String privKeyPath = "";  // path to PEM file
+    }
+
+    // ── Singleton ─────────────────────────────────────────────────────────────
+
     private UserProfileManager() {
         try {
             Files.createDirectories(Paths.get(PROFILES_DIR));
-            Files.createDirectories(Paths.get(PEMS_DIR));
+            Files.createDirectories(Paths.get(KEYS_DIR));
         } catch (IOException ignored) {}
     }
 
@@ -79,12 +91,8 @@ public class UserProfileManager {
         return instance;
     }
 
-    // ── Telegram Auth ────────────────────────────────────────────────────────
+    // ── Telegram Auth ─────────────────────────────────────────────────────────
 
-    /**
-     * Verify Telegram WebApp initData (HMAC-SHA256).
-     * Returns parsed user map on success, null on failure.
-     */
     @SuppressWarnings("unchecked")
     public Map<String, Object> verifyInitData(String initData, String botToken) {
         if (initData == null || initData.isBlank()) return null;
@@ -101,73 +109,43 @@ public class UserProfileManager {
                 }
             }
             if (hash == null) return null;
-
             StringBuilder sb = new StringBuilder();
             params.entrySet().stream().sorted(Map.Entry.comparingByKey())
                 .forEach(e -> { if (sb.length() > 0) sb.append('\n'); sb.append(e.getKey()).append('=').append(e.getValue()); });
-
             Mac mac = Mac.getInstance("HmacSHA256");
-            SecretKeySpec webAppData = new SecretKeySpec("WebAppData".getBytes(StandardCharsets.UTF_8), "HmacSHA256");
-            mac.init(webAppData);
-            byte[] secretKey = mac.doFinal(botToken.getBytes(StandardCharsets.UTF_8));
+            SecretKeySpec webApp = new SecretKeySpec("WebAppData".getBytes(StandardCharsets.UTF_8), "HmacSHA256");
+            mac.init(webApp);
+            byte[] sk = mac.doFinal(botToken.getBytes(StandardCharsets.UTF_8));
             mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(secretKey, "HmacSHA256"));
+            mac.init(new SecretKeySpec(sk, "HmacSHA256"));
             byte[] computed = mac.doFinal(sb.toString().getBytes(StandardCharsets.UTF_8));
             if (!MessageDigest.isEqual(bytesToHex(computed).getBytes(), hash.getBytes())) return null;
-
             String userJson = params.get("user");
             if (userJson == null) return null;
             Map<String, Object> user = mapper.readValue(userJson, Map.class);
             user.put("auth_date", params.get("auth_date"));
             return user;
-        } catch (Exception e) {
-            log.error("Error verifying initData", e);
-            return null;
-        }
+        } catch (Exception e) { log.error("Error verifying initData", e); return null; }
     }
 
-    /**
-     * Verify Telegram Login Widget callback data (HMAC-SHA256 with SHA256(botToken) as key).
-     * Used for browser-based login via widget.
-     */
     @SuppressWarnings("unchecked")
     public Map<String, Object> verifyLoginWidget(Map<String, Object> data, String botToken) {
         if (data == null || !data.containsKey("hash")) return null;
         try {
             String hash = (String) data.get("hash");
-            // Build check string: sorted key=value, excluding hash
             StringBuilder sb = new StringBuilder();
-            data.entrySet().stream()
-                .filter(e -> !"hash".equals(e.getKey()))
-                .sorted(Map.Entry.comparingByKey())
+            data.entrySet().stream().filter(e -> !"hash".equals(e.getKey())).sorted(Map.Entry.comparingByKey())
                 .forEach(e -> { if (sb.length() > 0) sb.append('\n'); sb.append(e.getKey()).append('=').append(e.getValue()); });
-
-            // Secret key = SHA256(botToken)
             MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
-            byte[] secretKey = sha256.digest(botToken.getBytes(StandardCharsets.UTF_8));
-
+            byte[] sk = sha256.digest(botToken.getBytes(StandardCharsets.UTF_8));
             Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(secretKey, "HmacSHA256"));
+            mac.init(new SecretKeySpec(sk, "HmacSHA256"));
             byte[] computed = mac.doFinal(sb.toString().getBytes(StandardCharsets.UTF_8));
-            if (!MessageDigest.isEqual(bytesToHex(computed).getBytes(), hash.getBytes())) {
-                log.warn("Login widget verification failed");
-                return null;
-            }
-
-            // Check auth_date not older than 1 day
+            if (!MessageDigest.isEqual(bytesToHex(computed).getBytes(), hash.getBytes())) return null;
             Object authDate = data.get("auth_date");
-            if (authDate != null) {
-                long ts = Long.parseLong(authDate.toString());
-                if (System.currentTimeMillis() / 1000 - ts > 86400) {
-                    log.warn("Login widget data expired");
-                    return null;
-                }
-            }
+            if (authDate != null && System.currentTimeMillis() / 1000 - Long.parseLong(authDate.toString()) > 86400) return null;
             return data;
-        } catch (Exception e) {
-            log.error("Error verifying login widget", e);
-            return null;
-        }
+        } catch (Exception e) { log.error("Error verifying login widget", e); return null; }
     }
 
     private String bytesToHex(byte[] b) {
@@ -176,11 +154,16 @@ public class UserProfileManager {
         return sb.toString();
     }
 
+    // ── Session tokens ────────────────────────────────────────────────────────
+
+    private final ConcurrentHashMap<String, Long> sessionTokens = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Long> tokenExpiry   = new ConcurrentHashMap<>();
+    private static final long TOKEN_TTL_MS = 7L * 24 * 3600 * 1000;
+
     public String createSession(long userId) {
         String token = UUID.randomUUID().toString().replace("-", "") + Long.toHexString(userId);
         sessionTokens.put(token, userId);
         tokenExpiry.put(token, System.currentTimeMillis() + TOKEN_TTL_MS);
-        // Cleanup
         long now = System.currentTimeMillis();
         tokenExpiry.entrySet().removeIf(e -> e.getValue() < now);
         sessionTokens.keySet().retainAll(tokenExpiry.keySet());
@@ -191,14 +174,12 @@ public class UserProfileManager {
         if (token == null || token.isBlank()) return null;
         Long exp = tokenExpiry.get(token);
         if (exp == null || exp < System.currentTimeMillis()) {
-            sessionTokens.remove(token);
-            tokenExpiry.remove(token);
-            return null;
+            sessionTokens.remove(token); tokenExpiry.remove(token); return null;
         }
         return sessionTokens.get(token);
     }
 
-    // ── Profile CRUD ─────────────────────────────────────────────────────────
+    // ── Profile CRUD ──────────────────────────────────────────────────────────
 
     private String profilePath(long userId) {
         return Paths.get(PROFILES_DIR, userId + ".json").toString();
@@ -226,99 +207,147 @@ public class UserProfileManager {
     }
 
     public UserProfile updateFromTelegram(Map<String, Object> tgUser) {
-        long uid       = toLong(tgUser.get("id"));
+        long uid = toLong(tgUser.get("id"));
         String username   = str(tgUser.get("username"));
         String firstName  = str(tgUser.get("first_name"));
         String photoUrl   = str(tgUser.get("photo_url"));
         UserProfile p = getOrCreate(uid, username, firstName);
-        p.telegramUsername  = username;
-        p.telegramFirstName = firstName;
+        p.telegramUsername = username; p.telegramFirstName = firstName;
         if (!photoUrl.isBlank()) p.telegramPhotoUrl = photoUrl;
         saveProfile(p);
         return p;
     }
 
-    // ── Binance Keys ─────────────────────────────────────────────────────────
+    // ── Secure key storage ────────────────────────────────────────────────────
+
+    /** Directory for a user's keys — isolated per user */
+    private Path userKeysDir(long userId) throws IOException {
+        Path dir = Paths.get(KEYS_DIR, String.valueOf(userId));
+        if (!Files.exists(dir)) {
+            Files.createDirectories(dir);
+            // Restrict permissions: owner read/write only (chmod 700)
+            try { dir.toFile().setReadable(true, true); dir.toFile().setWritable(true, true); dir.toFile().setExecutable(true, true); } catch (Exception ignored) {}
+        }
+        return dir;
+    }
+
+    private Path keysFilePath(long userId, boolean testnet) throws IOException {
+        return userKeysDir(userId).resolve(testnet ? "binance_test_keys.json" : "binance_keys.json");
+    }
+
+    private Path pemFilePath(long userId, boolean testnet) throws IOException {
+        Path dir = userKeysDir(userId).resolve("pems");
+        Files.createDirectories(dir);
+        return dir.resolve(testnet ? "test.pem" : "main.pem");
+    }
+
+    private BinanceKeys loadKeys(long userId, boolean testnet) {
+        try {
+            Path path = keysFilePath(userId, testnet);
+            if (!Files.exists(path)) return new BinanceKeys();
+            return mapper.readValue(path.toFile(), BinanceKeys.class);
+        } catch (Exception e) { log.warn("Failed to load keys for user {}", userId); return new BinanceKeys(); }
+    }
+
+    private void saveKeys(long userId, BinanceKeys keys, boolean testnet) throws IOException {
+        Path path = keysFilePath(userId, testnet);
+        mapper.writerWithDefaultPrettyPrinter().writeValue(path.toFile(), keys);
+        // Restrict to owner only
+        path.toFile().setReadable(true, true);
+        path.toFile().setWritable(true, true);
+    }
 
     /**
-     * Save API key text and (optional) PEM file content for a user.
-     * pemContent is the raw PEM string uploaded from browser.
-     * If pemContent is provided, it is written to profiles/pems/<userId>_<net>.pem
-     * and the path is stored. resolvePrivateKeyPath() can then read it directly.
+     * Save Binance API key and/or PEM content for a user.
+     * Keys stored in profiles/keys/<userId>/ — NOT in the public profile JSON.
      */
     public Map<String, Object> saveBinanceKeys(long userId, String apiKey, String pemContent, boolean testnet) {
-        UserProfile p = loadProfile(userId);
-        if (p == null) return Map.of("error", "Профиль не найден");
+        try {
+            BinanceKeys keys = loadKeys(userId, testnet);
+            boolean pemSaved = false;
 
-        String pemPath = null;
-        if (pemContent != null && !pemContent.isBlank()) {
-            String suffix = testnet ? "test" : "main";
-            pemPath = Paths.get(PEMS_DIR, userId + "_" + suffix + ".pem").toString();
-            try {
-                // Normalise — ensure PEM headers exist
+            if (apiKey != null && !apiKey.isBlank()) {
+                keys.apiKey = apiKey.trim();
+            }
+
+            if (pemContent != null && !pemContent.isBlank()) {
                 String content = pemContent.replace("\\n", "\n").trim();
                 if (!content.contains("-----BEGIN")) {
                     content = "-----BEGIN PRIVATE KEY-----\n" + content + "\n-----END PRIVATE KEY-----\n";
                 }
-                Files.writeString(Paths.get(pemPath), content, StandardCharsets.UTF_8);
-            } catch (IOException e) {
-                log.error("Failed to write PEM for user {}", userId, e);
-                return Map.of("error", "Ошибка сохранения PEM: " + e.getMessage());
+                Path pemPath = pemFilePath(userId, testnet);
+                Files.writeString(pemPath, content, StandardCharsets.UTF_8);
+                pemPath.toFile().setReadable(true, true);
+                pemPath.toFile().setWritable(true, true);
+                keys.privKeyPath = pemPath.toString();
+                pemSaved = true;
             }
-        }
 
-        if (testnet) {
-            if (apiKey  != null && !apiKey.isBlank())  p.binanceTestApiKey      = apiKey;
-            if (pemPath != null) p.binanceTestPrivKeyPath = pemPath;
-        } else {
-            if (apiKey  != null && !apiKey.isBlank())  p.binanceApiKey      = apiKey;
-            if (pemPath != null) p.binancePrivKeyPath = pemPath;
+            saveKeys(userId, keys, testnet);
+
+            // Update profile flags (no actual key data in profile)
+            UserProfile p = loadProfile(userId);
+            if (p != null) {
+                boolean hasKey = !blank(keys.apiKey);
+                boolean hasPem = !blank(keys.privKeyPath) && new File(keys.privKeyPath).exists();
+                if (testnet) p.hasBinanceTestnet = hasKey || hasPem;
+                else         p.hasBinanceMainnet = hasKey || hasPem;
+                saveProfile(p);
+            }
+
+            return Map.of("ok", true, "testnet", testnet, "pemSaved", pemSaved);
+        } catch (Exception e) {
+            log.error("Failed to save keys for user {}", userId, e);
+            return Map.of("error", "Ошибка сохранения ключей: " + e.getMessage());
         }
-        saveProfile(p);
-        return Map.of("ok", true, "testnet", testnet, "pemSaved", pemPath != null);
     }
 
+    /** Public key status (hints only, no raw values) */
     public Map<String, Object> getBinanceKeysStatus(long userId) {
-        UserProfile p = loadProfile(userId);
-        if (p == null) return Map.of("error", "Профиль не найден");
+        BinanceKeys main = loadKeys(userId, false);
+        BinanceKeys test = loadKeys(userId, true);
         return Map.of(
             "mainnet", Map.of(
-                "hasApiKey",  !blank(p.binanceApiKey),
-                "hasPem",     !blank(p.binancePrivKeyPath) && new File(p.binancePrivKeyPath).exists(),
-                "apiKeyHint", mask(p.binanceApiKey)
+                "hasApiKey", !blank(main.apiKey),
+                "hasPem",    !blank(main.privKeyPath) && new File(main.privKeyPath).exists(),
+                "apiKeyHint", mask(main.apiKey)
             ),
             "testnet", Map.of(
-                "hasApiKey",  !blank(p.binanceTestApiKey),
-                "hasPem",     !blank(p.binanceTestPrivKeyPath) && new File(p.binanceTestPrivKeyPath).exists(),
-                "apiKeyHint", mask(p.binanceTestApiKey)
+                "hasApiKey", !blank(test.apiKey),
+                "hasPem",    !blank(test.privKeyPath) && new File(test.privKeyPath).exists(),
+                "apiKeyHint", mask(test.apiKey)
             )
         );
     }
 
-    // ── Wallet (structured) ───────────────────────────────────────────────────
+    /** Resolve API key for trading — called by TradingSessionManager */
+    public String getBinanceApiKey(long userId, boolean testnet) {
+        return loadKeys(userId, testnet).apiKey;
+    }
 
-    /**
-     * Fetch live wallet balances from Binance.
-     * Returns list of {symbol, name, amount} for all non-zero assets.
-     */
-    public Map<String, Object> getWallet(long userId) {
-        UserProfile p = loadProfile(userId);
-        if (p == null) return Map.of("error", "Профиль не найден");
+    /** Resolve PEM path for trading — called by TradingSessionManager */
+    public String getBinancePrivKeyPath(long userId, boolean testnet) {
+        return loadKeys(userId, testnet).privKeyPath;
+    }
 
+    // ── Wallet ────────────────────────────────────────────────────────────────
+
+    /** Return balances for the specified network (testnet/mainnet) */
+    public Map<String, Object> getWallet(long userId, boolean testnet) {
+        BinanceKeys keys = loadKeys(userId, testnet);
         Map<String, Object> result = new LinkedHashMap<>();
 
-        // Mainnet
-        if (!blank(p.binanceApiKey) && !blank(p.binancePrivKeyPath)) {
-            result.put("mainnet", fetchBinanceBalances(p.binanceApiKey, p.binancePrivKeyPath, false));
-        }
-        // Testnet
-        if (!blank(p.binanceTestApiKey) && !blank(p.binanceTestPrivKeyPath)) {
-            result.put("testnet", fetchBinanceBalances(p.binanceTestApiKey, p.binanceTestPrivKeyPath, true));
+        if (blank(keys.apiKey)) {
+            result.put("error", "API ключи не настроены. Добавьте ключи в разделе Binance API ключи.");
+            return result;
         }
 
-        // Active session snapshots
-        List<Map<String, Object>> running = TradingSessionManager.forUser(userId).getAllSessions().stream()
-            .filter(s -> "RUNNING".equals(s.get("status")))
+        List<Map<String, Object>> balances = fetchBinanceBalances(keys.apiKey, keys.privKeyPath, testnet);
+        result.put("balances", balances);
+
+        // Active session snapshots for this user
+        List<Map<String, Object>> running = TradingSessionManager.forUser(userId).getAllSessions()
+            .stream().filter(s -> "RUNNING".equals(s.get("status")))
             .map(s -> {
                 Map<String, Object> m = new LinkedHashMap<>();
                 m.put("sessionId", s.get("id")); m.put("coin", s.get("coinName"));
@@ -329,44 +358,43 @@ public class UserProfileManager {
         return result;
     }
 
-    private Object fetchBinanceBalances(String apiKey, String privKeyPath, boolean testnet) {
+    private List<Map<String, Object>> fetchBinanceBalances(String apiKey, String privKeyPath, boolean testnet) {
         try {
-            char[] key  = apiKey.toCharArray();
-            char[] pem  = ton.dariushkmetsyak.Config.AppConfig.getInstance()
-                .resolvePrivateKeyPath(privKeyPath).toCharArray();
+            char[] key = apiKey.toCharArray();
+            char[] pem = ton.dariushkmetsyak.Config.AppConfig.getInstance()
+                    .resolvePrivateKeyPath(privKeyPath).toCharArray();
             ton.dariushkmetsyak.TradingApi.ApiService.Account acc =
-                ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder.createNewBinance(
-                    key, pem,
+                ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder.createNewBinance(key, pem,
                     testnet
                         ? ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder.BINANCE_BASE_URL.TESTNET
                         : ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder.BINANCE_BASE_URL.MAINNET);
-
             Map<ton.dariushkmetsyak.GeckoApiService.geckoEntities.Coin, Double> assets =
                 acc.wallet().getAllAssets();
-
-            List<Map<String, Object>> balances = new ArrayList<>();
-            for (var entry : assets.entrySet()) {
-                if (entry.getValue() == null || entry.getValue() == 0) continue;
+            List<Map<String, Object>> list = new ArrayList<>();
+            for (var e : assets.entrySet()) {
+                if (e.getValue() == null || e.getValue() == 0) continue;
                 Map<String, Object> b = new LinkedHashMap<>();
-                b.put("symbol", entry.getKey().getSymbol());
-                b.put("name",   entry.getKey().getName());
-                b.put("amount", entry.getValue());
-                balances.add(b);
+                b.put("symbol", e.getKey().getSymbol());
+                b.put("name",   e.getKey().getName());
+                b.put("amount", e.getValue());
+                list.add(b);
             }
-            // Sort: USDT first, then by amount desc
-            balances.sort((a, b2) -> {
-                boolean aUsdt = "USDT".equalsIgnoreCase((String)a.get("symbol"));
-                boolean bUsdt = "USDT".equalsIgnoreCase((String)b2.get("symbol"));
-                if (aUsdt) return -1; if (bUsdt) return 1;
-                return Double.compare((Double)b2.get("amount"), (Double)a.get("amount"));
+            list.sort((a, b) -> {
+                boolean aU = "USDT".equalsIgnoreCase((String)a.get("symbol"));
+                boolean bU = "USDT".equalsIgnoreCase((String)b.get("symbol"));
+                if (aU) return -1; if (bU) return 1;
+                return Double.compare((Double)b.get("amount"), (Double)a.get("amount"));
             });
-            return balances;
+            return list;
         } catch (Exception e) {
-            return Map.of("error", e.getMessage());
+            log.error("Failed to fetch Binance balances (testnet={}): {}", testnet, e.getMessage());
+            List<Map<String, Object>> err = new ArrayList<>();
+            err.add(Map.of("error", e.getMessage() != null ? e.getMessage() : "Ошибка подключения к Binance"));
+            return err;
         }
     }
 
-    // ── Trade Report ─────────────────────────────────────────────────────────
+    // ── Trade report ──────────────────────────────────────────────────────────
 
     public Map<String, Object> getTradingReport(long userId) {
         List<Map<String, Object>> all = TradingSessionManager.forUser(userId).getAllSessions();
@@ -382,11 +410,8 @@ public class UserProfileManager {
             }
         }
         Map<String, Object> r = new LinkedHashMap<>();
-        r.put("totalSessions", all.size());
-        r.put("buyCount",  buyCount);
-        r.put("sellCount", sellCount);
-        r.put("sessionsByType", byType);
-        r.put("sessions", all);
+        r.put("totalSessions", all.size()); r.put("buyCount", buyCount); r.put("sellCount", sellCount);
+        r.put("sessionsByType", byType); r.put("sessions", all);
         return r;
     }
 

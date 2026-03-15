@@ -367,7 +367,7 @@
       </div>
       <div class="btn-row">
         <button class="btn btn-success" onclick="startTrading()" id="startTradeBtn">▶ ЗАПУСТИТЬ</button>
-        <button class="btn btn-danger" onclick="stopAllTrading()" style="flex:0.5">■ СТОП</button>
+
       </div>
     </div>
 
@@ -479,7 +479,7 @@
         <div class="card-title">🎮 СЕССИИ <span id="activeSessionCount" style="font-size:10px;color:var(--muted);font-weight:400;"></span><button class="btn btn-secondary btn-sm" onclick="loadSessions()" style="margin-left:auto;">🔄</button></div>
         <div id="sessionsList"><div class="empty-state"><span class="icon">🎮</span>Нет сессий</div></div>
       </div>
-      <button class="btn btn-danger" onclick="stopAllTrading()" style="margin-top:4px;">■ ОСТАНОВИТЬ ВСЕ</button>
+
     </div>
 
     <!-- PROFILE / CABINET -->
@@ -885,9 +885,11 @@ async function loadChartData(coinId, interval) {
 }
 
 function dedupeChartData(raw) {
+  // Shift timestamps by local timezone offset so chart displays local time
+  const tzOffsetSec = -(new Date().getTimezoneOffset()) * 60;
   const seen = new Set();
-  return raw.map(p => ({time:Math.floor(p[0]/1000), value:p[1]}))
-    .filter(p => p.value>0).sort((a,b)=>a.time-b.time)
+  return raw.map(p => ({time: Math.floor(p[0]/1000) + tzOffsetSec, value:p[1]}))
+    .filter(p => p.value > 0).sort((a,b) => a.time - b.time)
     .filter(p => { if(seen.has(p.time)) return false; seen.add(p.time); return true; });
 }
 
@@ -1358,8 +1360,9 @@ function getChartIntervalForSession(sess) {
  *  Before session: dim gray. During session: accent cyan. After session: dim gray.
  *  Uses two line series stored in entry.lineBefore and entry.lineAfter. */
 function applySessionRangeColoring(entry, data, sess) {
-  const sessionStartSec = sess.startedAt ? Math.floor(sess.startedAt / 1000) : null;
-  const sessionEndSec   = sess.endedAt   ? Math.floor(sess.endedAt   / 1000) : null;
+  const tzOff = -(new Date().getTimezoneOffset()) * 60;
+  const sessionStartSec = sess.startedAt ? Math.floor(sess.startedAt / 1000) + tzOff : null;
+  const sessionEndSec   = sess.endedAt   ? Math.floor(sess.endedAt   / 1000) + tzOff : null;
   const GRAY  = 'rgba(104,120,168,0.35)';
   const CYAN  = '#00e5ff';
 
@@ -1502,7 +1505,8 @@ function applyChartMarkers(lineSeries, data, events, inlineMode = false) {
   const markers = events
     .filter(e => e.type === 'BUY' || e.type === 'SELL')
     .map(e => {
-      const rawT = Math.floor(e.timestamp / 1000);
+      const tzOff = -(new Date().getTimezoneOffset()) * 60;
+      const rawT = Math.floor(e.timestamp / 1000) + tzOff;
       const nearest = snapToNearestPoint(rawT);
       const gapSec = Math.abs(nearest.time - rawT);
       // In inline mode, skip markers that are > 20 minutes away from any candle
@@ -2234,12 +2238,21 @@ function profileLogout() {
 
 // ── Keys ──────────────────────────────────────────────────────────────────────
 
+let _activeNet = 'test'; // tracks which network tab is active
+
 function profSelectNet(net) {
+  _activeNet = net;
   const isTest = net === 'test';
   document.getElementById('prof-keys-test-panel').style.display = isTest ? 'block' : 'none';
   document.getElementById('prof-keys-main-panel').style.display = isTest ? 'none' : 'block';
-  document.getElementById('prof-net-test-btn').style.cssText += isTest ? ';background:var(--accent);color:#000' : ';background:;color:';
-  document.getElementById('prof-net-main-btn').style.cssText += isTest ? ';background:;color:' : ';background:var(--red);color:#fff';
+  const testBtn = document.getElementById('prof-net-test-btn');
+  const mainBtn = document.getElementById('prof-net-main-btn');
+  testBtn.style.background = isTest ? 'var(--accent)' : '';
+  testBtn.style.color = isTest ? '#000' : '';
+  mainBtn.style.background = isTest ? '' : 'var(--red)';
+  mainBtn.style.color = isTest ? '' : '#fff';
+  // Reload wallet to show active network
+  profLoadWallet();
 }
 
 async function profLoadKeys() {
@@ -2295,20 +2308,26 @@ function renderBalanceTable(balances, netLabel, color) {
 async function profLoadWallet() {
   if (!_profToken) { showToast('Войдите в аккаунт'); return; }
   const el = document.getElementById('prof-wallet-content');
-  el.innerHTML = '<div class="empty-state"><div class="spinner" style="margin:0 auto 8px"></div>Загрузка балансов...</div>';
+  const net = _activeNet || 'test';
+  el.innerHTML = `<div class="empty-state"><div class="spinner" style="margin:0 auto 8px"></div>Загрузка ${net === 'test' ? 'Testnet' : 'Mainnet'}...</div>`;
   try {
-    const r = await fetch(`${API_BASE}/api/profile/wallet`, { headers: authHeaders() });
+    const r = await fetch(`${API_BASE}/api/profile/wallet?net=${net}`, { headers: authHeaders() });
     const data = await r.json();
     if (data.error) { el.innerHTML = `<div style="color:var(--red);font-size:12px">${escHtml(data.error)}</div>`; return; }
-    let html = '';
-    html += renderBalanceTable(data.mainnet, 'MAINNET', 'var(--green)');
-    html += renderBalanceTable(data.testnet, 'TESTNET', 'var(--accent)');
+    const color = net === 'test' ? 'var(--accent)' : 'var(--green)';
+    const label = net === 'test' ? 'TESTNET' : 'MAINNET';
+    let html = renderBalanceTable(data.balances, label, color);
     if (data.activeSessions?.length) {
-      html += `<div style="padding-top:10px;border-top:1px solid var(--border)"><div style="font-family:var(--font-head);font-size:9px;color:var(--muted);margin-bottom:8px">АКТИВНЫЕ СЕССИИ</div>`;
-      for (const s of data.activeSessions) html += `<div style="display:flex;justify-content:space-between;font-size:11px;padding:5px 0;border-bottom:1px solid rgba(42,53,96,0.4)"><span style="color:var(--muted);font-family:var(--font-head);font-size:10px">${escHtml(String(s.coin))}</span><span>${fmtNum(s.coinBalance)} ${escHtml(String(s.coin))} + ${fmtNum(s.usdtBalance)} USDT</span></div>`;
+      html += `<div style="padding-top:10px;border-top:1px solid var(--border)">
+        <div style="font-family:var(--font-head);font-size:9px;color:var(--muted);margin-bottom:8px">АКТИВНЫЕ СЕССИИ</div>`;
+      for (const s of data.activeSessions) {
+        html += `<div style="display:flex;justify-content:space-between;font-size:11px;padding:5px 0;border-bottom:1px solid rgba(42,53,96,0.4)">
+          <span style="color:var(--muted);font-family:var(--font-head);font-size:10px">${escHtml(String(s.coin))}</span>
+          <span>${fmtNum(s.coinBalance)} ${escHtml(String(s.coin))} + ${fmtNum(s.usdtBalance)} USDT</span></div>`;
+      }
       html += '</div>';
     }
-    if (!html) html = '<div style="color:var(--muted);font-size:12px;padding:12px 0">Нет данных. Добавьте API ключи Binance.</div>';
+    if (!html) html = `<div style="color:var(--muted);font-size:12px;padding:12px 0">Нет данных. Добавьте ${label} API ключи.</div>`;
     el.innerHTML = html;
   } catch(e) { el.innerHTML = `<div style="color:var(--red);font-size:12px">Ошибка: ${escHtml(e.message)}</div>`; }
 }
