@@ -1,4 +1,5 @@
 package ton.dariushkmetsyak.Strategies.ReversalPointsStrategy.ResearchingStrategy;
+
 import ton.dariushkmetsyak.Charts.Chart;
 import ton.dariushkmetsyak.GeckoApiService.geckoEntities.Coin;
 import ton.dariushkmetsyak.Graphics.DrawTradingChart.TradingChart;
@@ -14,33 +15,41 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.function.BiConsumer;
-
+import java.util.function.Consumer;
 
 public class ReversalPointStrategyBackTester {
     TreeMap<Double, Double> prices = new TreeMap<>();
-    ArrayList<ReversalPointStrategyBackTester.Reversal> reversalArrayList = new ArrayList<>();
+    ArrayList<Reversal> reversalArrayList = new ArrayList<>();
     boolean trading = false;
     boolean max = false;
     boolean isSold = false;
     double buyGap = 0;
-    double pointPrice=0;
-    double buyPrice=0;
-    double sellWithProfitGap =0;
-    double sellWithLossGap =0;
+    double pointPrice = 0;
+    double buyPrice = 0;
+    double sellWithProfitGap = 0;
+    double sellWithLossGap = 0;
     Double[] currentMinPrice = {Double.MAX_VALUE};
     Double[] currentMaxPrice = {0.0};
     Double[] currentMaxPriceTimestamp = {0.0};
     Double[] currentMinPriceTimestamp = {Double.MAX_VALUE};
-    String chartScreenshotMessage ="";
+    String chartScreenshotMessage = "";
     Account account;
     Coin coin;
     Chart chart;
     double tradingSum;
+    private final double feeRate;
+    private final Consumer<Integer> progressCallback;
+    private int totalTrades = 0;
+    private int profitableTrades = 0;
+    private int losingTrades = 0;
+    private double estimatedCommissionUsd = 0;
+
     final static Coin USDT;
     BackTestResult backTestResult;
+
     static {
         try {
-            USDT=Coin.createCoin("Tether");
+            USDT = Coin.createCoin("Tether");
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -51,292 +60,205 @@ public class ReversalPointStrategyBackTester {
     }
 
     public ReversalPointStrategyBackTester(Coin coin, Chart chart, double tradingSum, double buyGap, double sellWithProfitGap, double sellWithLossGap) {
+        this(coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, 0.0, null);
+    }
 
+    public ReversalPointStrategyBackTester(Coin coin, Chart chart, double tradingSum, double buyGap, double sellWithProfitGap,
+                                           double sellWithLossGap, double feeRate, Consumer<Integer> progressCallback) {
         try {
-            this.coin=Coin.createCoin(chart.getCoinName());
+            this.coin = Coin.createCoin(chart.getCoinName());
             Map<Coin, Double> testAssets = new HashMap<>();
             testAssets.put(USDT, 100d);
             testAssets.put(coin, 0d);
-            this.account= AccountBuilder.createNewTester(testAssets);
-            this.tradingSum=tradingSum;
+            this.account = AccountBuilder.createNewTester(testAssets);
+            this.tradingSum = tradingSum;
             this.buyGap = buyGap;
-            this.chart=chart;
+            this.chart = chart;
             this.sellWithProfitGap = sellWithProfitGap;
             this.sellWithLossGap = sellWithLossGap;
+            this.feeRate = feeRate;
+            this.progressCallback = progressCallback;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-
     }
-    public class BackTestResult implements Comparable<BackTestResult>{
+
+    public class BackTestResult implements Comparable<BackTestResult> {
         double buyGap;
         double sellWithProfitGap;
         double sellWithLossGap;
+        double profitInUsd;
+        double percentageProfit;
+        double estimatedCommissionUsd;
+        double profitAfterCommissionUsd;
+        int totalTrades;
+        int profitableTrades;
+        int losingTrades;
 
-        public double getProfitInUsd() {
-            return profitInUsd;
-        }
-
+        public double getProfitInUsd() { return profitInUsd; }
         public double getBuyGap() { return buyGap; }
         public double getSellWithProfit() { return sellWithProfitGap; }
         public double getSellWithLossGap() { return sellWithLossGap; }
         public double getPercentageProfit() { return percentageProfit; }
+        public double getEstimatedCommissionUsd() { return estimatedCommissionUsd; }
+        public double getProfitAfterCommissionUsd() { return profitAfterCommissionUsd; }
+        public int getTotalTrades() { return totalTrades; }
+        public int getProfitableTrades() { return profitableTrades; }
+        public int getLosingTrades() { return losingTrades; }
 
-        double profitInUsd;
-        double percentageProfit;
-
-        @Override
-        public String toString() {
-            return coin.getName() +  "\n" +
-                    "Assets: " + account.wallet().getAllAssets()+ "\n" +
-                    "Profit in USD: " + (account.wallet().getBalance() - 100) +"\n" +
-                    "Profit in %: " + (account.wallet().getBalance() - 100)/100*100 + "\n" +
-                    "Buy gap: " + buyGap + "\n" +
-                    "Sell with profit gap: " + sellWithProfitGap + "\n" +
-                    "Sell with loss gap: " + sellWithLossGap + "\n";
-        }
-
-        public BackTestResult(double buyGap, double sellWithProfit, double sellWithLossGap, double profitInUsd, double percentageProfit) {
+        public BackTestResult(double buyGap, double sellWithProfit, double sellWithLossGap,
+                              double profitInUsd, double percentageProfit,
+                              double estimatedCommissionUsd, double profitAfterCommissionUsd,
+                              int totalTrades, int profitableTrades, int losingTrades) {
             this.buyGap = buyGap;
             this.sellWithProfitGap = sellWithProfit;
             this.sellWithLossGap = sellWithLossGap;
             this.profitInUsd = profitInUsd;
             this.percentageProfit = percentageProfit;
+            this.estimatedCommissionUsd = estimatedCommissionUsd;
+            this.profitAfterCommissionUsd = profitAfterCommissionUsd;
+            this.totalTrades = totalTrades;
+            this.profitableTrades = profitableTrades;
+            this.losingTrades = losingTrades;
         }
-
 
         @Override
-        public int compareTo(BackTestResult backTestResult) {
-            return Double.compare(backTestResult.profitInUsd, this.profitInUsd);
+        public int compareTo(BackTestResult other) {
+            return Double.compare(other.profitAfterCommissionUsd, this.profitAfterCommissionUsd);
         }
     }
+
     private class Reversal {
         private final double[] data;
         private final String tag;
-
-        Reversal(double[] data, String tag) {
-            this.data = data;
-            this.tag = tag;
-        }
+        Reversal(double[] data, String tag) { this.data = data; this.tag = tag; }
     }
 
-    BiConsumer<Double, Double> findReversalPoints = (timestamp, price) -> {
+    BiConsumer<Double, Double> findReversalPoints = (timestamp, price) -> {};
 
-    };
-
-    public BackTestResult startBackTest(){
-        init(chart.getPrices().get(0)[0],chart.getPrices().get(0)[1]);
-        for (int i=0; i<chart.getPrices().size();i++){
+    public BackTestResult startBackTest() {
+        init(chart.getPrices().get(0)[0], chart.getPrices().get(0)[1]);
+        int totalPoints = chart.getPrices().size();
+        for (int i = 0; i < totalPoints; i++) {
             try {
-                if (!startBackTestingPoint(chart.getPrices().get(i)[0],chart.getPrices().get(i)[1])) return null;
-              //  System.out.println(chart.getPrices().size()-i);
+                if (!startBackTestingPoint(chart.getPrices().get(i)[0], chart.getPrices().get(i)[1])) return null;
+                if (progressCallback != null && (i % 50 == 0 || i == totalPoints - 1)) {
+                    progressCallback.accept((int) (((i + 1) * 100.0) / totalPoints));
+                }
             } catch (NoSuchSymbolException | InsufficientAmountOfUsdtException e) {
                 throw new RuntimeException(e);
             }
-
         }
 
-      //  System.out.println(account.wallet().getAllAssets());
-     //   System.out.println(account.wallet().getBalance());
-
-      //  System.out.println("Last price: "+ chart.getPrices().get(chart.getPrices().size()-1)[1]);
-        if (account.wallet().getAllAssets().get(coin)!=0){
-           Double USDTinWallet =  account.wallet().getAllAssets().get(USDT)+(account.wallet().getAllAssets().get(coin)*chart.getPrices().get(chart.getPrices().size()-1)[1]); //конвертируем оставшиеся монеты в USDT по последней в графике цене
-            account.wallet().getAllAssets().replace(USDT, USDTinWallet);
+        if (account.wallet().getAllAssets().get(coin) != 0) {
+            Double usdtInWallet = account.wallet().getAllAssets().get(USDT) +
+                    (account.wallet().getAllAssets().get(coin) * chart.getPrices().get(chart.getPrices().size() - 1)[1]);
+            account.wallet().getAllAssets().replace(USDT, usdtInWallet);
             account.wallet().getAllAssets().replace(coin, 0d);
         }
-      //  System.out.println(account.wallet().getAllAssets());
-        backTestResult = new BackTestResult(buyGap, sellWithProfitGap, sellWithLossGap, (account.wallet().getAllAssets().get(USDT) - tradingSum),(account.wallet().getAllAssets().get(USDT) - tradingSum)/tradingSum*100);
-      //  ImageAndMessageSender.sendTelegramMessage(backTestResult.toString());
-      //  clearChart();
+
+        double profitUsd = account.wallet().getAllAssets().get(USDT) - tradingSum;
+        double percentageProfit = profitUsd / tradingSum * 100;
+        double profitAfterCommission = profitUsd - estimatedCommissionUsd;
+        backTestResult = new BackTestResult(
+                buyGap, sellWithProfitGap, sellWithLossGap,
+                profitUsd, percentageProfit,
+                estimatedCommissionUsd, profitAfterCommission,
+                totalTrades, profitableTrades, losingTrades
+        );
         return backTestResult;
     }
 
-    private void init (double pointTimestamp, double pointPrice){
-        reversalArrayList.add(new ReversalPointStrategyBackTester.Reversal(new double[]{pointTimestamp, pointPrice}, "initPoint"));
+    private void init(double pointTimestamp, double pointPrice) {
+        reversalArrayList.add(new Reversal(new double[]{pointTimestamp, pointPrice}, "initPoint"));
     }
-    private   boolean startBackTestingPoint(double pointTimestamp, double pointPrice) throws NoSuchSymbolException, InsufficientAmountOfUsdtException {
-        //   System.out.println("Trading "+ trading);
 
+    private boolean startBackTestingPoint(double pointTimestamp, double pointPrice) throws NoSuchSymbolException, InsufficientAmountOfUsdtException {
         this.pointPrice = pointPrice;
         prices.put(pointTimestamp, pointPrice);
-//        TradingChart.addSimplePoint(pointTimestamp, pointPrice);
-//        TradingChart.addSimplePriceMarker(pointTimestamp, pointPrice);
-        //gap=gap+(100 - (currentMinPrice[0] / currentMaxPrice[0] * 100));
+
         if (trading) {
-//                System.out.println(trading);
-            //  TradingChart.addSimplePriceMarker(pointTimestamp,pointPrice);
-            //   gap = "/n grow is: "+ (pointPrice-buyPrice)/buyPrice*100;
             if (((pointPrice - buyPrice) / buyPrice * 100) > sellWithProfitGap) {
-                    Double coinQuantityInWallet = account.wallet().getAllAssets().get(coin);
-                    Double UsdtQuantityInWallet = account.wallet().getAllAssets().get(USDT);
-                    UsdtQuantityInWallet+=coinQuantityInWallet*pointPrice;
-                    coinQuantityInWallet=0d;
-                    account.wallet().getAllAssets().replace(coin, coinQuantityInWallet);
-                    account.wallet().getAllAssets().replace(USDT,UsdtQuantityInWallet);
-
-//                TradingChart.addSellIntervalMarker(pointTimestamp, pointPrice);
-                isSold =true;
+                double coinQty = account.wallet().getAllAssets().get(coin);
+                double usdtQty = account.wallet().getAllAssets().get(USDT);
+                usdtQty += coinQty * pointPrice;
+                estimatedCommissionUsd += (coinQty * buyPrice + coinQty * pointPrice) * feeRate;
+                totalTrades++;
+                profitableTrades++;
+                account.wallet().getAllAssets().replace(coin, 0d);
+                account.wallet().getAllAssets().replace(USDT, usdtQty);
+                isSold = true;
                 chartScreenshotMessage = "SOLD WITH PROFIT";
-             //   System.out.println("PROFIT " + account.wallet().getBalance()+ " PRICE: " + pointPrice);
-
-//                TradingChart.clearChart();
-
                 trading = false;
-                isSold=false;
-//                sendPhotoToTelegram();
-//                ImageAndMessageSender.sendTelegramMessage(account.wallet().getAllAssets().toString());
-//                try {
-//                    TimeUnit.SECONDS.sleep(5);
-//                } catch (InterruptedException e) {
-//                    throw new RuntimeException(e);
-//                }
-
+                isSold = false;
                 return true;
             }
             if (((buyPrice - pointPrice) / buyPrice * 100) > sellWithLossGap) {
-
-
-                //account.trader().sell(coin,pointPrice,tradingSum/buyPrice);
-                    Double coinQuantityInWallet = account.wallet().getAllAssets().get(coin);
-                    Double UsdtQuantityInWallet = account.wallet().getAllAssets().get(USDT);
-                    UsdtQuantityInWallet+=coinQuantityInWallet*pointPrice;
-                    coinQuantityInWallet=0d;
-                    account.wallet().getAllAssets().replace(coin, coinQuantityInWallet);
-                    account.wallet().getAllAssets().replace(USDT,UsdtQuantityInWallet);
-
-//                TradingChart.addSellIntervalMarker(pointTimestamp, pointPrice);
-                isSold=true;
+                double coinQty = account.wallet().getAllAssets().get(coin);
+                double usdtQty = account.wallet().getAllAssets().get(USDT);
+                usdtQty += coinQty * pointPrice;
+                estimatedCommissionUsd += (coinQty * buyPrice + coinQty * pointPrice) * feeRate;
+                totalTrades++;
+                losingTrades++;
+                account.wallet().getAllAssets().replace(coin, 0d);
+                account.wallet().getAllAssets().replace(USDT, usdtQty);
+                isSold = true;
                 chartScreenshotMessage = "SOLD WITH LOSS";
-            //    System.out.println("LOSS " + account.wallet().getBalance()+ " PRICE: " + pointPrice);
-//                TradingChart.clearChart();
-
                 trading = false;
-                isSold=false;
-//                sendPhotoToTelegram();
-//                ImageAndMessageSender.sendTelegramMessage(account.wallet().getAllAssets().toString());
-//                try {
-//                    TimeUnit.SECONDS.sleep(5);
-//                } catch (InterruptedException e) {
-//                    throw new RuntimeException(e);
-//                }
+                isSold = false;
                 return true;
             }
         }
-        if (!prices.isEmpty() && !trading) {
 
-            ReversalPointStrategyBackTester.Reversal previousRec = reversalArrayList.get(reversalArrayList.toArray().length - 1);
-            //  System.out.println("finding reversals");
+        if (!prices.isEmpty() && !trading) {
+            Reversal previousRec = reversalArrayList.get(reversalArrayList.size() - 1);
             if (pointPrice > currentMaxPrice[0]) {
-                max=true;
+                max = true;
                 currentMaxPrice[0] = pointPrice;
                 currentMaxPriceTimestamp[0] = pointTimestamp;
-                // gap="+"+ (100 - (currentMinPrice[0] / currentMaxPrice[0] * 100));
                 if (100 - (currentMinPrice[0] / currentMaxPrice[0] * 100) > buyGap) {
                     if (!Objects.equals(previousRec.tag, "min")) {
-                        ReversalPointStrategyBackTester.Reversal r = new ReversalPointStrategyBackTester.Reversal(new double[]{currentMinPriceTimestamp[0], currentMinPrice[0]}, "min");
-                        reversalArrayList.add(r);
-
+                        reversalArrayList.add(new Reversal(new double[]{currentMinPriceTimestamp[0], currentMinPrice[0]}, "min"));
                     }
                     currentMinPrice[0] = pointPrice;
                 }
             }
             if (pointPrice < currentMinPrice[0]) {
-                max=false;
+                max = false;
                 currentMinPrice[0] = pointPrice;
                 currentMinPriceTimestamp[0] = pointTimestamp;
-                //gap="-"+(100-currentMinPrice[0] / currentMaxPrice[0] * 100);
                 if (100 - (currentMinPrice[0] / currentMaxPrice[0] * 100) > buyGap) {
                     if (!Objects.equals(previousRec.tag, "max")) {
-                        ReversalPointStrategyBackTester.Reversal r = new ReversalPointStrategyBackTester.Reversal(new double[]{currentMaxPriceTimestamp[0], currentMaxPrice[0]}, "max");
-                        reversalArrayList.add(r);
-                        if (!trading){
-                            //account.trader().buy(coin,pointPrice,tradingSum/pointPrice);
-                                Double coinQuantityInWallet = account.wallet().getAllAssets().get(coin);
-                                Double UsdtQuantityInWallet = account.wallet().getAllAssets().get(USDT);
-                                coinQuantityInWallet+=(account.wallet().getAmountOfCoin(USDT)*1)/pointPrice;
-                                UsdtQuantityInWallet=0d;
-                           // System.out.println("BOUGHT   USDT: "+ UsdtQuantityInWallet + "COIN: "+ coinQuantityInWallet);
-                                if (UsdtQuantityInWallet<0){
-//                                    chartScreenshotMessage=coin.getName() +  "\n" +
-//                                            "PercentageGap: " + percentageGap + "\n" +
-//                                            "Buy ratio: " + buyRatio + "\n" +
-//                                            "Sell ratio: " + sellRatio + "\n"+
-//                                            "Out of money. Current USDT Balance: "+ UsdtQuantityInWallet;
-//                                    System.out.println(chartScreenshotMessage);
-                      //              ImageAndMessageSender.sendTelegramMessage(chartScreenshotMessage);
-                                    return  false;
-                                }
-                                account.wallet().getAllAssets().replace(coin, coinQuantityInWallet);
-                                account.wallet().getAllAssets().replace(USDT,UsdtQuantityInWallet);
-//                                TradingChart.addBuyIntervalMarker(pointTimestamp, pointPrice);
-                                buyPrice = pointPrice;
-                                trading = true;
-                              //  ImageAndMessageSender.sendTelegramMessage(account.wallet().getAllAssets().toString());
+                        reversalArrayList.add(new Reversal(new double[]{currentMaxPriceTimestamp[0], currentMaxPrice[0]}, "max"));
+                        if (!trading) {
+                            double coinQty = account.wallet().getAllAssets().get(coin);
+                            double usdtQty = account.wallet().getAllAssets().get(USDT);
+                            coinQty += account.wallet().getAmountOfCoin(USDT) / pointPrice;
+                            usdtQty = 0d;
+                            if (usdtQty < 0) return false;
+                            account.wallet().getAllAssets().replace(coin, coinQty);
+                            account.wallet().getAllAssets().replace(USDT, usdtQty);
+                            buyPrice = pointPrice;
+                            trading = true;
                         }
                     }
                     currentMaxPrice[0] = pointPrice;
-
                 }
             }
         }
-
         return true;
     }
 
+    private static void clearChart() { TradingChart.clearChart(); }
 
-
-    private static void clearChart (){
-        TradingChart.clearChart();
-    }
-
-    public void sendPhotoToTelegram (){
-        String telegramPicturePath = "";
-        String currentPicturePath = telegramPicturePath + LocalDateTime.now();
+    public void sendPhotoToTelegram() {
+        String currentPicturePath = "" + LocalDateTime.now();
         TradingChart.makeScreenShot(currentPicturePath);
-        double growth;
-//         if(!trading&&max) {
-//
-//             chartScreenshotMessage =
-//                          "Finding entry point..." + "\n" +
-//                          "Current POINT: " + Prices.round(pointPrice) + "\n" +
-//                          "Current MIN: " + Prices.round(currentMinPrice[0]) + "\n" +
-//                          "+" + Prices.round(((pointPrice - currentMinPrice[0]) / currentMinPrice[0] * 100));
-//             Prices.round(((pointPrice - currentMinPrice[0]) / currentMinPrice[0] * 100));
-//             System.out.println(Prices.round(((pointPrice - currentMinPrice[0]) / currentMinPrice[0] * 100)));
-//
-//         }
-//        if(!trading) {
-//            chartScreenshotMessage =
-//                    "Looking for entry point..." + "\n" +
-//                            "Current POINT: " + Prices.round(pointPrice) + "\n" +
-//                            "Current MAX: " + Prices.round(currentMaxPrice[0]) + "\n" +
-//                            "Percentage gap: " + percentageGap + "\n" +
-//                            "Drop from MAX: " + Prices.round(((pointPrice - currentMaxPrice[0]) / currentMaxPrice[0] * 100));
-//        }
-//        if (trading&&!isSold) {
-//            chartScreenshotMessage =
-//                    "TRADING" + "\n" +
-//                            "Current POINT: " + Prices.round(pointPrice) + "\n" +
-//                            "Price to BUY: " + Prices.round(buyPrice + (buyPrice/100*percentageGap)) + "\n" +
-//                            "Price to SELL: " + Prices.round(buyPrice - (buyPrice/100*percentageGap/3)) + "\n" +
-//                            "grow is: " + Prices.round(((pointPrice - buyPrice) / buyPrice * 100));
-//        }
-//        if (trading&&isSold) {
-//            chartScreenshotMessage += "\n"+
-//                    "Bought for: " + Prices.round(buyPrice) + "\n" +
-//                    "Sold for: " + Prices.round(pointPrice) + "\n" +
-//                    "grow is: " + Prices.round((pointPrice - buyPrice) / buyPrice * 100);
-//        }
         ImageAndMessageSender.sendPhoto(currentPicturePath, chartScreenshotMessage);
         try {
             Files.delete(Path.of(currentPicturePath));
         } catch (IOException e) {
-            System.err.println("Error deleting file created for sending to Telegram: " + currentPicturePath);
             throw new RuntimeException(e);
         }
-
     }
 }
-
-
