@@ -243,6 +243,7 @@
     <button class="tab" onclick="showPage('trade')" id="tab-trade">⚡ ТОРГОВЛЯ</button>
     <button class="tab" onclick="showPage('research')" id="tab-research">🔬 ИССЛ.</button>
     <button class="tab" onclick="showPage('backtest')" id="tab-backtest">🧪 БЭКТЕСТ</button>
+    <button class="tab" onclick="showPage('optimize')" id="tab-optimize">🏆 ТОП-10</button>
     <button class="tab" onclick="showPage('sessions')" id="tab-sessions">🎮 СЕССИИ</button>
     <button class="tab" onclick="showPage('profile')" id="tab-profile">👤 КАБИНЕТ</button>
   </div>
@@ -440,6 +441,7 @@
             <label class="input-label">ПЕРИОД ДАННЫХ</label>
             <select id="btChartType" oninput="saveField('btChartType')">
               <option value="1d">1 день (5-мин интервалы)</option>
+              <option value="monthly">1 месяц (часовые интервалы)</option>
               <option value="yearly" selected>Год (часовые интервалы)</option>
             </select>
           </div>
@@ -459,17 +461,116 @@
             <label class="input-label">КОЭ. ПРОДАЖИ - (%)</label>
             <input type="number" id="btSellLoss" value="8.0" min="0.1" step="0.1" oninput="saveField('btSellLoss')">
           </div>
+          <div class="input-wrap form-full">
+            <label class="input-label">БИРЖА / КОМИССИЯ</label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <select id="btExchange" oninput="updateBtCommission();saveField('btExchange')" style="flex:1">
+                <option value="Binance">Binance</option>
+              </select>
+              <span style="font-size:11px;color:var(--muted);white-space:nowrap">Комиссия:</span>
+              <span id="btCommissionDisplay" style="font-family:var(--font-head);font-size:12px;color:#ffea00;white-space:nowrap">0.1% / сделку</span>
+            </div>
+          </div>
         </div>
       </div>
       <div id="btAlert" style="display:none"></div>
-      <button class="btn btn-primary" id="btStartBtn" onclick="startBacktest()">🧪 ЗАПУСТИТЬ БЭКТЕСТ</button>
+      <!-- Progress bar -->
+      <div id="btProgressWrap" style="display:none" class="card">
+        <div style="font-family:var(--font-head);font-size:10px;color:var(--accent);margin-bottom:8px;">⏳ ВЫПОЛНЯЕТСЯ БЭКТЕСТ</div>
+        <div style="background:var(--bg3);border-radius:4px;overflow:hidden;height:8px;margin-bottom:6px">
+          <div id="btProgressBar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--accent2),var(--accent));transition:width 0.3s"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted)">
+          <span id="btProgressText">0 / 0 тиков</span>
+          <span id="btProgressPct">0%</span>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btStartBtn" onclick="startBacktest()">🧪 ЗАПУСТИТЬ БЭКТЕСТ</button>
+      </div>
       <div id="btResultCard" style="display:none" class="card">
         <div class="card-title">🏆 РЕЗУЛЬТАТ</div>
         <div class="backtest-result">
           <div id="btProfitDisplay" class="backtest-profit"></div>
           <div class="stats-row" id="btStatsGrid" style="margin-top:12px;"></div>
           <div style="margin-top:12px;"><div id="btParamsDisplay" style="font-size:11px;color:var(--muted);line-height:1.8;"></div></div>
+          <div style="margin-top:10px;">
+            <button class="btn btn-secondary" id="btShowChartBtn" onclick="showBacktestChart()" style="display:none">📈 ПОКАЗАТЬ ГРАФИК</button>
+          </div>
         </div>
+      </div>
+      <!-- Backtest chart -->
+      <div id="btChartCard" style="display:none" class="card">
+        <div class="card-title">📈 ГРАФИК БЭКТЕСТА
+          <button class="btn btn-secondary btn-sm" onclick="document.getElementById('btChartCard').style.display='none'" style="margin-left:auto">✕</button>
+        </div>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:8px">
+          <span style="color:#1565C0">●</span> Покупка &nbsp;
+          <span style="color:#00e676">●</span> Продажа в прибыль &nbsp;
+          <span style="color:#ff1744">●</span> Продажа в убыток
+        </div>
+        <div id="btChartContainer" style="width:100%;height:280px;background:var(--bg3);border-radius:var(--radius-sm)"></div>
+      </div>
+    </div>
+
+    <!-- OPTIMIZE / TOP-10 -->
+    <div class="page" id="page-optimize">
+      <div class="card">
+        <div class="card-title">🏆 ТОП-10 ЛУЧШИХ СТРАТЕГИЙ</div>
+        <div class="research-hint" style="margin-bottom:12px;">Перебирает комбинации параметров и находит 10 наиболее прибыльных стратегий с учётом комиссии.</div>
+        <div class="form-grid">
+          <div class="input-wrap form-full">
+            <label class="input-label">МОНЕТА</label>
+            <div class="coin-search-wrap">
+              <input type="text" id="optCoinInput" placeholder="Например: Bitcoin" autocomplete="off"
+                     oninput="handleOptSearch(this.value);saveField('optCoinInput')" onfocus="handleOptSearch(this.value)" onblur="scheduleHide('optSuggestions')">
+              <div class="coin-suggestions" id="optSuggestions"></div>
+            </div>
+          </div>
+          <div class="input-wrap form-full">
+            <label class="input-label">ПЕРИОД ДАННЫХ</label>
+            <select id="optChartType" oninput="saveField('optChartType')">
+              <option value="1d">1 день (5-мин интервалы)</option>
+              <option value="monthly">1 месяц (часовые интервалы)</option>
+              <option value="yearly" selected>Год (часовые интервалы)</option>
+            </select>
+          </div>
+          <div class="input-wrap">
+            <label class="input-label">СУММА (USDT)</label>
+            <input type="number" id="optTradingSum" value="100" min="10" step="10" oninput="saveField('optTradingSum')">
+          </div>
+          <div class="input-wrap">
+            <label class="input-label">КОЛИЧЕСТВО ТОП</label>
+            <input type="number" id="optTopN" value="10" min="1" max="20">
+          </div>
+          <div class="input-wrap form-full">
+            <label class="input-label">БИРЖА / КОМИССИЯ</label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <select id="optExchange" oninput="updateOptCommission()" style="flex:1">
+                <option value="Binance">Binance</option>
+              </select>
+              <span style="font-size:11px;color:var(--muted);white-space:nowrap">Комиссия:</span>
+              <span id="optCommissionDisplay" style="font-family:var(--font-head);font-size:12px;color:#ffea00;white-space:nowrap">0.1% / сделку</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="optAlert" style="display:none"></div>
+      <!-- Progress bar -->
+      <div id="optProgressWrap" style="display:none" class="card">
+        <div style="font-family:var(--font-head);font-size:10px;color:var(--accent);margin-bottom:8px;">⏳ ПЕРЕБОР СТРАТЕГИЙ</div>
+        <div style="background:var(--bg3);border-radius:4px;overflow:hidden;height:8px;margin-bottom:6px">
+          <div id="optProgressBar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--accent2),var(--accent));transition:width 0.3s"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted)">
+          <span id="optProgressText">0 / 0</span>
+          <span id="optProgressPct">0%</span>
+        </div>
+      </div>
+      <button class="btn btn-primary" id="optStartBtn" onclick="startOptimize()">🔍 НАЙТИ ЛУЧШИЕ СТРАТЕГИИ</button>
+      <div id="optResultCard" style="display:none" class="card">
+        <div class="card-title">🏆 РЕЗУЛЬТАТЫ</div>
+        <div id="optResultList"></div>
       </div>
     </div>
 
@@ -666,7 +767,7 @@ async function checkHealth() {
 // ============================================================
 // NAVIGATION
 // ============================================================
-const AUTH_REQUIRED_PAGES = new Set(['trade', 'research', 'backtest', 'sessions']);
+const AUTH_REQUIRED_PAGES = new Set(['trade', 'research', 'backtest', 'sessions', 'optimize']);
 
 function showPage(pageId) {
   // Auth gate — protected pages require login
@@ -677,7 +778,7 @@ function showPage(pageId) {
     document.getElementById('page-' + pageId)?.classList.add('active');
     document.getElementById('tab-' + pageId)?.classList.add('active');
     const lockTarget = {
-      trade: 'page-trade', research: 'page-research', backtest: 'page-backtest', sessions: 'sessionsList'
+      trade: 'page-trade', research: 'page-research', backtest: 'page-backtest', sessions: 'sessionsList', optimize: 'page-optimize'
     }[pageId] || 'page-' + pageId;
     showAuthRequired(lockTarget, 'Войдите через Telegram, чтобы торговать и видеть сессии.');
     return;
@@ -693,6 +794,7 @@ function showPage(pageId) {
   else stopSessionsRefresh();
   if (pageId === 'trade' || pageId === 'research') checkActiveSessionBanner();
   if (pageId === 'profile') initProfilePage();
+  if (pageId === 'optimize') { updateOptCommission(); }
 }
 
 // ============================================================
@@ -823,6 +925,17 @@ async function handleBtSearch(val) {
     makeSuggestions(coins, 'btSuggestions', 'btCoinInput', c => {
       document.getElementById('btCoinInput').value = c.name;
       saveField('btCoinInput');
+    });
+  }, val);
+}
+
+async function handleOptSearch(val) {
+  if (val.length < 2) { document.getElementById('optSuggestions')?.classList.remove('show'); return; }
+  debounceSearch(async v => {
+    const coins = await fetchCoins(v);
+    makeSuggestions(coins, 'optSuggestions', 'optCoinInput', c => {
+      document.getElementById('optCoinInput').value = c.name;
+      saveField('optCoinInput');
     });
   }, val);
 }
@@ -995,66 +1108,308 @@ async function startResearch() {
 // ============================================================
 // BACKTEST
 // ============================================================
+const EXCHANGE_COMMISSIONS = { 'Binance': 0.1 };
+function updateBtCommission() {
+  const ex = document.getElementById('btExchange')?.value || 'Binance';
+  const rate = EXCHANGE_COMMISSIONS[ex] || 0.1;
+  const el = document.getElementById('btCommissionDisplay');
+  if (el) el.textContent = rate + '% / сделку';
+}
+function updateOptCommission() {
+  const ex = document.getElementById('optExchange')?.value || 'Binance';
+  const rate = EXCHANGE_COMMISSIONS[ex] || 0.1;
+  const el = document.getElementById('optCommissionDisplay');
+  if (el) el.textContent = rate + '% / сделку';
+}
+
+let _btSessionId = null;
+let _btLastResult = null;
+
 async function startBacktest() {
   const coin = document.getElementById('btCoinInput').value.trim();
   if (!coin) { showAlert('btAlert','error','⚠️ Введите название монеты!'); return; }
   const btn = document.getElementById('btStartBtn');
   btn.disabled=true; btn.innerHTML='<div class="spinner"></div> Загрузка...';
   document.getElementById('btResultCard').style.display='none';
+  document.getElementById('btChartCard').style.display='none';
   document.getElementById('btAlert').style.display='none';
+  document.getElementById('btProgressWrap').style.display='block';
+  document.getElementById('btProgressBar').style.width='0%';
+  document.getElementById('btProgressText').textContent='0 / 0 тиков';
+  document.getElementById('btProgressPct').textContent='0%';
+  const exchange = document.getElementById('btExchange')?.value || 'Binance';
+  const commissionRate = EXCHANGE_COMMISSIONS[exchange] || 0.1;
   const body = {
     coin, tradingSum: +document.getElementById('btTradingSum').value||100,
     buyGap: +document.getElementById('btBuyGap').value||3.5,
     sellWithProfitGap: +document.getElementById('btSellProfit').value||2.0,
     sellWithLossGap: +document.getElementById('btSellLoss').value||8.0,
     chartType: document.getElementById('btChartType').value,
+    exchangeName: exchange, commissionRate,
   };
   try {
     const r = await fetch(`${API_BASE}/api/backtest/start`,{method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
     const sessionData = await r.json();
     if (sessionData.error) throw new Error(sessionData.error);
+    _btSessionId = sessionData.id;
     showAlert('btAlert','info','⏳ Бэктест запущен...');
     btn.innerHTML='<div class="spinner"></div> Выполняется...';
-    let attempts=0;
+    // Poll for status — unlimited attempts, check progress
     const pollId = setInterval(async ()=>{
-      attempts++;
-      if (attempts>60) { clearInterval(pollId); showAlert('btAlert','warn','⏰ Таймаут'); btn.disabled=false; btn.innerHTML='🧪 ЗАПУСТИТЬ БЭКТЕСТ'; return; }
-      const sr = await fetch(`${API_BASE}/api/trading/sessions`, {headers:authHeaders()}).catch(()=>null);
-      if (!sr?.ok) return;
-      const sessions = await sr.json();
-      const sess = sessions.find(s=>s.id===sessionData.id);
-      if (!sess) return;
-      if (sess.status==='DONE') {
-        clearInterval(pollId);
-        const rr = await fetch(`${API_BASE}/api/backtest/result`, {headers:authHeaders()});
-        showBacktestResult(await rr.json());
-        btn.disabled=false; btn.innerHTML='🧪 ЗАПУСТИТЬ БЭКТЕСТ';
-        document.getElementById('btAlert').style.display='none';
-      } else if (sess.status==='ERROR') {
-        clearInterval(pollId);
-        showAlert('btAlert','error','❌ '+sess.lastMessage);
-        btn.disabled=false; btn.innerHTML='🧪 ЗАПУСТИТЬ БЭКТЕСТ';
-      }
-    },2000);
-  } catch(e) { showAlert('btAlert','error','❌ '+e.message); btn.disabled=false; btn.innerHTML='🧪 ЗАПУСТИТЬ БЭКТЕСТ'; }
+      try {
+        const sr = await fetch(`${API_BASE}/api/trading/sessions/${sessionData.id}`, {headers:authHeaders()}).catch(()=>null);
+        if (!sr?.ok) return;
+        const sess = await sr.json();
+        // Update progress bar
+        const cur = sess.backtestProgressCurrent || 0;
+        const tot = sess.backtestProgressTotal || 0;
+        const pct = tot > 0 ? Math.round(cur / tot * 100) : 0;
+        document.getElementById('btProgressBar').style.width = pct + '%';
+        document.getElementById('btProgressText').textContent = cur + ' / ' + tot + ' тиков';
+        document.getElementById('btProgressPct').textContent = pct + '%';
+        if (sess.status==='DONE') {
+          clearInterval(pollId);
+          document.getElementById('btProgressWrap').style.display='none';
+          const rr = await fetch(`${API_BASE}/api/backtest/result`, {headers:authHeaders()});
+          const result = await rr.json();
+          _btLastResult = result;
+          showBacktestResult(result);
+          btn.disabled=false; btn.innerHTML='🧪 ЗАПУСТИТЬ БЭКТЕСТ';
+          document.getElementById('btAlert').style.display='none';
+        } else if (sess.status==='ERROR') {
+          clearInterval(pollId);
+          document.getElementById('btProgressWrap').style.display='none';
+          showAlert('btAlert','error','❌ '+sess.lastMessage);
+          btn.disabled=false; btn.innerHTML='🧪 ЗАПУСТИТЬ БЭКТЕСТ';
+        }
+      } catch(e) { /* ignore poll error */ }
+    }, 1500);
+  } catch(e) {
+    document.getElementById('btProgressWrap').style.display='none';
+    showAlert('btAlert','error','❌ '+e.message);
+    btn.disabled=false; btn.innerHTML='🧪 ЗАПУСТИТЬ БЭКТЕСТ';
+  }
 }
 
 function showBacktestResult(result) {
   if (!result||result.ready===false) return;
   document.getElementById('btResultCard').style.display='block';
-  const profit=result.profitUsd||0, pct=result.profitPercent||0, pos=profit>=0;
-  document.getElementById('btProfitDisplay').innerHTML=`<span style="color:${pos?'var(--green)':'var(--red)'}">${pos?'+':''}${profit.toFixed(2)} USD</span>`;
-  document.getElementById('btStatsGrid').innerHTML=`
+  const profit = result.profitUsd || 0;
+  const profitAfterComm = result.profitUsdAfterCommission != null ? result.profitUsdAfterCommission : profit;
+  const pct = result.profitPercent || 0;
+  const pctAfterComm = result.profitPercentAfterCommission != null ? result.profitPercentAfterCommission : pct;
+  const commission = result.totalCommission || 0;
+  const pos = profit >= 0;
+  const posAfter = profitAfterComm >= 0;
+  const profTrades = result.profitTradeCount || 0;
+  const lossTrades = result.lossTradeCount || 0;
+  const totalTrades = profTrades + lossTrades;
+  const profitSum = result.totalProfit || 0;
+  const lossSum = Math.abs(result.totalLoss || 0);
+  const chartType = result.chartType || '';
+  const periodLabel = chartType === 'yearly' ? '1 год' : chartType === 'monthly' ? '1 месяц' : '1 день';
+
+  document.getElementById('btProfitDisplay').innerHTML = `
+    <div style="font-family:var(--font-head);font-size:22px;font-weight:900;text-align:center;color:${pos?'var(--green)':'var(--red)'}">
+      ${pos?'+':''}${profit.toFixed(2)} USD
+    </div>
+    ${commission > 0 ? `<div style="font-size:13px;text-align:center;color:${posAfter?'var(--green)':'var(--red)'};margin-top:4px">
+      С учётом комиссии: ${posAfter?'+':''}${profitAfterComm.toFixed(2)} USD
+    </div>` : ''}`;
+
+  document.getElementById('btStatsGrid').innerHTML = `
     <div class="stat-box"><div class="stat-val ${pos?'pos':'neg'}">${pos?'+':''}${pct.toFixed(2)}%</div><div class="stat-label">ДОХОДНОСТЬ</div></div>
     <div class="stat-box"><div class="stat-val">${result.tradingSum||'—'}</div><div class="stat-label">СУММА USDT</div></div>
     <div class="stat-box"><div class="stat-val" style="color:var(--accent)">${result.coinName||'—'}</div><div class="stat-label">МОНЕТА</div></div>
+    <div class="stat-box"><div class="stat-val" style="color:var(--green)">+${profTrades}</div><div class="stat-label">СДЕЛОК +</div></div>
+    <div class="stat-box"><div class="stat-val" style="color:var(--red)">-${lossTrades}</div><div class="stat-label">СДЕЛОК -</div></div>
+    <div class="stat-box"><div class="stat-val">${totalTrades}</div><div class="stat-label">ВСЕГО СДЕЛОК</div></div>
+    ${commission > 0 ? `<div class="stat-box" style="grid-column:1/-1"><div class="stat-val" style="color:#ffea00">$${commission.toFixed(4)}</div><div class="stat-label">КОМИССИЯ БИРЖИ (РАСЧЁТНАЯ)</div></div>` : ''}
   `;
-  document.getElementById('btParamsDisplay').innerHTML=`
+
+  document.getElementById('btParamsDisplay').innerHTML = `
     📥 Коэф. покупки: <b>${result.buyGap||'—'}%</b><br>
     📈 Коэф. продажи+: <b>${result.sellWithProfitGap||'—'}%</b><br>
     📉 Коэф. продажи-: <b>${result.sellWithLossGap||'—'}%</b><br>
-    📅 Период: <b>${result.chartType==='yearly'?'1 год':'1 день'}</b>
+    📅 Период: <b>${periodLabel}</b><br>
+    ${profTrades > 0 ? `💚 Прибыль (сделки+): <b>$${profitSum.toFixed(2)}</b><br>` : ''}
+    ${lossTrades > 0 ? `❤️ Убыток (сделки-): <b>$${lossSum.toFixed(2)}</b><br>` : ''}
+    ${commission > 0 && pctAfterComm !== pct ? `📊 Доходность с комиссией: <b style="color:${posAfter?'var(--green)':'var(--red)'}">${posAfter?'+':''}${pctAfterComm.toFixed(2)}%</b>` : ''}
   `;
+
+  // Show "Show Chart" button only if we have trade events
+  const hasTrades = result.tradeEvents && result.tradeEvents.length > 0;
+  const btShowChartBtn = document.getElementById('btShowChartBtn');
+  if (btShowChartBtn) btShowChartBtn.style.display = hasTrades ? '' : 'none';
+}
+
+let _btChartInstance = null;
+function showBacktestChart() {
+  const result = _btLastResult;
+  if (!result || !result.tradeEvents || !result.tradeEvents.length) {
+    showToast('Нет данных для графика'); return;
+  }
+  const card = document.getElementById('btChartCard');
+  card.style.display = 'block';
+  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  const container = document.getElementById('btChartContainer');
+  // Destroy previous chart
+  if (_btChartInstance) { try { _btChartInstance.remove(); } catch(e){} _btChartInstance = null; }
+  container.innerHTML = '';
+
+  const w = container.getBoundingClientRect().width || (window.innerWidth - 32);
+  _btChartInstance = LightweightCharts.createChart(container, {
+    width: w, height: 280,
+    layout: { background: { type: 'solid', color: '#0a0e1a' }, textColor: '#6878a8' },
+    grid: { vertLines: { color: 'rgba(42,53,96,0.2)' }, horzLines: { color: 'rgba(42,53,96,0.2)' } },
+    timeScale: { timeVisible: true, secondsVisible: false },
+    rightPriceScale: { borderColor: '#2a3560' },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+  });
+
+  // Price line series
+  const priceSeries = _btChartInstance.addLineSeries({ color: '#00e5ff', lineWidth: 1, priceLineVisible: false });
+  // Markers
+  const events = result.tradeEvents; // each: {timestamp, price, type} or [ts, price, type]
+  const priceData = [];
+  const markers = [];
+
+  for (const ev of events) {
+    const ts = Array.isArray(ev) ? ev[0] : ev.timestamp;
+    const price = Array.isArray(ev) ? ev[1] : ev.price;
+    const type = Array.isArray(ev) ? ev[2] : (ev.eventType != null ? ev.eventType : ev.type); // 0=buy, 1=sell+, 2=sell-
+    const timeSec = Math.floor(ts / 1000);
+    priceData.push({ time: timeSec, value: price });
+    let color, shape, text;
+    if (type === 0) { color = '#1565C0'; shape = 'arrowUp'; text = 'B'; }
+    else if (type === 1) { color = '#00e676'; shape = 'arrowDown'; text = 'S+'; }
+    else { color = '#ff1744'; shape = 'arrowDown'; text = 'S-'; }
+    markers.push({ time: timeSec, position: type === 0 ? 'belowBar' : 'aboveBar', color, shape, text });
+  }
+
+  // Sort by time
+  priceData.sort((a, b) => a.time - b.time);
+  markers.sort((a, b) => a.time - b.time);
+
+  priceSeries.setData(priceData);
+  priceSeries.setMarkers(markers);
+  _btChartInstance.timeScale().fitContent();
+}
+
+// ============================================================
+// OPTIMIZE (TOP-10 STRATEGIES)
+// ============================================================
+let _optPollTimer = null;
+
+async function startOptimize() {
+  const coin = document.getElementById('optCoinInput').value.trim();
+  if (!coin) { showAlert('optAlert','error','⚠️ Введите название монеты!'); return; }
+  const btn = document.getElementById('optStartBtn');
+  btn.disabled = true; btn.innerHTML = '<div class="spinner"></div> Поиск...';
+  document.getElementById('optResultCard').style.display = 'none';
+  document.getElementById('optAlert').style.display = 'none';
+  document.getElementById('optProgressWrap').style.display = 'block';
+  document.getElementById('optProgressBar').style.width = '0%';
+  document.getElementById('optProgressText').textContent = '0 / 0';
+  document.getElementById('optProgressPct').textContent = '0%';
+
+  const exchange = document.getElementById('optExchange')?.value || 'Binance';
+  const commissionRate = EXCHANGE_COMMISSIONS[exchange] || 0.1;
+  const body = {
+    coin,
+    tradingSum: +document.getElementById('optTradingSum').value || 100,
+    topN: +document.getElementById('optTopN').value || 10,
+    chartType: document.getElementById('optChartType').value || 'yearly',
+    exchangeName: exchange,
+    commissionRate,
+  };
+
+  if (_optPollTimer) { clearInterval(_optPollTimer); _optPollTimer = null; }
+
+  try {
+    const r = await fetch(`${API_BASE}/api/backtest/optimize`, {
+      method: 'POST', headers: authHeaders(), body: JSON.stringify(body)
+    });
+    const sessionData = await r.json();
+    if (sessionData.error) throw new Error(sessionData.error);
+    const sessionId = sessionData.id;
+    showAlert('optAlert','info','⏳ Перебор стратегий запущен...');
+
+    _optPollTimer = setInterval(async () => {
+      try {
+        const sr = await fetch(`${API_BASE}/api/trading/sessions/${sessionId}`, { headers: authHeaders() }).catch(()=>null);
+        if (!sr?.ok) return;
+        const sess = await sr.json();
+        // Update progress
+        const cur = sess.backtestProgressCurrent || 0;
+        const tot = sess.backtestProgressTotal || 0;
+        const pct = tot > 0 ? Math.round(cur / tot * 100) : 0;
+        document.getElementById('optProgressBar').style.width = pct + '%';
+        document.getElementById('optProgressText').textContent = cur + ' / ' + tot;
+        document.getElementById('optProgressPct').textContent = pct + '%';
+
+        if (sess.status === 'DONE') {
+          clearInterval(_optPollTimer); _optPollTimer = null;
+          document.getElementById('optProgressWrap').style.display = 'none';
+          // Fetch optimize result (stored in lastBacktestResult as {topStrategies:[...]})
+          const rr = await fetch(`${API_BASE}/api/backtest/result`, { headers: authHeaders() });
+          const optResult = await rr.json();
+          showOptimizeResult(optResult.topStrategies || []);
+          btn.disabled = false; btn.innerHTML = '🔍 НАЙТИ ЛУЧШИЕ СТРАТЕГИИ';
+          document.getElementById('optAlert').style.display = 'none';
+        } else if (sess.status === 'ERROR') {
+          clearInterval(_optPollTimer); _optPollTimer = null;
+          document.getElementById('optProgressWrap').style.display = 'none';
+          showAlert('optAlert','error','❌ ' + (sess.lastMessage || 'Ошибка'));
+          btn.disabled = false; btn.innerHTML = '🔍 НАЙТИ ЛУЧШИЕ СТРАТЕГИИ';
+        }
+      } catch(e) { /* ignore poll error */ }
+    }, 1500);
+  } catch(e) {
+    document.getElementById('optProgressWrap').style.display = 'none';
+    showAlert('optAlert','error','❌ ' + e.message);
+    btn.disabled = false; btn.innerHTML = '🔍 НАЙТИ ЛУЧШИЕ СТРАТЕГИИ';
+  }
+}
+
+function showOptimizeResult(results) {
+  const card = document.getElementById('optResultCard');
+  const list = document.getElementById('optResultList');
+  if (!Array.isArray(results) || !results.length) {
+    list.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:8px 0">Нет результатов</div>';
+    card.style.display = 'block';
+    return;
+  }
+  let html = '';
+  results.forEach((r, i) => {
+    const profit = r.profitUsd || 0;
+    const profitAfter = r.profitUsdAfterCommission != null ? r.profitUsdAfterCommission : profit;
+    const pct = r.profitPercent || 0;
+    const pctAfter = r.profitPercentAfterCommission != null ? r.profitPercentAfterCommission : pct;
+    const commission = r.totalCommission || 0;
+    const pos = profitAfter >= 0;
+    const profTrades = r.profitTradeCount || 0;
+    const lossTrades = r.lossTradeCount || 0;
+    html += `<div style="background:var(--bg3);border-radius:var(--radius-sm);padding:10px 12px;border:1px solid var(--border);margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <span style="font-family:var(--font-head);font-size:13px;color:${pos?'var(--green)':'var(--red)'};min-width:28px">#${i+1}</span>
+        <span style="font-family:var(--font-head);font-size:15px;font-weight:700;color:${pos?'var(--green)':'var(--red)'}">${pos?'+':''}${profitAfter.toFixed(2)} USD</span>
+        <span style="font-size:11px;color:var(--muted);margin-left:auto">${pos?'+':''}${pctAfter.toFixed(2)}%</span>
+      </div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.7">
+        📥 Покупка: <b style="color:var(--text)">${r.buyGap}%</b> &nbsp;
+        📈 Продажа+: <b style="color:var(--green)">${r.sellWithProfitGap}%</b> &nbsp;
+        📉 Продажа−: <b style="color:var(--red)">${r.sellWithLossGap}%</b><br>
+        <span style="color:var(--green)">+${profTrades} сделок</span> &nbsp;
+        <span style="color:var(--red)">-${lossTrades} сделок</span>
+        ${commission > 0 ? `&nbsp; 💸 <span style="color:#ffea00">комиссия: $${commission.toFixed(4)}</span>` : ''}
+      </div>
+    </div>`;
+  });
+  list.innerHTML = html;
+  card.style.display = 'block';
+  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // ============================================================
@@ -1170,10 +1525,12 @@ function patchSessionCard(s, prev) {
 
 // Price line colors — must match chart line colors
 const PC = {
-  max:    '#7c4dff',   // purple  — Макс. волна
-  buy:    '#00e676',   // green   — Цена покупки / Продажа+
-  cur:    '#00e5ff',   // cyan    — Текущая цена
-  sold:   '#ff1744',   // red     — Продажа−
+  max:      '#7c4dff',   // purple  — Макс. волна
+  buy:      '#1565C0',   // blue    — Покупка (синий)
+  buyLine:  '#00e676',   // green   — Цена покупки (линия)/Продажа+
+  cur:      '#00e5ff',   // cyan    — Текущая цена
+  sellProfit: '#00e676', // green   — Продажа в прибыль
+  sold:     '#ff1744',   // red     — Продажа в убыток
 };
 
 function buildTargetPricesHtml(s) {
@@ -1195,10 +1552,21 @@ function buildTargetPricesHtml(s) {
     const leftToBuyStr = leftToBuy !== null
       ? `<span style="font-size:9px;color:${parseFloat(leftToBuy)<=0?PC.buy:'#ffea00'}">${parseFloat(leftToBuy)<=0?'🎯 сигнал!':'осталось '+leftToBuy+'%'}</span>`
       : '<span></span>';
+    // Trade stats for non-trading state
+    const profitTradesNT = s.profitTradeCount || 0;
+    const lossTradesNT = s.lossTradeCount || 0;
+    const profitSumNT = s.profitSum || 0;
+    const lossSumNT = s.lossSum || 0;
+    const isTesterNT = s.type === 'TESTER' || s.type === 'BACKTEST';
+    const commissionNT = s.estimatedCommission || 0;
+    const tradeStatsNT = (profitTradesNT > 0 || lossTradesNT > 0) ? `
+      <span class="tp-label">📊 Сделки:</span><span class="tp-val"><span style="color:${PC.sellProfit}">+${profitTradesNT}($${profitSumNT.toFixed(2)})</span> <span style="color:${PC.sold}">-${lossTradesNT}($${Math.abs(lossSumNT).toFixed(2)})</span></span><span class="tp-rem"></span><span></span>
+      ${isTesterNT ? `<span class="tp-label">💸 Комиссия:</span><span class="tp-val" style="color:#ffea00">$${commissionNT.toFixed(4)}</span><span class="tp-rem" style="font-size:9px;color:var(--muted)">(Binance est.)</span><span></span>` : ''}` : '';
     return `<div class="target-prices">
       <span class="tp-label">🔭 Макс. волна:</span><span class="tp-val" style="color:${PC.max}">${s.maxPrice ? '$' + formatPrice(s.maxPrice) : '—'}</span><span class="tp-rem"></span><span></span>
       <span class="tp-label">💹 Текущая:</span>${curStr}<span class="tp-rem">${dropStr}</span><span></span>
       <span class="tp-label">🎯 Цена покупки:</span><span class="tp-val" style="color:${PC.buy}">${s.buyTargetPrice ? '$' + formatPrice(s.buyTargetPrice) : '—'}</span><span class="tp-rem">${leftToBuyStr}</span><span></span>
+      ${tradeStatsNT}
     </div>`;
   } else {
     // Calculate remaining % to profit/loss targets from current price
@@ -1219,11 +1587,23 @@ function buildTargetPricesHtml(s) {
     const changeCol = changePct !== null
       ? `<span style="font-size:9px;color:${parseFloat(changePct)>=0?PC.buy:PC.sold}">${parseFloat(changePct)>=0?'+':''}${changePct}%</span>`
       : '<span></span>';
+    // Trade stats row
+    const profitTrades = s.profitTradeCount || 0;
+    const lossTrades = s.lossTradeCount || 0;
+    const profitSumVal = s.profitSum || 0;
+    const lossSumVal = s.lossSum || 0;
+    const isTester = s.type === 'TESTER' || s.type === 'BACKTEST';
+    const commissionVal = s.estimatedCommission || 0;
+    const netPnl = profitSumVal + lossSumVal - (isTester ? commissionVal : 0);
+    const tradeStatsRow = (profitTrades > 0 || lossTrades > 0) ? `
+      <span class="tp-label">📊 Сделки:</span><span class="tp-val"><span style="color:${PC.sellProfit}">+${profitTrades}($${profitSumVal.toFixed(2)})</span> <span style="color:${PC.sold}">-${lossTrades}($${Math.abs(lossSumVal).toFixed(2)})</span></span><span class="tp-rem"></span><span></span>
+      ${isTester ? `<span class="tp-label">💸 Комиссия:</span><span class="tp-val" style="color:#ffea00">$${commissionVal.toFixed(4)}</span><span class="tp-rem" style="font-size:9px;color:var(--muted)">(Binance est.)</span><span></span>` : ''}` : '';
     return `<div class="target-prices">
-      <span class="tp-label">💰 Куплено за:</span><span class="tp-val" style="color:var(--muted)">${s.boughtAtPrice ? '$' + formatPrice(s.boughtAtPrice) : '—'}</span><span class="tp-rem"></span><span></span>
+      <span class="tp-label">💰 Куплено за:</span><span class="tp-val" style="color:${PC.buy}">${s.boughtAtPrice ? '$' + formatPrice(s.boughtAtPrice) : '—'}</span><span class="tp-rem"></span><span></span>
       <span class="tp-label">💹 Текущая:</span>${curStr}<span class="tp-rem">${changeCol}</span><span></span>
-      <span class="tp-label">📈 Продажа+:</span><span class="tp-val" style="color:${PC.buy}">${s.sellProfitPrice ? '$' + formatPrice(s.sellProfitPrice) : '—'}</span><span class="tp-rem">${remProfitCol}</span><span></span>
+      <span class="tp-label">📈 Продажа+:</span><span class="tp-val" style="color:${PC.sellProfit}">${s.sellProfitPrice ? '$' + formatPrice(s.sellProfitPrice) : '—'}</span><span class="tp-rem">${remProfitCol}</span><span></span>
       <span class="tp-label">📉 Продажа−:</span><span class="tp-val" style="color:${PC.sold}">${s.sellLossPrice ? '$' + formatPrice(s.sellLossPrice) : '—'}</span><span class="tp-rem">${remLossCol}</span><span></span>
+      ${tradeStatsRow}
     </div>`;
   }
 }
@@ -1484,12 +1864,12 @@ function applyChartPriceLines(lineSeries, linesArr, live) {
   if (!live) return;
   if (!live.isTrading) {
     // Waiting for buy signal
-    if (live.maxPrice)       linesArr.push(lineSeries.createPriceLine({ price: live.maxPrice,       color: PC.max,  lineWidth: 1, lineStyle: 2, title: 'Макс.' }));
-    if (live.buyTargetPrice) linesArr.push(lineSeries.createPriceLine({ price: live.buyTargetPrice, color: PC.buy,  lineWidth: 1, lineStyle: 1, title: 'Покупка' }));
+    if (live.maxPrice)       linesArr.push(lineSeries.createPriceLine({ price: live.maxPrice,       color: PC.max,      lineWidth: 1, lineStyle: 2, title: 'Макс.' }));
+    if (live.buyTargetPrice) linesArr.push(lineSeries.createPriceLine({ price: live.buyTargetPrice, color: PC.buy,      lineWidth: 1, lineStyle: 1, title: 'Покупка' }));
   } else {
     // Holding — show only sell targets
-    if (live.sellProfitPrice) linesArr.push(lineSeries.createPriceLine({ price: live.sellProfitPrice, color: PC.buy,  lineWidth: 1, lineStyle: 1, title: 'Продажа+' }));
-    if (live.sellLossPrice)   linesArr.push(lineSeries.createPriceLine({ price: live.sellLossPrice,  color: PC.sold, lineWidth: 1, lineStyle: 1, title: 'Продажа−' }));
+    if (live.sellProfitPrice) linesArr.push(lineSeries.createPriceLine({ price: live.sellProfitPrice, color: PC.sellProfit, lineWidth: 1, lineStyle: 1, title: 'Продажа+' }));
+    if (live.sellLossPrice)   linesArr.push(lineSeries.createPriceLine({ price: live.sellLossPrice,  color: PC.sold,      lineWidth: 1, lineStyle: 1, title: 'Продажа−' }));
   }
 }
 
@@ -1525,12 +1905,27 @@ function applyChartMarkers(lineSeries, data, events, inlineMode = false) {
       const nearest = snapToNearestPoint(rawT);
       const gapSec = Math.abs(nearest.time - rawT);
       // In inline mode, skip markers that are > 20 minutes away from any candle
-      // (means event happened outside chart range or chart resolution mismatch)
       if (inlineMode && gapSec > 1200) return null;
+
+      // Determine sell type by inspecting event message
+      let markerColor, markerPosition, markerText;
+      if (e.type === 'BUY') {
+        markerColor = PC.buy;       // blue
+        markerPosition = 'belowBar';
+        markerText = 'B';
+      } else {
+        // SELL — check if profit or loss
+        const msg = (e.message || '').toLowerCase();
+        const isProfit = msg.includes('прибыль') || msg.includes('profit') || msg.includes('+');
+        markerColor = isProfit ? PC.sellProfit : PC.sold; // green or red
+        markerPosition = 'aboveBar';
+        markerText = isProfit ? 'P' : 'L';
+      }
+
       return {
-        time: nearest.time,   // use EXACT chart candle time — no drift
-        position: e.type === 'BUY' ? 'belowBar' : 'aboveBar',
-        color: e.type === 'BUY' ? PC.buy : PC.sold,
+        time: nearest.time,
+        position: markerPosition,
+        color: markerColor,
         shape: 'circle',
         text: '',
       };
@@ -2429,11 +2824,37 @@ async function profLoadReport() {
     if (sessions.length) {
       html += `<div style="font-family:var(--font-head);font-size:9px;color:var(--muted);margin:10px 0 8px">ПОСЛЕДНИЕ СЕССИИ</div><div style="display:flex;flex-direction:column;gap:6px">`;
       for (const s of sessions) {
-        const buys = (s.events||[]).filter(e=>e.type==='BUY').length;
-        const sells = (s.events||[]).filter(e=>e.type==='SELL').length;
         const dot = s.status==='RUNNING'?'var(--green)':s.status==='ERROR'?'var(--red)':'var(--muted)';
         const dur = s.endedAt ? Math.round((s.endedAt - s.startedAt)/60000) + ' мин' : 'активна';
-        html += `<div style="background:var(--bg3);border-radius:var(--radius-sm);padding:8px 10px;border:1px solid var(--border)"><div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><div style="width:7px;height:7px;border-radius:50%;background:${dot};flex-shrink:0"></div><span style="font-family:var(--font-head);font-size:10px;color:var(--text)">${escHtml(s.coinName)}</span><span style="font-size:9px;color:var(--muted)">${s.type}</span><span style="font-size:9px;color:var(--muted);margin-left:auto">${fmtDateTime(s.startedAt)}</span></div><div style="display:flex;gap:12px;font-size:10px;color:var(--muted)"><span>⏱ ${dur}</span><span style="color:var(--green)">▲ ${buys}</span><span style="color:var(--red)">▼ ${sells}</span></div></div>`;
+        const profTrades = s.profitTradeCount || 0;
+        const lossTrades = s.lossTradeCount || 0;
+        const profSum = s.profitSum || 0;
+        const lossSum = s.lossSum || 0;
+        const commission = s.estimatedCommission || 0;
+        const isTester = s.type === 'TESTER' || s.type === 'BACKTEST';
+        const netPnl = profSum + lossSum;
+        const netPnlAfterComm = netPnl - (isTester ? commission : 0);
+        const hasTrades = profTrades > 0 || lossTrades > 0;
+        const tradeStats = hasTrades ? `
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;font-size:10px">
+            <span style="color:var(--green)">+${profTrades} ($${profSum.toFixed(2)})</span>
+            <span style="color:var(--red)">-${lossTrades} ($${Math.abs(lossSum).toFixed(2)})</span>
+            <span style="color:${netPnl>=0?'var(--green)':'var(--red)'}">P&L: ${netPnl>=0?'+':''}${netPnl.toFixed(2)}</span>
+            ${isTester && commission > 0 ? `<span style="color:#ffea00">комиссия: $${commission.toFixed(4)}</span>` : ''}
+            ${isTester && commission > 0 ? `<span style="color:${netPnlAfterComm>=0?'var(--green)':'var(--red)'}">P&L c комис.: ${netPnlAfterComm>=0?'+':''}${netPnlAfterComm.toFixed(2)}</span>` : ''}
+          </div>` : '';
+        html += `<div style="background:var(--bg3);border-radius:var(--radius-sm);padding:8px 10px;border:1px solid var(--border)">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <div style="width:7px;height:7px;border-radius:50%;background:${dot};flex-shrink:0"></div>
+            <span style="font-family:var(--font-head);font-size:10px;color:var(--text)">${escHtml(s.coinName)}</span>
+            <span style="font-size:9px;color:var(--muted)">${s.type}</span>
+            <span style="font-size:9px;color:var(--muted);margin-left:auto">${fmtDateTime(s.startedAt)}</span>
+          </div>
+          <div style="display:flex;gap:12px;font-size:10px;color:var(--muted)">
+            <span>⏱ ${dur}</span>
+          </div>
+          ${tradeStats}
+        </div>`;
       }
       html += '</div>';
     }

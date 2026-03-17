@@ -98,9 +98,9 @@ public class TradingChart {
         intervalMarker = new IntervalMarker(timestamp, timestamp);
         intervalMarker.setPaint(Color.decode("#F0E68C"));
         ValueMarker valueMarker = new ValueMarker(timestamp);
-        valueMarker.setPaint(Color.GREEN);
-        XYTextAnnotation annotation = new XYTextAnnotation(String.valueOf(price), timestamp, price);
-        annotation.setPaint(Color.BLACK);
+        valueMarker.setPaint(Color.decode("#1565C0")); // Blue for BUY
+        XYTextAnnotation annotation = new XYTextAnnotation("BUY " + String.valueOf(price), timestamp, price);
+        annotation.setPaint(Color.decode("#1565C0"));
         annotation.setFont(new Font("Verdana", Font.BOLD, 20));
         plot.addAnnotation(annotation);
         valueMarker.setStroke(new BasicStroke(5));
@@ -129,9 +129,12 @@ public class TradingChart {
         valueMarker.setStroke(new BasicStroke(0));
     }
     public static void addSellIntervalMarker(double timestamp, double price) {
-        getForCurrentThread().addSellIntervalMarkerI(timestamp, price);
+        getForCurrentThread().addSellIntervalMarkerI(timestamp, price, false);
     }
-    void addSellIntervalMarkerI(double timestamp, double price) {
+    public static void addSellProfitMarker(double timestamp, double price) {
+        getForCurrentThread().addSellIntervalMarkerI(timestamp, price, true);
+    }
+    void addSellIntervalMarkerI(double timestamp, double price, boolean isProfit) {
         addSimplePointI(timestamp, price);
         if (intervalMarker == null) {
             intervalMarker = new IntervalMarker(timestamp, timestamp);
@@ -139,12 +142,14 @@ public class TradingChart {
             plot.addDomainMarker(intervalMarker);
         }
         intervalMarker.setEndValue(timestamp);
-        XYTextAnnotation annotation = new XYTextAnnotation(String.valueOf(price), timestamp, price);
-        annotation.setPaint(Color.BLACK);
+        Color sellColor = isProfit ? Color.decode("#00C853") : Color.RED; // Green for profit, Red for loss
+        String label = isProfit ? "SELL+" : "SELL-";
+        XYTextAnnotation annotation = new XYTextAnnotation(label + " " + String.valueOf(price), timestamp, price);
+        annotation.setPaint(sellColor);
         annotation.setFont(new Font("Verdana", Font.BOLD, 20));
         plot.addAnnotation(annotation);
         ValueMarker valueMarker = new ValueMarker(timestamp);
-        valueMarker.setPaint(Color.RED);
+        valueMarker.setPaint(sellColor);
         valueMarker.setStroke(new BasicStroke(5));
         plot.addDomainMarker(valueMarker);
         intervalMarker = null;

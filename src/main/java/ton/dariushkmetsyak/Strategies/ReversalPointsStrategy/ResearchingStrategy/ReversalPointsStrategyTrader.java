@@ -63,6 +63,15 @@ public class ReversalPointsStrategyTrader {
     private String lastBuyFailureSignature = "";
     private static final long BUY_FAILURE_NOTIFICATION_COOLDOWN_MS = TimeUnit.MINUTES.toMillis(5);
 
+    // Trade statistics tracking
+    private int profitTradeCount = 0;
+    private int lossTradeCount = 0;
+    private double profitSum = 0.0;
+    private double lossSum = 0.0;
+    private double estimatedCommission = 0.0;
+    // Binance standard commission = 0.1% per trade
+    private static final double BINANCE_COMMISSION_RATE = 0.1;
+
     class Reversal {
         private final double[] data;
         private final String tag;
@@ -298,7 +307,7 @@ public class ReversalPointsStrategyTrader {
                 } catch (InsufficientAmountOfCoinException e) {
                     throw new RuntimeException(e);
                 }
-                TradingChart.addSellIntervalMarker(pointTimestamp, soldFor);
+                TradingChart.addSellProfitMarker(pointTimestamp, soldFor);
                 isSold = true;
                 chartScreenshotMessage = "Продано в ПРИБЫЛЬ";
                 double profitUsd = (soldFor - boughtFor) * (tradingSum / boughtFor);
@@ -307,14 +316,28 @@ public class ReversalPointsStrategyTrader {
                 try { coinAmtSell = account.wallet().getAmountOfCoin(coin); } catch (Exception ignored) {}
                 double usdtAmtSell = 0;
                 try { usdtAmtSell = account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin()); } catch (Exception ignored) {}
+                // Track trade stats
+                profitTradeCount++;
+                profitSum += profitUsd;
+                boolean isTesterAccount = accountType.contains("TESTER");
+                if (isTesterAccount) {
+                    // Estimated commission: buy + sell = 2 * tradingSum * 0.1%
+                    double commForTrade = tradingSum * BINANCE_COMMISSION_RATE / 100.0 * 2;
+                    estimatedCommission += commForTrade;
+                }
+
+                String commissionNote = isTesterAccount
+                    ? String.format("\n💸 Расчётная комиссия (Binance): $%.4f", tradingSum * BINANCE_COMMISSION_RATE / 100.0 * 2)
+                    : "";
                 String sellProfitMsg = String.format(
                     "📈 ПРОДАЖА В ПРИБЫЛЬ\nМонета: %s\nКуплено за: $%s\nПродано за: $%s\n" +
                     "Прибыль: +%.2f%% (+$%.2f)\nКоличество: %.6f %s\n" +
-                    "Баланс после: %.6f %s, %.2f USDT",
+                    "Баланс после: %.6f %s, %.2f USDT%s",
                     coin.getName(), Prices.round(boughtFor), Prices.round(soldFor),
                     profitPct, profitUsd,
                     tradingSum / boughtFor, coin.getSymbol(),
-                    coinAmtSell, coin.getSymbol(), usdtAmtSell
+                    coinAmtSell, coin.getSymbol(), usdtAmtSell,
+                    commissionNote
                 );
                 ImageAndMessageSender.sendTelegramMessage(sellProfitMsg, chatID);
                 ton.dariushkmetsyak.Web.TradingSessionManager.logTypedEventFromCurrentThread("SELL", sellProfitMsg);
@@ -345,14 +368,27 @@ public class ReversalPointsStrategyTrader {
                 try { coinAmtLoss = account.wallet().getAmountOfCoin(coin); } catch (Exception ignored) {}
                 double usdtAmtLoss = 0;
                 try { usdtAmtLoss = account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin()); } catch (Exception ignored) {}
+                // Track trade stats
+                lossTradeCount++;
+                lossSum += lossUsd; // negative value
+                boolean isTesterAccountLoss = accountType.contains("TESTER");
+                if (isTesterAccountLoss) {
+                    double commForTrade = tradingSum * BINANCE_COMMISSION_RATE / 100.0 * 2;
+                    estimatedCommission += commForTrade;
+                }
+
+                String commissionNoteLoss = isTesterAccountLoss
+                    ? String.format("\n💸 Расчётная комиссия (Binance): $%.4f", tradingSum * BINANCE_COMMISSION_RATE / 100.0 * 2)
+                    : "";
                 String sellLossMsg = String.format(
                     "📉 ПРОДАЖА В УБЫТОК\nМонета: %s\nКуплено за: $%s\nПродано за: $%s\n" +
                     "Убыток: %.2f%% ($%.2f)\nКоличество: %.6f %s\n" +
-                    "Баланс после: %.6f %s, %.2f USDT",
+                    "Баланс после: %.6f %s, %.2f USDT%s",
                     coin.getName(), Prices.round(boughtFor), Prices.round(soldFor),
                     lossPct, lossUsd,
                     tradingSum / boughtFor, coin.getSymbol(),
-                    coinAmtLoss, coin.getSymbol(), usdtAmtLoss
+                    coinAmtLoss, coin.getSymbol(), usdtAmtLoss,
+                    commissionNoteLoss
                 );
                 ImageAndMessageSender.sendTelegramMessage(sellLossMsg, chatID);
                 ton.dariushkmetsyak.Web.TradingSessionManager.logTypedEventFromCurrentThread("SELL", sellLossMsg);
@@ -658,7 +694,8 @@ public class ReversalPointsStrategyTrader {
 
             ton.dariushkmetsyak.Web.TradingSessionManager.updateLiveState(
                 coinBal, usdtBal, trading, currentPrice,
-                maxPriceVal, buyTarget, boughtFor, profitTarget, lossTarget
+                maxPriceVal, buyTarget, boughtFor, profitTarget, lossTarget,
+                profitTradeCount, lossTradeCount, profitSum, lossSum, estimatedCommission
             );
         } catch (Exception ignored) {}
     }

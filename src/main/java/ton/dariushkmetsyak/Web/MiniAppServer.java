@@ -173,6 +173,23 @@ public class MiniAppServer {
             });
         });
 
+        server.createContext("/api/backtest/optimize", exchange -> {
+            if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
+            Long userId = requireUser(exchange); if (userId == null) return;
+            handleJson(exchange, () -> {
+                Map<String, Object> body = parseBody(exchange);
+                String coinName = (String) body.getOrDefault("coin", "bitcoin");
+                double tradingSum = toDouble(body.get("tradingSum"), 100.0);
+                String chartType = (String) body.getOrDefault("chartType", "yearly");
+                String exchangeName = (String) body.getOrDefault("exchangeName", "Binance");
+                double commissionRate = toDouble(body.get("commissionRate"), 0.1);
+                int topN = toInt(body.get("topN"), 10);
+                TradingSessionManager.SessionInfo info = TradingSessionManager.forUser(userId)
+                        .startTopStrategies(coinName, tradingSum, chartType, exchangeName, commissionRate, topN);
+                return info.toMap();
+            });
+        });
+
         // ── Profile / Auth ────────────────────────────────────────────────────
 
         server.createContext("/api/auth/config", exchange -> handleJson(exchange, () -> {
@@ -442,8 +459,10 @@ public class MiniAppServer {
         double spg = toDouble(body.get("sellWithProfitGap"), 2.0);
         double slg = toDouble(body.get("sellWithLossGap"), 8.0);
         String chartType = (String) body.getOrDefault("chartType", "1d");
+        String exchangeName = (String) body.getOrDefault("exchangeName", "Binance");
+        double commissionRate = toDouble(body.get("commissionRate"), 0.1);
         TradingSessionManager.SessionInfo info = TradingSessionManager.forUser(userId)
-                .startBacktest(coinName, tradingSum, buyGap, spg, slg, chartType);
+                .startBacktest(coinName, tradingSum, buyGap, spg, slg, chartType, exchangeName, commissionRate);
         return info.toMap();
     }
 
