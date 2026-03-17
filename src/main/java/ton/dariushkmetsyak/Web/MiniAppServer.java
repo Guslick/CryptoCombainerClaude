@@ -151,6 +151,11 @@ public class MiniAppServer {
             });
         });
 
+        server.createContext("/api/backtest/top", exchange -> {
+            if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            handleJson(exchange, () -> findTopBacktestsFromRequest(exchange));
+        });
+
         server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
         server.start();
         log.info("🚀 MiniApp сервер запущен на порту {}", port);
@@ -211,9 +216,27 @@ public class MiniAppServer {
         double sellWithProfitGap = toDouble(body.get("sellWithProfitGap"), 2.0);
         double sellWithLossGap = toDouble(body.get("sellWithLossGap"), 8.0);
         String chartType = (String) body.getOrDefault("chartType", "1d");
+        String exchange = (String) body.getOrDefault("exchange", "binance");
+        double feeRate = toDouble(body.get("feeRate"), resolveFeeRate(exchange));
         TradingSessionManager.SessionInfo info = TradingSessionManager.getInstance()
-                .startBacktest(coinName, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, chartType);
+                .startBacktest(coinName, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, chartType, exchange, feeRate);
         return info.toMap();
+    }
+
+    private List<Map<String, Object>> findTopBacktestsFromRequest(HttpExchange exchange) throws Exception {
+        Map<String, Object> body = parseBody(exchange);
+        String coinName = (String) body.getOrDefault("coin", "bitcoin");
+        double tradingSum = toDouble(body.get("tradingSum"), 100.0);
+        String chartType = (String) body.getOrDefault("chartType", "1d");
+        String exchange = (String) body.getOrDefault("exchange", "binance");
+        double feeRate = toDouble(body.get("feeRate"), resolveFeeRate(exchange));
+        return TradingSessionManager.getInstance().findTopBacktests(coinName, tradingSum, chartType, exchange, feeRate);
+    }
+
+    private double resolveFeeRate(String exchange) {
+        if (exchange == null) return 0.001;
+        if ("binance".equalsIgnoreCase(exchange)) return 0.001;
+        return 0.001;
     }
 
     @SuppressWarnings("unchecked")
