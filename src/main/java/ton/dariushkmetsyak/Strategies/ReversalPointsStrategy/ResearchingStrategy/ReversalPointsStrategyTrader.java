@@ -52,6 +52,8 @@ public class ReversalPointsStrategyTrader {
 
     /** True when state was successfully restored — skip init() call on first tick */
     private boolean restoredFromState = false;
+    /** True when session is a resume (even without saved state) — suppress "new session" message */
+    private boolean isResume = false;
 
     private final StateManager stateManager;
     private final String sessionId;
@@ -99,12 +101,24 @@ public class ReversalPointsStrategyTrader {
                                         double buyGap, double sellWithProfitGap,
                                         double sellWithLossGap, int updateTimeout, Long chatID,
                                         TradingState savedState, String sessionId) {
+        this(account, coin, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap,
+             updateTimeout, chatID, savedState, sessionId, false);
+    }
+
+    public ReversalPointsStrategyTrader(Account account, Coin coin, double tradingSum,
+                                        double buyGap, double sellWithProfitGap,
+                                        double sellWithLossGap, int updateTimeout, Long chatID,
+                                        TradingState savedState, String sessionId, boolean isResume) {
         this.account = account;
         this.coin = coin;
         this.chatID = chatID;
         this.sessionId = sessionId != null ? sessionId : "trader_" + System.currentTimeMillis();
         this.accountType = account.getClass().getSimpleName().toUpperCase();
-        this.stateManager = new StateManager();
+        // Pass userId to StateManager so state files are stored in user-namespaced directory
+        long smUserId = 0L;
+        if (savedState != null && savedState.getChatId() != null) smUserId = savedState.getChatId();
+        this.stateManager = new StateManager(smUserId);
+        this.isResume = isResume;
 
         if (savedState != null && tryRestoreFromState(savedState)) {
             restoredFromState = true;
@@ -133,11 +147,21 @@ public class ReversalPointsStrategyTrader {
             double usdtBal = 0, coinBal = 0;
             try { usdtBal = account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin()); } catch (Exception ignored) {}
             try { coinBal = account.wallet().getAmountOfCoin(coin); } catch (Exception ignored) {}
-            ImageAndMessageSender.sendTelegramMessage(
-                "🆕 Новая торговая сессия\n" +
-                "Монета: " + coin.getName() + "\n" +
-                "Баланс: " + Prices.round(coinBal) + " " + coin.getSymbol() +
-                ", " + Prices.round(usdtBal) + " USDT", chatID);
+            if (!this.isResume) {
+                String newMsg = "🆕 Новая торговая сессия\n" +
+                    "Монета: " + coin.getName() + "\n" +
+                    "Баланс: " + Prices.round(coinBal) + " " + coin.getSymbol() +
+                    ", " + Prices.round(usdtBal) + " USDT";
+                ImageAndMessageSender.sendTelegramMessage(newMsg, chatID);
+                ton.dariushkmetsyak.Web.TradingSessionManager.logTypedEventFromCurrentThread("START", newMsg);
+            } else {
+                String resumeNoStateMsg = "🔄 Сессия возобновлена (без сохранённого состояния)\n" +
+                    "Монета: " + coin.getName() + "\n" +
+                    "Текущий баланс: " + Prices.round(coinBal) + " " + coin.getSymbol() +
+                    ", " + Prices.round(usdtBal) + " USDT\nВход в рынок ищется заново.";
+                ImageAndMessageSender.sendTelegramMessage(resumeNoStateMsg, chatID);
+                ton.dariushkmetsyak.Web.TradingSessionManager.logTypedEventFromCurrentThread("START", resumeNoStateMsg);
+            }
         }
 
         // Register shutdown hook for JVM kill (SIGTERM / kill)
