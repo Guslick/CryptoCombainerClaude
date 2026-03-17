@@ -78,6 +78,16 @@ public class TradingSessionManager {
         public volatile Double sellProfitPrice = null;
         public volatile Double sellLossPrice = null;
         public volatile boolean stoppedUnexpectedly = false;
+        public volatile int totalTrades = 0;
+        public volatile int profitableTrades = 0;
+        public volatile int losingTrades = 0;
+        public volatile double grossProfitUsd = 0;
+        public volatile double grossLossUsd = 0;
+        public volatile double sessionPnlUsd = 0;
+        public volatile double estimatedCommissionUsd = 0;
+        public volatile double startCoinBalance = 0;
+        public volatile double endCoinBalance = 0;
+        public volatile int backtestProgress = 0;
         public transient Thread thread;
         public final List<SessionEvent> events = new CopyOnWriteArrayList<>();
 
@@ -114,6 +124,16 @@ public class TradingSessionManager {
             m.put("sellProfitPrice", sellProfitPrice);
             m.put("sellLossPrice", sellLossPrice);
             m.put("stoppedUnexpectedly", stoppedUnexpectedly);
+            m.put("totalTrades", totalTrades);
+            m.put("profitableTrades", profitableTrades);
+            m.put("losingTrades", losingTrades);
+            m.put("grossProfitUsd", grossProfitUsd);
+            m.put("grossLossUsd", grossLossUsd);
+            m.put("sessionPnlUsd", sessionPnlUsd);
+            m.put("estimatedCommissionUsd", estimatedCommissionUsd);
+            m.put("startCoinBalance", startCoinBalance);
+            m.put("endCoinBalance", endCoinBalance);
+            m.put("backtestProgress", backtestProgress);
             if (includeEvents) {
                 m.put("events", events.stream().map(SessionEvent::toMap).collect(Collectors.toList()));
             }
@@ -151,7 +171,16 @@ public class TradingSessionManager {
                                        Double buyTargetPrice,
                                        Double boughtAtPrice,
                                        Double sellProfitPrice,
-                                       Double sellLossPrice) {
+                                       Double sellLossPrice,
+                                       int totalTrades,
+                                       int profitableTrades,
+                                       int losingTrades,
+                                       double grossProfitUsd,
+                                       double grossLossUsd,
+                                       double sessionPnlUsd,
+                                       double estimatedCommissionUsd,
+                                       double startCoinBalance,
+                                       double endCoinBalance) {
         TradingSessionManager mgr = instance;
         if (mgr == null) return;
         String sid = mgr.threadToSession.get(Thread.currentThread().getId());
@@ -168,6 +197,15 @@ public class TradingSessionManager {
         info.boughtAtPrice  = boughtAtPrice;
         info.sellProfitPrice = sellProfitPrice;
         info.sellLossPrice  = sellLossPrice;
+        info.totalTrades = totalTrades;
+        info.profitableTrades = profitableTrades;
+        info.losingTrades = losingTrades;
+        info.grossProfitUsd = grossProfitUsd;
+        info.grossLossUsd = grossLossUsd;
+        info.sessionPnlUsd = sessionPnlUsd;
+        info.estimatedCommissionUsd = estimatedCommissionUsd;
+        info.startCoinBalance = startCoinBalance;
+        info.endCoinBalance = endCoinBalance;
 
         // Persist session list on every live update so balances are always current
         mgr.saveSessions();
@@ -269,6 +307,16 @@ public class TradingSessionManager {
                 info.boughtAtPrice = m.get("boughtAtPrice") != null ? toDouble(m.get("boughtAtPrice")) : null;
                 info.sellProfitPrice = m.get("sellProfitPrice") != null ? toDouble(m.get("sellProfitPrice")) : null;
                 info.sellLossPrice = m.get("sellLossPrice") != null ? toDouble(m.get("sellLossPrice")) : null;
+                info.totalTrades = toInt(m.get("totalTrades"));
+                info.profitableTrades = toInt(m.get("profitableTrades"));
+                info.losingTrades = toInt(m.get("losingTrades"));
+                info.grossProfitUsd = toDouble(m.get("grossProfitUsd"));
+                info.grossLossUsd = toDouble(m.get("grossLossUsd"));
+                info.sessionPnlUsd = toDouble(m.get("sessionPnlUsd"));
+                info.estimatedCommissionUsd = toDouble(m.get("estimatedCommissionUsd"));
+                info.startCoinBalance = toDouble(m.get("startCoinBalance"));
+                info.endCoinBalance = toDouble(m.get("endCoinBalance"));
+                info.backtestProgress = toInt(m.get("backtestProgress"));
                 // Restore events
                 List<Map<String, Object>> evts = (List<Map<String, Object>>) m.get("events");
                 if (evts != null) {
@@ -584,10 +632,13 @@ public class TradingSessionManager {
 
     public SessionInfo startBacktest(String coinName, double tradingSum,
                                      double buyGap, double sellWithProfitGap,
-                                     double sellWithLossGap, String chartType) {
+                                     double sellWithLossGap, String chartType,
+                                     String exchange, double feeRate) {
         String id = "backtest_" + System.currentTimeMillis();
         Map<String, Object> params = buildParams(tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, 30, 60);
         params.put("chartType", chartType);
+        params.put("exchange", exchange);
+        params.put("feeRate", feeRate);
 
         SessionInfo info = new SessionInfo(id, SessionType.BACKTEST, coinName, params);
         lastBacktestResult.set(null);
@@ -597,12 +648,15 @@ public class TradingSessionManager {
             registerThread(id);
             try {
                 Coin coin = CoinsList.getCoinByName(coinName);
-                Chart chart = "yearly".equals(chartType)
-                    ? Chart.getYearlyChart_1hourInterval(coin)
-                    : Chart.get1DayUntilNowChart_5MinuteInterval(coin);
+                Chart chart = switch (chartType) {
+                    case "yearly" -> Chart.getYearlyChart_1hourInterval(coin);
+                    case "monthly" -> Chart.getMonthlyChart_1hourInterval(coin, java.time.YearMonth.now());
+                    default -> Chart.get1DayUntilNowChart_5MinuteInterval(coin);
+                };
                 info.addEvent("INFO", "Данные загружены, запускаю расчёт...");
                 ReversalPointStrategyBackTester tester = new ReversalPointStrategyBackTester(
-                        coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap);
+                        coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, feeRate,
+                        progress -> { info.backtestProgress = progress; saveSessions(); });
                 ReversalPointStrategyBackTester.BackTestResult result = tester.startBackTest();
 
                 Map<String, Object> resultMap = new LinkedHashMap<>();
@@ -612,9 +666,23 @@ public class TradingSessionManager {
                 resultMap.put("sellWithLossGap", result.getSellWithLossGap());
                 resultMap.put("profitUsd", result.getProfitInUsd());
                 resultMap.put("profitPercent", result.getPercentageProfit());
+                resultMap.put("estimatedCommissionUsd", result.getEstimatedCommissionUsd());
+                resultMap.put("profitAfterCommissionUsd", result.getProfitAfterCommissionUsd());
+                resultMap.put("totalTrades", result.getTotalTrades());
+                resultMap.put("profitableTrades", result.getProfitableTrades());
+                resultMap.put("losingTrades", result.getLosingTrades());
                 resultMap.put("tradingSum", tradingSum);
                 resultMap.put("chartType", chartType);
+                resultMap.put("exchange", exchange);
+                resultMap.put("feeRate", feeRate);
                 lastBacktestResult.set(resultMap);
+
+                info.totalTrades = result.getTotalTrades();
+                info.profitableTrades = result.getProfitableTrades();
+                info.losingTrades = result.getLosingTrades();
+                info.estimatedCommissionUsd = result.getEstimatedCommissionUsd();
+                info.sessionPnlUsd = result.getProfitInUsd();
+                info.backtestProgress = 100;
 
                 info.status = "DONE";
                 info.endedAt = System.currentTimeMillis();
@@ -639,6 +707,39 @@ public class TradingSessionManager {
         sessions.put(id, info);
         t.start();
         return info;
+    }
+
+    public List<Map<String, Object>> findTopBacktests(String coinName, double tradingSum, String chartType,
+                                                      String exchange, double feeRate) throws NoSuchSymbolException {
+        Coin coin = CoinsList.getCoinByName(coinName);
+        Chart chart = switch (chartType) {
+            case "yearly" -> Chart.getYearlyChart_1hourInterval(coin);
+            case "monthly" -> Chart.getMonthlyChart_1hourInterval(coin, java.time.YearMonth.now());
+            default -> Chart.get1DayUntilNowChart_5MinuteInterval(coin);
+        };
+        List<ReversalPointStrategyBackTester.BackTestResult> results = new ArrayList<>();
+        double[] buy = {2, 3, 4, 5, 6};
+        double[] sellP = {1, 2, 3, 4};
+        double[] sellL = {4, 6, 8, 10};
+        for (double b : buy) for (double sp : sellP) for (double sl : sellL) {
+            ReversalPointStrategyBackTester t = new ReversalPointStrategyBackTester(coin, chart, tradingSum, b, sp, sl, feeRate, null);
+            ReversalPointStrategyBackTester.BackTestResult r = t.startBackTest();
+            if (r != null) results.add(r);
+        }
+        Collections.sort(results);
+        return results.stream().limit(10).map(r -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("buyGap", r.getBuyGap());
+            m.put("sellWithProfitGap", r.getSellWithProfit());
+            m.put("sellWithLossGap", r.getSellWithLossGap());
+            m.put("profitUsd", r.getProfitInUsd());
+            m.put("profitAfterCommissionUsd", r.getProfitAfterCommissionUsd());
+            m.put("estimatedCommissionUsd", r.getEstimatedCommissionUsd());
+            m.put("totalTrades", r.getTotalTrades());
+            m.put("exchange", exchange);
+            m.put("feeRate", feeRate);
+            return m;
+        }).collect(Collectors.toList());
     }
 
     public Map<String, Object> getLastBacktestResult() {
@@ -683,5 +784,11 @@ public class TradingSessionManager {
         if (v == null) return 0.0;
         if (v instanceof Number) return ((Number) v).doubleValue();
         return 0.0;
+    }
+
+    private static int toInt(Object v) {
+        if (v == null) return 0;
+        if (v instanceof Number) return ((Number) v).intValue();
+        return 0;
     }
 }

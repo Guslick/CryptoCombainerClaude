@@ -225,6 +225,10 @@
   /* ---- BACKTEST RESULT ---- */
   .backtest-result{background:var(--bg3);border-radius:var(--radius-sm);padding:14px;border:1px solid var(--border)}
   .backtest-profit{font-family:var(--font-head);font-size:28px;font-weight:900;text-align:center;margin:10px 0}
+  .progress-wrap{margin-top:10px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;height:14px;overflow:hidden}
+  .progress-bar{height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .3s}
+  .table-mini{width:100%;font-size:11px;border-collapse:collapse;margin-top:8px}
+  .table-mini td,.table-mini th{padding:6px;border-bottom:1px solid rgba(255,255,255,.06);text-align:left}
 </style>
 </head>
 <body>
@@ -439,6 +443,7 @@
             <select id="btChartType" oninput="saveField('btChartType')">
               <option value="1d">1 день (5-мин интервалы)</option>
               <option value="yearly" selected>Год (часовые интервалы)</option>
+              <option value="monthly">1 месяц (часовые интервалы)</option>
             </select>
           </div>
           <div class="input-wrap">
@@ -457,10 +462,23 @@
             <label class="input-label">КОЭ. ПРОДАЖИ - (%)</label>
             <input type="number" id="btSellLoss" value="8.0" min="0.1" step="0.1" oninput="saveField('btSellLoss')">
           </div>
+          <div class="input-wrap">
+            <label class="input-label">БИРЖА ДЛЯ КОМИССИИ</label>
+            <select id="btExchange" onchange="onBtExchangeChange();saveField('btExchange')"><option value="binance" selected>Binance</option></select>
+          </div>
+          <div class="input-wrap">
+            <label class="input-label">КОМИССИЯ (%)</label>
+            <input type="number" id="btFee" value="0.1" step="0.01" min="0" oninput="saveField('btFee')">
+          </div>
         </div>
       </div>
       <div id="btAlert" style="display:none"></div>
       <button class="btn btn-primary" id="btStartBtn" onclick="startBacktest()">🧪 ЗАПУСТИТЬ БЭКТЕСТ</button>
+      <button class="btn btn-secondary" onclick="findTopBacktests()">🏅 ТОП-10 СТРАТЕГИЙ</button>
+      <button class="btn btn-secondary" onclick="showBacktestChart()">📈 ПОКАЗАТЬ ГРАФИК</button>
+      <div class="progress-wrap"><div id="btProgressBar" class="progress-bar"></div></div>
+      <div id="btProgressText" style="font-size:11px;color:var(--muted);margin-top:4px;">Прогресс: 0%</div>
+      <div id="btTopResult" class="card" style="display:none"></div>
       <div id="btResultCard" style="display:none" class="card">
         <div class="card-title">🏆 РЕЗУЛЬТАТ</div>
         <div class="backtest-result">
@@ -881,6 +899,8 @@ async function startBacktest() {
     sellWithProfitGap: +document.getElementById('btSellProfit').value||2.0,
     sellWithLossGap: +document.getElementById('btSellLoss').value||8.0,
     chartType: document.getElementById('btChartType').value,
+    exchange: document.getElementById('btExchange').value,
+    feeRate: (+document.getElementById('btFee').value||0)/100,
   };
   try {
     const r = await fetch(`${API_BASE}/api/backtest/start`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -891,12 +911,15 @@ async function startBacktest() {
     let attempts=0;
     const pollId = setInterval(async ()=>{
       attempts++;
-      if (attempts>60) { clearInterval(pollId); showAlert('btAlert','warn','⏰ Таймаут'); btn.disabled=false; btn.innerHTML='🧪 ЗАПУСТИТЬ БЭКТЕСТ'; return; }
+      if (attempts>300) { clearInterval(pollId); showAlert('btAlert','warn','⏰ Таймаут'); btn.disabled=false; btn.innerHTML='🧪 ЗАПУСТИТЬ БЭКТЕСТ'; return; }
       const sr = await fetch(`${API_BASE}/api/trading/sessions`).catch(()=>null);
       if (!sr?.ok) return;
       const sessions = await sr.json();
       const sess = sessions.find(s=>s.id===sessionData.id);
       if (!sess) return;
+      const p=sess.backtestProgress||0;
+      document.getElementById('btProgressBar').style.width=`${p}%`;
+      document.getElementById('btProgressText').textContent=`Прогресс: ${p}%`;
       if (sess.status==='DONE') {
         clearInterval(pollId);
         const rr = await fetch(`${API_BASE}/api/backtest/result`);
@@ -926,9 +949,31 @@ function showBacktestResult(result) {
     📥 Коэф. покупки: <b>${result.buyGap||'—'}%</b><br>
     📈 Коэф. продажи+: <b>${result.sellWithProfitGap||'—'}%</b><br>
     📉 Коэф. продажи-: <b>${result.sellWithLossGap||'—'}%</b><br>
-    📅 Период: <b>${result.chartType==='yearly'?'1 год':'1 день'}</b>
+    📅 Период: <b>${result.chartType==='yearly'?'1 год':(result.chartType==='monthly'?'1 месяц':'1 день')}</b><br>
+    🏦 Биржа: <b>${result.exchange||'binance'}</b> • Комиссия: <b>${((result.feeRate||0)*100).toFixed(2)}%</b><br>
+    💸 Оценка комиссии: <b>${(result.estimatedCommissionUsd||0).toFixed(2)} USD</b><br>
+    🧾 Итого с комиссией: <b>${(result.profitAfterCommissionUsd||0).toFixed(2)} USD</b><br>
+    📊 Сделок: <b>${result.totalTrades||0}</b> (+: ${result.profitableTrades||0}, -: ${result.losingTrades||0})
   `;
 }
+
+function onBtExchangeChange(){
+  const ex=document.getElementById('btExchange').value;
+  if(ex==='binance') document.getElementById('btFee').value='0.1';
+}
+
+async function findTopBacktests(){
+  const coin=document.getElementById('btCoinInput').value.trim();
+  if(!coin){ showAlert('btAlert','error','⚠️ Введите название монеты!'); return; }
+  const body={coin,tradingSum:+document.getElementById('btTradingSum').value||100,chartType:document.getElementById('btChartType').value,exchange:document.getElementById('btExchange').value,feeRate:(+document.getElementById('btFee').value||0)/100};
+  const r=await fetch(`${API_BASE}/api/backtest/top`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const rows=await r.json();
+  const box=document.getElementById('btTopResult');
+  box.style.display='block';
+  box.innerHTML='<div class="card-title">🏅 ТОП-10 СТРАТЕГИЙ</div><table class="table-mini"><tr><th>#</th><th>buy</th><th>sell+</th><th>sell-</th><th>P/L</th><th>P/L с комис.</th></tr>'+rows.map((x,i)=>`<tr><td>${i+1}</td><td>${x.buyGap}%</td><td>${x.sellWithProfitGap}%</td><td>${x.sellWithLossGap}%</td><td>${(x.profitUsd||0).toFixed(2)}</td><td>${(x.profitAfterCommissionUsd||0).toFixed(2)}</td></tr>`).join('')+'</table>';
+}
+
+function showBacktestChart(){ showPage('sessions'); }
 
 // ============================================================
 // SESSIONS LIST
@@ -1038,9 +1083,10 @@ function patchSessionCard(s, prev) {
 // Price line colors — must match chart line colors
 const PC = {
   max:    '#7c4dff',   // purple  — Макс. волна
-  buy:    '#00e676',   // green   — Цена покупки / Продажа+
+  buy:    '#2979ff',   // blue    — Цена покупки / BUY
   cur:    '#00e5ff',   // cyan    — Текущая цена
   sold:   '#ff1744',   // red     — Продажа−
+  soldProfit:'#00e676', // green   — Продажа в плюс
 };
 
 function buildTargetPricesHtml(s) {
@@ -1054,13 +1100,21 @@ function buildTargetPricesHtml(s) {
       <span class="tp-label">🔭 Макс. волна:</span><span class="tp-val" style="color:${PC.max}">${s.maxPrice ? '$' + formatPrice(s.maxPrice) : '—'}</span>
       <span class="tp-label">💹 Текущая:</span>${curStr}
       <span class="tp-label">🎯 Цена покупки:</span><span class="tp-val" style="color:${PC.buy}">${s.buyTargetPrice ? '$' + formatPrice(s.buyTargetPrice) : '—'}</span>
+      <span class="tp-label">✅ Сделки +:</span><span class="tp-val">${s.profitableTrades||0} / ${(s.grossProfitUsd||0).toFixed(2)}$</span>
+      <span class="tp-label">❌ Сделки -:</span><span class="tp-val">${s.losingTrades||0} / ${(s.grossLossUsd||0).toFixed(2)}$</span>
+      <span class="tp-label">💸 Комиссия:</span><span class="tp-val">${(s.estimatedCommissionUsd||0).toFixed(2)}$</span>
     </div>`;
   } else {
     return `<div class="target-prices">
       <span class="tp-label">💰 Куплено за:</span><span class="tp-val" style="color:var(--muted)">${s.boughtAtPrice ? '$' + formatPrice(s.boughtAtPrice) : '—'}</span>
       <span class="tp-label">💹 Текущая:</span>${curStr}
-      <span class="tp-label">📈 Продажа+:</span><span class="tp-val" style="color:${PC.buy}">${s.sellProfitPrice ? '$' + formatPrice(s.sellProfitPrice) : '—'}</span>
+      <span class="tp-label">📈 Продажа+:</span><span class="tp-val" style="color:${PC.soldProfit}">${s.sellProfitPrice ? '$' + formatPrice(s.sellProfitPrice) : '—'}</span>
       <span class="tp-label">📉 Продажа−:</span><span class="tp-val" style="color:${PC.sold}">${s.sellLossPrice ? '$' + formatPrice(s.sellLossPrice) : '—'}</span>
+      <span class="tp-label">✅ Сделки +:</span><span class="tp-val">${s.profitableTrades||0} / ${(s.grossProfitUsd||0).toFixed(2)}$</span>
+      <span class="tp-label">❌ Сделки -:</span><span class="tp-val">${s.losingTrades||0} / ${(s.grossLossUsd||0).toFixed(2)}$</span>
+      <span class="tp-label">🧮 P/L сессии:</span><span class="tp-val">${(s.sessionPnlUsd||0).toFixed(2)}$</span>
+      <span class="tp-label">🪙 Актив старт/финиш:</span><span class="tp-val">${(s.startCoinBalance||0).toFixed(6)} → ${(s.endCoinBalance||0).toFixed(6)}</span>
+      <span class="tp-label">💸 Комиссия:</span><span class="tp-val">${(s.estimatedCommissionUsd||0).toFixed(2)}$</span>
     </div>`;
   }
 }
@@ -1308,7 +1362,7 @@ function applyChartMarkers(lineSeries, data, events) {
       return {
         time: snappedT,
         position: e.type === 'BUY' ? 'belowBar' : 'aboveBar',
-        color: e.type === 'BUY' ? PC.buy : PC.sold,
+        color: e.type === 'BUY' ? PC.buy : ((e.message||'').includes('ПРИБЫЛЬ') ? PC.soldProfit : PC.sold),
         shape: 'circle',
         text: '',   // no text label — shape only
       };
@@ -1610,6 +1664,11 @@ function renderDrawer(sess, isFirstRender = false, scrollOpts = {}) {
       💼 ${sess.coinBalance > 0 ? `${fmtNum(sess.coinBalance)} ${sess.coinName}` : ''}
       ${sess.usdtBalance > 0 ? `${fmtNum(sess.usdtBalance)} USDT` : ''}
       ${!sess.coinBalance && !sess.usdtBalance ? '—' : ''}
+    </div>
+    <div style="margin-top:6px;font-size:11px;color:var(--muted)">
+      📊 Сделок: ${sess.totalTrades||0} (+: ${sess.profitableTrades||0}, -: ${sess.losingTrades||0}) • P/L: ${(sess.sessionPnlUsd||0).toFixed(2)}$<br>
+      ✅ Плюс: ${(sess.grossProfitUsd||0).toFixed(2)}$ • ❌ Минус: ${(sess.grossLossUsd||0).toFixed(2)}$ • 💸 Комиссия: ${(sess.estimatedCommissionUsd||0).toFixed(2)}$<br>
+      🪙 Актив старт/финиш: ${(sess.startCoinBalance||0).toFixed(6)} → ${(sess.endCoinBalance||0).toFixed(6)}
     </div>
     <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
       ${isRunning ? `<button class="btn btn-danger btn-sm" onclick="stopSession('${sess.id}')">■ СТОП</button>` : ''}
