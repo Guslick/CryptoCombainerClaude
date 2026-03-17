@@ -49,6 +49,14 @@ public class ReversalPointsStrategyTrader {
     int updateTimeout;
     Long chatID;
     int prevMessageId = 0;
+    private int totalTrades = 0;
+    private int profitableTrades = 0;
+    private int losingTrades = 0;
+    private double grossProfitUsd = 0;
+    private double grossLossUsd = 0;
+    private double estimatedCommissionUsd = 0;
+    private double startCoinBalance = 0;
+    private static final double BINANCE_FEE_RATE = 0.001;
 
     /** True when state was successfully restored — skip init() call on first tick */
     private boolean restoredFromState = false;
@@ -105,6 +113,7 @@ public class ReversalPointsStrategyTrader {
         this.sessionId = sessionId != null ? sessionId : "trader_" + System.currentTimeMillis();
         this.accountType = account.getClass().getSimpleName().toUpperCase();
         this.stateManager = new StateManager();
+        try { this.startCoinBalance = account.wallet().getAmountOfCoin(coin); } catch (Exception ignored) {}
 
         if (savedState != null && tryRestoreFromState(savedState)) {
             restoredFromState = true;
@@ -279,6 +288,11 @@ public class ReversalPointsStrategyTrader {
                 chartScreenshotMessage = "Продано в ПРИБЫЛЬ";
                 double profitUsd = (soldFor - boughtFor) * (tradingSum / boughtFor);
                 double profitPct = (soldFor - boughtFor) / boughtFor * 100;
+                double qty = tradingSum / boughtFor;
+                totalTrades++;
+                profitableTrades++;
+                grossProfitUsd += Math.max(0, profitUsd);
+                estimatedCommissionUsd += (qty * boughtFor + qty * soldFor) * BINANCE_FEE_RATE;
                 double coinAmtSell = 0;
                 try { coinAmtSell = account.wallet().getAmountOfCoin(coin); } catch (Exception ignored) {}
                 double usdtAmtSell = 0;
@@ -289,7 +303,7 @@ public class ReversalPointsStrategyTrader {
                     "Баланс после: %.6f %s, %.2f USDT",
                     coin.getName(), Prices.round(boughtFor), Prices.round(soldFor),
                     profitPct, profitUsd,
-                    tradingSum / boughtFor, coin.getSymbol(),
+                    qty, coin.getSymbol(),
                     coinAmtSell, coin.getSymbol(), usdtAmtSell
                 );
                 ImageAndMessageSender.sendTelegramMessage(sellProfitMsg, chatID);
@@ -317,6 +331,11 @@ public class ReversalPointsStrategyTrader {
                 chartScreenshotMessage = "Продано в УБЫТОК";
                 double lossUsd = (soldFor - boughtFor) * (tradingSum / boughtFor);
                 double lossPct = (soldFor - boughtFor) / boughtFor * 100;
+                double qty = tradingSum / boughtFor;
+                totalTrades++;
+                losingTrades++;
+                grossLossUsd += Math.min(0, lossUsd);
+                estimatedCommissionUsd += (qty * boughtFor + qty * soldFor) * BINANCE_FEE_RATE;
                 double coinAmtLoss = 0;
                 try { coinAmtLoss = account.wallet().getAmountOfCoin(coin); } catch (Exception ignored) {}
                 double usdtAmtLoss = 0;
@@ -327,7 +346,7 @@ public class ReversalPointsStrategyTrader {
                     "Баланс после: %.6f %s, %.2f USDT",
                     coin.getName(), Prices.round(boughtFor), Prices.round(soldFor),
                     lossPct, lossUsd,
-                    tradingSum / boughtFor, coin.getSymbol(),
+                    qty, coin.getSymbol(),
                     coinAmtLoss, coin.getSymbol(), usdtAmtLoss
                 );
                 ImageAndMessageSender.sendTelegramMessage(sellLossMsg, chatID);
@@ -632,9 +651,13 @@ public class ReversalPointsStrategyTrader {
             Double lossTarget = (trading && boughtFor != null)
                 ? boughtFor * (1 - sellWithLossGap / 100.0) : null;
 
+            double sessionPnl = grossProfitUsd + grossLossUsd;
             ton.dariushkmetsyak.Web.TradingSessionManager.updateLiveState(
                 coinBal, usdtBal, trading, currentPrice,
-                maxPriceVal, buyTarget, boughtFor, profitTarget, lossTarget
+                maxPriceVal, buyTarget, boughtFor, profitTarget, lossTarget,
+                totalTrades, profitableTrades, losingTrades,
+                grossProfitUsd, grossLossUsd, sessionPnl, estimatedCommissionUsd,
+                startCoinBalance, coinBal
             );
         } catch (Exception ignored) {}
     }
