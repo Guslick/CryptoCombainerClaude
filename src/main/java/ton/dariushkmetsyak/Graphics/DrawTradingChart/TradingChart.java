@@ -96,11 +96,11 @@ public class TradingChart {
     void addBuyIntervalMarkerI(double timestamp, double price) {
         addSimplePointI(timestamp, price);
         intervalMarker = new IntervalMarker(timestamp, timestamp);
-        intervalMarker.setPaint(Color.decode("#F0E68C"));
+        intervalMarker.setPaint(Color.decode("#D6EAF8"));
         ValueMarker valueMarker = new ValueMarker(timestamp);
-        valueMarker.setPaint(Color.GREEN);
+        valueMarker.setPaint(Color.BLUE);
         XYTextAnnotation annotation = new XYTextAnnotation(String.valueOf(price), timestamp, price);
-        annotation.setPaint(Color.BLACK);
+        annotation.setPaint(Color.BLUE);
         annotation.setFont(new Font("Verdana", Font.BOLD, 20));
         plot.addAnnotation(annotation);
         valueMarker.setStroke(new BasicStroke(5));
@@ -132,6 +132,20 @@ public class TradingChart {
         getForCurrentThread().addSellIntervalMarkerI(timestamp, price);
     }
     void addSellIntervalMarkerI(double timestamp, double price) {
+        addSellMarkerWithColor(timestamp, price, Color.RED);
+    }
+
+    /** Sell with profit — green marker */
+    public static void addSellProfitMarker(double timestamp, double price) {
+        getForCurrentThread().addSellMarkerWithColor(timestamp, price, new Color(0, 153, 0));
+    }
+
+    /** Sell with loss — red marker */
+    public static void addSellLossMarker(double timestamp, double price) {
+        getForCurrentThread().addSellMarkerWithColor(timestamp, price, Color.RED);
+    }
+
+    void addSellMarkerWithColor(double timestamp, double price, Color color) {
         addSimplePointI(timestamp, price);
         if (intervalMarker == null) {
             intervalMarker = new IntervalMarker(timestamp, timestamp);
@@ -140,11 +154,11 @@ public class TradingChart {
         }
         intervalMarker.setEndValue(timestamp);
         XYTextAnnotation annotation = new XYTextAnnotation(String.valueOf(price), timestamp, price);
-        annotation.setPaint(Color.BLACK);
+        annotation.setPaint(color);
         annotation.setFont(new Font("Verdana", Font.BOLD, 20));
         plot.addAnnotation(annotation);
         ValueMarker valueMarker = new ValueMarker(timestamp);
-        valueMarker.setPaint(Color.RED);
+        valueMarker.setPaint(color);
         valueMarker.setStroke(new BasicStroke(5));
         plot.addDomainMarker(valueMarker);
         intervalMarker = null;
