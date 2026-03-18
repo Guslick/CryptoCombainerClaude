@@ -23,6 +23,7 @@ import ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder;
 import ton.dariushkmetsyak.Persistence.StateManager;
 import ton.dariushkmetsyak.Persistence.TradingState;
 import ton.dariushkmetsyak.Config.AppConfig;
+import ton.dariushkmetsyak.Web.TradingSessionManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -72,12 +73,20 @@ public class MenuHandler extends TelegramLongPollingBot {
             switch (currentState){
                 case WAITING_FOR_OPTION: {
                     if (messageText.equals("/start")) {
-                        setMenu(chatId, "Что будем делать?");
+                        setMenu(chatId, "Выберите действие:");
                         break;
                     } else if (messageText.equals("Остановить")) {
-                        setMenu(chatId, "Что будем делать");
+                        setMenu(chatId, "Выберите действие:");
                         break;
-                    } else if (messageText.equals("Торговля")) {
+                    } else if (messageText.equals("📸 Скриншот текущей сессии")) {
+                        sendSessionScreenshot(chatId);
+                        break;
+                    } else if (messageText.equals("Отмена")) {
+                        setMenu(chatId, "Выберите действие:");
+                        break;
+                    }
+                    // Keep backward compat for old menu items
+                    else if (messageText.equals("Торговля")) {
                         currentState = UserState.CHECK_SAVED_STATE_BINANCE;
                         checkSavedStateAndPrompt(chatId, "BINANCEACCOUNT");
                         break;
@@ -89,7 +98,7 @@ public class MenuHandler extends TelegramLongPollingBot {
                         currentState = UserState.BEFORE_BACK_TESTING_RESEARCH;
                         SendMessage message = new SendMessage();
                         message.setChatId(String.valueOf(chatId));
-                        message.setReplyMarkup(keyboardMarkup); // Устанавливаем на клавиатуре кнопку "Остановить"
+                        message.setReplyMarkup(keyboardMarkup);
                         message.setText("Какую валюту будем исследовать?");
                         setCancelKeyboard(chatId,message);
                         break;
@@ -97,15 +106,11 @@ public class MenuHandler extends TelegramLongPollingBot {
                         currentState = UserState.BEFORE_REAL_TIME_RESEARCH;
                         SendMessage message = new SendMessage();
                         message.setChatId(String.valueOf(chatId));
-                        message.setReplyMarkup(keyboardMarkup); // Устанавливаем на клавиатуре кнопку "Остановить"
+                        message.setReplyMarkup(keyboardMarkup);
                         message.setText(" Введите параметры для исследования. \n\n" +
                                 "Образец: монета, стартовая_сумма_в_USDT, сумма_сделки_в_USDT, коэффициент_покупки_(в %), коэффициент_продажи_в_прибыль_(в %),коэффициент_продажи_в_убыток_(в %) частота_обновления_графика(в сек) \n\n"+
                                 "Пример: bitcoin, 150, 100, 3.5, 2, 8, 30 ");
-
                         setCancelKeyboard(chatId,message);
-                        break;
-                    } else if (messageText.equals("Отмена")) {
-                        setMenu(chatId, "Что будем делать");
                         break;
                     }
                     break;
@@ -325,24 +330,11 @@ public class MenuHandler extends TelegramLongPollingBot {
         // Создаем ряды кнопок
         List<KeyboardRow> keyboard = new ArrayList<>();
 
-        // Первый ряд
+        // Одна кнопка — скриншот текущей сессии
         KeyboardRow row1 = new KeyboardRow();
-        row1.add("Торговля");
-        row1.add("Тестовая торговля на Binance");
+        row1.add("📸 Скриншот текущей сессии");
 
-        // Второй ряд
-        KeyboardRow row2 = new KeyboardRow();
-        row2.add("Исследование в реальном времени");
-        row2.add("Историческое исследование");
-
-        // Третий ряд (одна кнопка)
-        KeyboardRow row3 = new KeyboardRow();
-        row3.add("Отмена");
-
-        // Добавляем ряды в клавиатуру
         keyboard.add(row1);
-        keyboard.add(row2);
-        keyboard.add(row3);
 
         // Устанавливаем клавиатуру
         keyboardMarkup.setKeyboard(keyboard);
@@ -372,6 +364,68 @@ public class MenuHandler extends TelegramLongPollingBot {
     }
 }
 
+
+private void sendSessionScreenshot(long chatId) {
+    try {
+        TradingSessionManager mgr = TradingSessionManager.forUser(chatId);
+        List<Map<String, Object>> sessions = mgr.getAllSessions();
+
+        // Find active (RUNNING) session
+        Map<String, Object> activeSession = null;
+        for (Map<String, Object> sess : sessions) {
+            if ("RUNNING".equals(sess.get("status"))) {
+                activeSession = sess;
+                break;
+            }
+        }
+
+        if (activeSession == null) {
+            // Check for any sessions at all
+            if (sessions.isEmpty()) {
+                sendText(chatId, "📭 Нет сессий.\n\nСоздайте сессию через MiniApp.");
+            } else {
+                // Show last session status
+                Map<String, Object> lastSess = sessions.get(0);
+                String status = String.valueOf(lastSess.getOrDefault("status", "UNKNOWN"));
+                String coinName = String.valueOf(lastSess.getOrDefault("coinName", "—"));
+                String id = String.valueOf(lastSess.getOrDefault("id", "—"));
+                sendText(chatId, "📊 Нет активных сессий.\n\n" +
+                        "Последняя сессия:\n" +
+                        "Монета: " + coinName + "\n" +
+                        "Статус: " + status + "\n" +
+                        "ID: " + id);
+            }
+            return;
+        }
+
+        // Build session info text
+        String coinName = String.valueOf(activeSession.getOrDefault("coinName", "—"));
+        String sessionId = String.valueOf(activeSession.getOrDefault("id", "—"));
+        double currentPrice = activeSession.get("currentPrice") != null ? ((Number) activeSession.get("currentPrice")).doubleValue() : 0;
+        boolean isTrading = Boolean.TRUE.equals(activeSession.get("isTrading"));
+        int profitTrades = activeSession.get("profitTradeCount") != null ? ((Number) activeSession.get("profitTradeCount")).intValue() : 0;
+        int lossTrades = activeSession.get("lossTradeCount") != null ? ((Number) activeSession.get("lossTradeCount")).intValue() : 0;
+        double profitSum = activeSession.get("profitSum") != null ? ((Number) activeSession.get("profitSum")).doubleValue() : 0;
+        double lossSum = activeSession.get("lossSum") != null ? ((Number) activeSession.get("lossSum")).doubleValue() : 0;
+        double netPnl = profitSum + lossSum;
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("📸 Сессия: ").append(coinName.toUpperCase()).append("\n");
+        sb.append("Статус: 🟢 RUNNING\n");
+        sb.append("Текущая цена: $").append(String.format("%.4f", currentPrice)).append("\n");
+        sb.append("В позиции: ").append(isTrading ? "Да" : "Нет").append("\n");
+        sb.append("Сделок +: ").append(profitTrades).append("\n");
+        sb.append("Сделок -: ").append(lossTrades).append("\n");
+        sb.append("PnL: ").append(String.format("%.2f", netPnl)).append(" USD\n");
+        sb.append("ID: ").append(sessionId);
+
+        sendText(chatId, sb.toString());
+
+    } catch (Exception e) {
+        log.error("Error sending session screenshot", e);
+        sendText(chatId, "❌ Ошибка получения данных сессии: " + e.getMessage());
+    }
+}
 
 private void setCancelKeyboard(long chatId, SendMessage message) {
         try {

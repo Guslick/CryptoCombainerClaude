@@ -704,6 +704,15 @@ public class TradingSessionManager {
                     evList.add(evm);
                 }
                 rm.put("tradeEvents", evList);
+                // Equity curve for yield chart
+                List<Map<String, Object>> eqList = new java.util.ArrayList<>();
+                for (double[] eq : tester.getEquityCurve()) {
+                    Map<String, Object> eqm = new LinkedHashMap<>();
+                    eqm.put("timestamp", (long) eq[0]);
+                    eqm.put("equity", eq[1]);
+                    eqList.add(eqm);
+                }
+                rm.put("equityCurve", eqList);
                 lastBacktestResult.set(rm);
                 info.status = "DONE"; info.endedAt = System.currentTimeMillis();
                 info.backtestProgressCurrent = info.backtestProgressTotal;
@@ -821,6 +830,15 @@ public class TradingSessionManager {
                     evList.add(evm);
                 }
                 m.put("tradeEvents", evList);
+                // Equity curve for yield chart
+                List<Map<String, Object>> eqList = new java.util.ArrayList<>();
+                for (double[] eq : tester.getEquityCurve()) {
+                    Map<String, Object> eqm = new LinkedHashMap<>();
+                    eqm.put("timestamp", (long) eq[0]);
+                    eqm.put("equity", eq[1]);
+                    eqList.add(eqm);
+                }
+                m.put("equityCurve", eqList);
                 top.add(m);
             }
             return top;

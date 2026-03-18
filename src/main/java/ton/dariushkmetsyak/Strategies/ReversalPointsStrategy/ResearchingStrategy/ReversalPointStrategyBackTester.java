@@ -59,6 +59,9 @@ public class ReversalPointStrategyBackTester {
     // Trade events for chart visualization
     private final List<double[]> tradeEvents = new ArrayList<>(); // [timestamp, price, type] type: 0=buy, 1=sell_profit, 2=sell_loss
 
+    // Equity curve: [timestamp, equityValue] — recorded at each trade event, starting from 0
+    private final List<double[]> equityCurve = new ArrayList<>();
+
     static {
         try {
             USDT=Coin.createCoin("Tether");
@@ -75,6 +78,7 @@ public class ReversalPointStrategyBackTester {
     public int getProgressTotal() { return progressTotal; }
 
     public List<double[]> getTradeEvents() { return tradeEvents; }
+    public List<double[]> getEquityCurve() { return equityCurve; }
 
     public ReversalPointStrategyBackTester(Coin coin, Chart chart, double tradingSum, double buyGap, double sellWithProfitGap, double sellWithLossGap) {
         this(coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, "Binance", 0.1);
@@ -189,9 +193,18 @@ public class ReversalPointStrategyBackTester {
 
     };
 
+    private void recordEquity(double timestamp, double currentPrice) {
+        double usdt = account.wallet().getAllAssets().get(USDT);
+        double coinAmt = account.wallet().getAllAssets().get(coin);
+        double equity = usdt + coinAmt * currentPrice - tradingSum; // profit relative to 0
+        equityCurve.add(new double[]{timestamp, equity});
+    }
+
     public BackTestResult startBackTest(){
         progressTotal = chart.getPrices().size();
         progressCurrent.set(0);
+        // Record initial equity = 0
+        equityCurve.add(new double[]{chart.getPrices().get(0)[0], 0.0});
         init(chart.getPrices().get(0)[0],chart.getPrices().get(0)[1]);
         for (int i=0; i<chart.getPrices().size();i++){
             try {
@@ -208,6 +221,11 @@ public class ReversalPointStrategyBackTester {
             account.wallet().getAllAssets().replace(USDT, USDTinWallet);
             account.wallet().getAllAssets().replace(coin, 0d);
         }
+        // Record final equity
+        double lastTs = chart.getPrices().get(chart.getPrices().size()-1)[0];
+        double lastPrice = chart.getPrices().get(chart.getPrices().size()-1)[1];
+        recordEquity(lastTs, lastPrice);
+
         // Free memory - reversalArrayList is not needed after backtest
         reversalArrayList.clear();
         reversalArrayList.trimToSize();
@@ -250,6 +268,7 @@ public class ReversalPointStrategyBackTester {
 
                 // Record trade event for chart
                 tradeEvents.add(new double[]{pointTimestamp, pointPrice, 1}); // 1=sell_profit
+                recordEquity(pointTimestamp, pointPrice);
 
                 isSold =true;
                 chartScreenshotMessage = "SOLD WITH PROFIT";
@@ -278,6 +297,7 @@ public class ReversalPointStrategyBackTester {
 
                 // Record trade event for chart
                 tradeEvents.add(new double[]{pointTimestamp, pointPrice, 2}); // 2=sell_loss
+                recordEquity(pointTimestamp, pointPrice);
 
                 isSold=true;
                 chartScreenshotMessage = "SOLD WITH LOSS";
@@ -329,6 +349,7 @@ public class ReversalPointStrategyBackTester {
                                 trading = true;
                                 // Record trade event for chart
                                 tradeEvents.add(new double[]{pointTimestamp, pointPrice, 0}); // 0=buy
+                                recordEquity(pointTimestamp, pointPrice);
                         }
                     }
                     currentMaxPrice[0] = pointPrice;

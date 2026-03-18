@@ -552,9 +552,14 @@ public class ReversalPointsStrategyTrader {
         int consecutiveErrors = 0;
         final int maxConsecutiveErrors = 10;
 
+        boolean firstTick = true;
         while (true) {
             try {
-                TimeUnit.SECONDS.sleep(updateTimeout);
+                // First tick executes immediately; subsequent ticks wait for the poll interval
+                if (!firstTick) {
+                    TimeUnit.SECONDS.sleep(updateTimeout);
+                }
+                firstTick = false;
 
                 // Fetch current price with retry
                 double currentPrice;
