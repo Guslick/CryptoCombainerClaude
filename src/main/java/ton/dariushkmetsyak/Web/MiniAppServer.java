@@ -184,8 +184,19 @@ public class MiniAppServer {
                 String exchangeName = (String) body.getOrDefault("exchangeName", "Binance");
                 double commissionRate = toDouble(body.get("commissionRate"), 0.1);
                 int topN = toInt(body.get("topN"), 10);
+                double buyMin = toDouble(body.get("buyMin"), 1.0);
+                double buyMax = toDouble(body.get("buyMax"), 10.0);
+                double buyStep = toDouble(body.get("buyStep"), 1.0);
+                double profitMin = toDouble(body.get("profitMin"), 1.0);
+                double profitMax = toDouble(body.get("profitMax"), 5.0);
+                double profitStep = toDouble(body.get("profitStep"), 0.5);
+                double lossMin = toDouble(body.get("lossMin"), 3.0);
+                double lossMax = toDouble(body.get("lossMax"), 15.0);
+                double lossStep = toDouble(body.get("lossStep"), 1.0);
                 TradingSessionManager.SessionInfo info = TradingSessionManager.forUser(userId)
-                        .startTopStrategies(coinName, tradingSum, chartType, exchangeName, commissionRate, topN);
+                        .startTopStrategies(coinName, tradingSum, chartType, exchangeName, commissionRate, topN,
+                                buyMin, buyMax, buyStep, profitMin, profitMax, profitStep,
+                                lossMin, lossMax, lossStep);
                 return info.toMap();
             });
         });

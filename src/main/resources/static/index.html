@@ -553,6 +553,33 @@
               <span id="optCommissionDisplay" style="font-family:var(--font-head);font-size:12px;color:#ffea00;white-space:nowrap">0.1% / сделку</span>
             </div>
           </div>
+          <div class="form-full" style="margin-top:4px;padding-top:8px;border-top:1px solid var(--border)">
+            <div style="font-family:var(--font-head);font-size:10px;color:var(--accent);margin-bottom:8px">📥 ДИАПАЗОН ПОКУПКИ (%)</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
+              <div class="input-wrap"><label class="input-label">МИН</label><input type="number" id="optBuyMin" value="1" min="0.1" step="0.1" oninput="updateCombinationsCount()"></div>
+              <div class="input-wrap"><label class="input-label">МАКС</label><input type="number" id="optBuyMax" value="10" min="0.1" step="0.1" oninput="updateCombinationsCount()"></div>
+              <div class="input-wrap"><label class="input-label">ШАГ</label><input type="number" id="optBuyStep" value="1" min="0.1" step="0.1" oninput="updateCombinationsCount()"></div>
+            </div>
+          </div>
+          <div class="form-full" style="margin-top:4px">
+            <div style="font-family:var(--font-head);font-size:10px;color:var(--green);margin-bottom:8px">📈 ДИАПАЗОН ПРОДАЖИ + (%)</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
+              <div class="input-wrap"><label class="input-label">МИН</label><input type="number" id="optProfitMin" value="1" min="0.1" step="0.1" oninput="updateCombinationsCount()"></div>
+              <div class="input-wrap"><label class="input-label">МАКС</label><input type="number" id="optProfitMax" value="5" min="0.1" step="0.1" oninput="updateCombinationsCount()"></div>
+              <div class="input-wrap"><label class="input-label">ШАГ</label><input type="number" id="optProfitStep" value="0.5" min="0.1" step="0.1" oninput="updateCombinationsCount()"></div>
+            </div>
+          </div>
+          <div class="form-full" style="margin-top:4px">
+            <div style="font-family:var(--font-head);font-size:10px;color:var(--red);margin-bottom:8px">📉 ДИАПАЗОН ПРОДАЖИ - (%)</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
+              <div class="input-wrap"><label class="input-label">МИН</label><input type="number" id="optLossMin" value="3" min="0.1" step="0.1" oninput="updateCombinationsCount()"></div>
+              <div class="input-wrap"><label class="input-label">МАКС</label><input type="number" id="optLossMax" value="15" min="0.1" step="0.1" oninput="updateCombinationsCount()"></div>
+              <div class="input-wrap"><label class="input-label">ШАГ</label><input type="number" id="optLossStep" value="1" min="0.1" step="0.1" oninput="updateCombinationsCount()"></div>
+            </div>
+          </div>
+          <div class="form-full" style="margin-top:6px">
+            <div style="font-size:10px;color:var(--muted)" id="optCombinationsCount">Комбинаций: ~270</div>
+          </div>
         </div>
       </div>
       <div id="optAlert" style="display:none"></div>
@@ -794,7 +821,7 @@ function showPage(pageId) {
   else stopSessionsRefresh();
   if (pageId === 'trade' || pageId === 'research') checkActiveSessionBanner();
   if (pageId === 'profile') initProfilePage();
-  if (pageId === 'optimize') { updateOptCommission(); }
+  if (pageId === 'optimize') { updateOptCommission(); updateCombinationsCount(); }
 }
 
 // ============================================================
@@ -1154,7 +1181,7 @@ async function startBacktest() {
     _btSessionId = sessionData.id;
     showAlert('btAlert','info','⏳ Бэктест запущен...');
     btn.innerHTML='<div class="spinner"></div> Выполняется...';
-    // Poll for status — unlimited attempts, check progress
+    // Poll for status — unlimited attempts, check progress (fast poll for smooth progress bar)
     const pollId = setInterval(async ()=>{
       try {
         const sr = await fetch(`${API_BASE}/api/trading/sessions/${sessionData.id}`, {headers:authHeaders()}).catch(()=>null);
@@ -1169,7 +1196,9 @@ async function startBacktest() {
         document.getElementById('btProgressPct').textContent = pct + '%';
         if (sess.status==='DONE') {
           clearInterval(pollId);
-          document.getElementById('btProgressWrap').style.display='none';
+          document.getElementById('btProgressBar').style.width = '100%';
+          document.getElementById('btProgressPct').textContent = '100%';
+          setTimeout(() => { document.getElementById('btProgressWrap').style.display='none'; }, 300);
           const rr = await fetch(`${API_BASE}/api/backtest/result`, {headers:authHeaders()});
           const result = await rr.json();
           _btLastResult = result;
@@ -1183,7 +1212,7 @@ async function startBacktest() {
           btn.disabled=false; btn.innerHTML='🧪 ЗАПУСТИТЬ БЭКТЕСТ';
         }
       } catch(e) { /* ignore poll error */ }
-    }, 1500);
+    }, 700);
   } catch(e) {
     document.getElementById('btProgressWrap').style.display='none';
     showAlert('btAlert','error','❌ '+e.message);
@@ -1275,6 +1304,7 @@ function showBacktestChart() {
   const priceData = [];
   const markers = [];
 
+  let lastBuyPrice = null;
   for (const ev of events) {
     const ts = Array.isArray(ev) ? ev[0] : ev.timestamp;
     const price = Array.isArray(ev) ? ev[1] : ev.price;
@@ -1282,9 +1312,21 @@ function showBacktestChart() {
     const timeSec = Math.floor(ts / 1000);
     priceData.push({ time: timeSec, value: price });
     let color, shape, text;
-    if (type === 0) { color = '#1565C0'; shape = 'arrowUp'; text = 'B'; }
-    else if (type === 1) { color = '#00e676'; shape = 'arrowDown'; text = 'S+'; }
-    else { color = '#ff1744'; shape = 'arrowDown'; text = 'S-'; }
+    if (type === 0) {
+      color = '#1565C0'; shape = 'arrowUp';
+      text = 'B (' + formatPrice(price) + ')';
+      lastBuyPrice = price;
+    } else if (type === 1) {
+      color = '#00e676'; shape = 'arrowDown';
+      const pctChange = lastBuyPrice ? ((price - lastBuyPrice) / lastBuyPrice * 100).toFixed(1) : '?';
+      text = 'S+ ' + (lastBuyPrice ? (pctChange >= 0 ? '+' : '') + pctChange + '%' : '');
+      lastBuyPrice = null;
+    } else {
+      color = '#ff1744'; shape = 'arrowDown';
+      const pctChange = lastBuyPrice ? ((price - lastBuyPrice) / lastBuyPrice * 100).toFixed(1) : '?';
+      text = 'S- ' + (lastBuyPrice ? (pctChange >= 0 ? '+' : '') + pctChange + '%' : '');
+      lastBuyPrice = null;
+    }
     markers.push({ time: timeSec, position: type === 0 ? 'belowBar' : 'aboveBar', color, shape, text });
   }
 
@@ -1323,6 +1365,15 @@ async function startOptimize() {
     chartType: document.getElementById('optChartType').value || 'yearly',
     exchangeName: exchange,
     commissionRate,
+    buyMin: +document.getElementById('optBuyMin').value || 1,
+    buyMax: +document.getElementById('optBuyMax').value || 10,
+    buyStep: +document.getElementById('optBuyStep').value || 1,
+    profitMin: +document.getElementById('optProfitMin').value || 1,
+    profitMax: +document.getElementById('optProfitMax').value || 5,
+    profitStep: +document.getElementById('optProfitStep').value || 0.5,
+    lossMin: +document.getElementById('optLossMin').value || 3,
+    lossMax: +document.getElementById('optLossMax').value || 15,
+    lossStep: +document.getElementById('optLossStep').value || 1,
   };
 
   if (_optPollTimer) { clearInterval(_optPollTimer); _optPollTimer = null; }
@@ -1351,7 +1402,9 @@ async function startOptimize() {
 
         if (sess.status === 'DONE') {
           clearInterval(_optPollTimer); _optPollTimer = null;
-          document.getElementById('optProgressWrap').style.display = 'none';
+          document.getElementById('optProgressBar').style.width = '100%';
+          document.getElementById('optProgressPct').textContent = '100%';
+          setTimeout(() => { document.getElementById('optProgressWrap').style.display = 'none'; }, 300);
           // Fetch optimize result (stored in lastBacktestResult as {topStrategies:[...]})
           const rr = await fetch(`${API_BASE}/api/backtest/result`, { headers: authHeaders() });
           const optResult = await rr.json();
@@ -1365,7 +1418,7 @@ async function startOptimize() {
           btn.disabled = false; btn.innerHTML = '🔍 НАЙТИ ЛУЧШИЕ СТРАТЕГИИ';
         }
       } catch(e) { /* ignore poll error */ }
-    }, 1500);
+    }, 700);
   } catch(e) {
     document.getElementById('optProgressWrap').style.display = 'none';
     showAlert('optAlert','error','❌ ' + e.message);
@@ -1373,14 +1426,23 @@ async function startOptimize() {
   }
 }
 
+let _optResults = []; // store optimize results for chart viewing
+let _optChartInstances = {}; // chart instances per result index
+
 function showOptimizeResult(results) {
   const card = document.getElementById('optResultCard');
   const list = document.getElementById('optResultList');
+  // Clean up old chart instances
+  Object.values(_optChartInstances).forEach(ch => { try { ch.remove(); } catch(e){} });
+  _optChartInstances = {};
+
   if (!Array.isArray(results) || !results.length) {
+    _optResults = [];
     list.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:8px 0">Нет результатов</div>';
     card.style.display = 'block';
     return;
   }
+  _optResults = results;
   let html = '';
   results.forEach((r, i) => {
     const profit = r.profitUsd || 0;
@@ -1391,6 +1453,7 @@ function showOptimizeResult(results) {
     const pos = profitAfter >= 0;
     const profTrades = r.profitTradeCount || 0;
     const lossTrades = r.lossTradeCount || 0;
+    const hasTrades = r.tradeEvents && r.tradeEvents.length > 0;
     html += `<div style="background:var(--bg3);border-radius:var(--radius-sm);padding:10px 12px;border:1px solid var(--border);margin-bottom:8px">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
         <span style="font-family:var(--font-head);font-size:13px;color:${pos?'var(--green)':'var(--red)'};min-width:28px">#${i+1}</span>
@@ -1405,11 +1468,108 @@ function showOptimizeResult(results) {
         <span style="color:var(--red)">-${lossTrades} сделок</span>
         ${commission > 0 ? `&nbsp; 💸 <span style="color:#ffea00">комиссия: $${commission.toFixed(4)}</span>` : ''}
       </div>
+      ${hasTrades ? `<div style="margin-top:6px"><button class="btn btn-secondary btn-sm" onclick="toggleOptChart(${i})" id="optChartBtn-${i}">📈 График</button></div>
+      <div id="optChartWrap-${i}" style="display:none;margin-top:8px">
+        <div style="font-size:10px;color:var(--muted);margin-bottom:4px">
+          <span style="color:#1565C0">●</span> Покупка &nbsp;
+          <span style="color:#00e676">●</span> Продажа+ &nbsp;
+          <span style="color:#ff1744">●</span> Продажа-
+        </div>
+        <div id="optChartContainer-${i}" style="width:100%;height:220px;background:var(--bg);border-radius:var(--radius-sm)"></div>
+      </div>` : ''}
     </div>`;
   });
   list.innerHTML = html;
   card.style.display = 'block';
   card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function toggleOptChart(idx) {
+  const wrap = document.getElementById('optChartWrap-' + idx);
+  if (!wrap) return;
+  const isVisible = wrap.style.display !== 'none';
+  if (isVisible) {
+    wrap.style.display = 'none';
+    if (_optChartInstances[idx]) { try { _optChartInstances[idx].remove(); } catch(e){} delete _optChartInstances[idx]; }
+    return;
+  }
+  wrap.style.display = 'block';
+  renderOptChart(idx);
+}
+
+function renderOptChart(idx) {
+  const r = _optResults[idx];
+  if (!r || !r.tradeEvents || !r.tradeEvents.length) return;
+  const container = document.getElementById('optChartContainer-' + idx);
+  if (!container) return;
+  if (_optChartInstances[idx]) { try { _optChartInstances[idx].remove(); } catch(e){} }
+  container.innerHTML = '';
+
+  const w = container.getBoundingClientRect().width || (window.innerWidth - 48);
+  const ch = LightweightCharts.createChart(container, {
+    width: w, height: 220,
+    layout: { background: { type: 'solid', color: '#0a0e1a' }, textColor: '#6878a8' },
+    grid: { vertLines: { color: 'rgba(42,53,96,0.2)' }, horzLines: { color: 'rgba(42,53,96,0.2)' } },
+    timeScale: { timeVisible: true, secondsVisible: false },
+    rightPriceScale: { borderColor: '#2a3560' },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+  });
+  _optChartInstances[idx] = ch;
+
+  const priceSeries = ch.addLineSeries({ color: '#00e5ff', lineWidth: 1, priceLineVisible: false });
+  const events = r.tradeEvents;
+  const priceData = [];
+  const markers = [];
+
+  let optLastBuyPrice = null;
+  for (const ev of events) {
+    const ts = ev.timestamp || ev[0];
+    const price = ev.price || ev[1];
+    const type = ev.eventType != null ? ev.eventType : (ev[2] != null ? ev[2] : ev.type);
+    const timeSec = Math.floor(ts / 1000);
+    priceData.push({ time: timeSec, value: price });
+    let color, shape, text;
+    if (type === 0) {
+      color = '#1565C0'; shape = 'arrowUp';
+      text = 'B (' + formatPrice(price) + ')';
+      optLastBuyPrice = price;
+    } else if (type === 1) {
+      color = '#00e676'; shape = 'arrowDown';
+      const pctChange = optLastBuyPrice ? ((price - optLastBuyPrice) / optLastBuyPrice * 100).toFixed(1) : '?';
+      text = 'S+ ' + (optLastBuyPrice ? (pctChange >= 0 ? '+' : '') + pctChange + '%' : '');
+      optLastBuyPrice = null;
+    } else {
+      color = '#ff1744'; shape = 'arrowDown';
+      const pctChange = optLastBuyPrice ? ((price - optLastBuyPrice) / optLastBuyPrice * 100).toFixed(1) : '?';
+      text = 'S- ' + (optLastBuyPrice ? (pctChange >= 0 ? '+' : '') + pctChange + '%' : '');
+      optLastBuyPrice = null;
+    }
+    markers.push({ time: timeSec, position: type === 0 ? 'belowBar' : 'aboveBar', color, shape, text });
+  }
+
+  priceData.sort((a, b) => a.time - b.time);
+  markers.sort((a, b) => a.time - b.time);
+  priceSeries.setData(priceData);
+  priceSeries.setMarkers(markers);
+  ch.timeScale().fitContent();
+
+  new ResizeObserver(() => { if (_optChartInstances[idx]) ch.applyOptions({ width: container.clientWidth }); }).observe(container);
+}
+
+function updateCombinationsCount() {
+  const buyMin = +document.getElementById('optBuyMin')?.value || 1;
+  const buyMax = +document.getElementById('optBuyMax')?.value || 10;
+  const buyStep = +document.getElementById('optBuyStep')?.value || 1;
+  const profitMin = +document.getElementById('optProfitMin')?.value || 1;
+  const profitMax = +document.getElementById('optProfitMax')?.value || 5;
+  const profitStep = +document.getElementById('optProfitStep')?.value || 0.5;
+  const lossMin = +document.getElementById('optLossMin')?.value || 3;
+  const lossMax = +document.getElementById('optLossMax')?.value || 15;
+  const lossStep = +document.getElementById('optLossStep')?.value || 1;
+  const count = (v1, v2, s) => s > 0 ? Math.floor((v2 - v1) / s) + 1 : 1;
+  const total = count(buyMin, buyMax, buyStep) * count(profitMin, profitMax, profitStep) * count(lossMin, lossMax, lossStep);
+  const el = document.getElementById('optCombinationsCount');
+  if (el) el.textContent = 'Комбинаций: ~' + total;
 }
 
 // ============================================================
@@ -1452,7 +1612,7 @@ async function loadSessions() {
       list.innerHTML = sessions.map(s => buildSessionCard(s)).join('');
       sessions.forEach(s => { _sessionsData[s.id] = s; });
       // Init charts after DOM is painted
-      sessions.filter(s => s.status === 'RUNNING').forEach(s => {
+      sessions.filter(s => s.status === 'RUNNING' && s.type !== 'BACKTEST').forEach(s => {
         requestAnimationFrame(() => requestAnimationFrame(() => initInlineChart(s)));
       });
     } else {
@@ -1463,7 +1623,7 @@ async function loadSessions() {
         patchSessionCard(s, prev);
         // Chart data is refreshed by per-session timer (startChartTimer)
         // Only init chart if it hasn't been created yet
-        if (s.status === 'RUNNING' && !inlineCharts[s.id]) {
+        if (s.status === 'RUNNING' && s.type !== 'BACKTEST' && !inlineCharts[s.id]) {
           requestAnimationFrame(() => requestAnimationFrame(() => initInlineChart(s)));
         }
       });
@@ -1627,9 +1787,10 @@ function buildSessionCard(s) {
   const tpHtml = buildTargetPricesHtml(s);
   const actionsHtml = buildActionsHtml(s);
 
-  // Chart is shown only for running sessions; collapsed state persists via _chartCollapsed
+  // Chart is shown only for running non-backtest sessions; collapsed state persists via _chartCollapsed
+  const isBacktest = s.type === 'BACKTEST';
   const isChartCollapsed = _chartCollapsed[s.id] || false;
-  const chartHtml = isRunning ? `
+  const chartHtml = (isRunning && !isBacktest) ? `
       <div class="inline-chart-wrap" id="cwrap-${s.id}">
         <div class="inline-chart-toolbar">
           <span class="inline-chart-label" id="chart-lbl-${s.id}">📈 обновление через <span id="chart-cd-${s.id}" style="color:var(--accent);font-family:var(--font-head);">—</span>с</span>
@@ -1897,6 +2058,7 @@ function applyChartMarkers(lineSeries, data, events, inlineMode = false) {
   }
 
   const seen = new Set();
+  let inlineLastBuyPrice = null;
   const markers = events
     .filter(e => e.type === 'BUY' || e.type === 'SELL')
     .map(e => {
@@ -1909,17 +2071,22 @@ function applyChartMarkers(lineSeries, data, events, inlineMode = false) {
 
       // Determine sell type by inspecting event message
       let markerColor, markerPosition, markerText;
+      const price = nearest.value;
       if (e.type === 'BUY') {
         markerColor = PC.buy;       // blue
         markerPosition = 'belowBar';
-        markerText = 'B';
+        markerText = 'B (' + formatPrice(price) + ')';
+        inlineLastBuyPrice = price;
       } else {
         // SELL — check if profit or loss
         const msg = (e.message || '').toLowerCase();
         const isProfit = msg.includes('прибыль') || msg.includes('profit') || msg.includes('+');
         markerColor = isProfit ? PC.sellProfit : PC.sold; // green or red
         markerPosition = 'aboveBar';
-        markerText = isProfit ? 'P' : 'L';
+        const pctChange = inlineLastBuyPrice ? ((price - inlineLastBuyPrice) / inlineLastBuyPrice * 100).toFixed(1) : null;
+        const prefix = isProfit ? 'S+' : 'S-';
+        markerText = pctChange !== null ? prefix + ' ' + (pctChange >= 0 ? '+' : '') + pctChange + '%' : prefix;
+        inlineLastBuyPrice = null;
       }
 
       return {
@@ -1927,7 +2094,7 @@ function applyChartMarkers(lineSeries, data, events, inlineMode = false) {
         position: markerPosition,
         color: markerColor,
         shape: 'circle',
-        text: '',
+        text: markerText,
       };
     })
     .filter(m => m && m.time >= minT && m.time <= maxT)

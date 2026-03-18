@@ -728,11 +728,24 @@ public class TradingSessionManager {
         return info;
     }
 
+    /** Generate range array from min/max/step */
+    private static double[] generateRange(double min, double max, double step) {
+        if (step <= 0 || min > max) return new double[]{min};
+        java.util.List<Double> vals = new java.util.ArrayList<>();
+        for (double v = min; v <= max + step * 0.01; v += step) {
+            vals.add(Math.round(v * 100.0) / 100.0);
+        }
+        return vals.stream().mapToDouble(Double::doubleValue).toArray();
+    }
+
     /** Find top N strategies by brute-force backtest over parameter grid */
     public List<Map<String, Object>> findTopStrategies(String coinName, double tradingSum,
                                                         String chartType, String exchangeName,
                                                         double commissionRate, int topN,
-                                                        SessionInfo progressInfo) {
+                                                        SessionInfo progressInfo,
+                                                        double buyMin, double buyMax, double buyStep,
+                                                        double profitMin, double profitMax, double profitStep,
+                                                        double lossMin, double lossMax, double lossStep) {
         try {
             Coin coin = CoinsList.getCoinByName(coinName);
             Chart chart;
@@ -745,9 +758,9 @@ public class TradingSessionManager {
                 default: chart = Chart.get1DayUntilNowChart_5MinuteInterval(coin); break;
             }
 
-            double[] buyGaps = {1.0, 2.0, 3.0, 3.5, 4.0, 5.0, 7.0, 10.0};
-            double[] profitGaps = {1.0, 1.5, 2.0, 3.0, 4.0, 5.0};
-            double[] lossGaps = {3.0, 5.0, 7.0, 8.0, 10.0, 15.0};
+            double[] buyGaps = generateRange(buyMin, buyMax, buyStep);
+            double[] profitGaps = generateRange(profitMin, profitMax, profitStep);
+            double[] lossGaps = generateRange(lossMin, lossMax, lossStep);
 
             int totalCombinations = buyGaps.length * profitGaps.length * lossGaps.length;
             if (progressInfo != null) {
@@ -755,26 +768,28 @@ public class TradingSessionManager {
                 progressInfo.backtestProgressCurrent = 0;
             }
 
-            List<ReversalPointStrategyBackTester.BackTestResult> results = new java.util.ArrayList<>();
+            // Store tester + result pairs for top-N trade events extraction
+            List<Object[]> resultPairs = new java.util.ArrayList<>(); // [BackTestResult, ReversalPointStrategyBackTester]
             int done = 0;
             for (double bg : buyGaps) {
                 for (double pg : profitGaps) {
                     for (double lg : lossGaps) {
-                        if (pg >= lg) { done++; continue; }
+                        if (pg >= lg) { done++; if (progressInfo != null) progressInfo.backtestProgressCurrent = done; continue; }
                         ReversalPointStrategyBackTester tester = new ReversalPointStrategyBackTester(
                                 coin, chart, tradingSum, bg, pg, lg, exchangeName, commissionRate);
                         ReversalPointStrategyBackTester.BackTestResult r = tester.startBackTest();
-                        if (r != null) results.add(r);
+                        if (r != null) resultPairs.add(new Object[]{r, tester});
                         done++;
                         if (progressInfo != null) progressInfo.backtestProgressCurrent = done;
                     }
                 }
             }
 
-            results.sort(Comparator.comparingDouble(r -> -r.getProfitInUsdAfterCommission()));
+            resultPairs.sort(Comparator.comparingDouble(p -> -((ReversalPointStrategyBackTester.BackTestResult) p[0]).getProfitInUsdAfterCommission()));
             List<Map<String, Object>> top = new java.util.ArrayList<>();
-            for (int i = 0; i < Math.min(topN, results.size()); i++) {
-                ReversalPointStrategyBackTester.BackTestResult r = results.get(i);
+            for (int i = 0; i < Math.min(topN, resultPairs.size()); i++) {
+                ReversalPointStrategyBackTester.BackTestResult r = (ReversalPointStrategyBackTester.BackTestResult) resultPairs.get(i)[0];
+                ReversalPointStrategyBackTester tester = (ReversalPointStrategyBackTester) resultPairs.get(i)[1];
                 Map<String, Object> m = new LinkedHashMap<>();
                 m.put("rank", i + 1);
                 m.put("buyGap", r.getBuyGap());
@@ -790,6 +805,16 @@ public class TradingSessionManager {
                 m.put("totalCommission", r.getTotalCommission());
                 m.put("exchangeName", r.getExchangeName());
                 m.put("commissionRate", r.getCommissionRate());
+                // Trade events for chart visualization
+                List<Map<String, Object>> evList = new java.util.ArrayList<>();
+                for (double[] ev : tester.getTradeEvents()) {
+                    Map<String, Object> evm = new LinkedHashMap<>();
+                    evm.put("timestamp", (long) ev[0]);
+                    evm.put("price", ev[1]);
+                    evm.put("eventType", (int) ev[2]);
+                    evList.add(evm);
+                }
+                m.put("tradeEvents", evList);
                 top.add(m);
             }
             return top;
@@ -801,7 +826,10 @@ public class TradingSessionManager {
 
     public SessionInfo startTopStrategies(String coinName, double tradingSum,
                                            String chartType, String exchangeName,
-                                           double commissionRate, int topN) {
+                                           double commissionRate, int topN,
+                                           double buyMin, double buyMax, double buyStep,
+                                           double profitMin, double profitMax, double profitStep,
+                                           double lossMin, double lossMax, double lossStep) {
         String id = "optimize_" + System.currentTimeMillis();
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("tradingSum", tradingSum); params.put("chartType", chartType);
@@ -813,7 +841,9 @@ public class TradingSessionManager {
             registerThread(id);
             try {
                 List<Map<String, Object>> top = findTopStrategies(coinName, tradingSum, chartType,
-                        exchangeName, commissionRate, topN, info);
+                        exchangeName, commissionRate, topN, info,
+                        buyMin, buyMax, buyStep, profitMin, profitMax, profitStep,
+                        lossMin, lossMax, lossStep);
                 Map<String, Object> rm = new LinkedHashMap<>();
                 rm.put("coinName", coinName); rm.put("chartType", chartType);
                 rm.put("exchangeName", exchangeName); rm.put("commissionRate", commissionRate);
