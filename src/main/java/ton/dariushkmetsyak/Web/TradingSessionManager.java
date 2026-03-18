@@ -768,8 +768,9 @@ public class TradingSessionManager {
                 progressInfo.backtestProgressCurrent = 0;
             }
 
-            // Store tester + result pairs for top-N trade events extraction
-            List<Object[]> resultPairs = new java.util.ArrayList<>(); // [BackTestResult, ReversalPointStrategyBackTester]
+            // Bounded min-heap: keep only topN best results to avoid OOM
+            java.util.PriorityQueue<Object[]> topHeap = new java.util.PriorityQueue<>(topN + 1,
+                    Comparator.comparingDouble(p -> ((ReversalPointStrategyBackTester.BackTestResult) p[0]).getProfitInUsdAfterCommission()));
             int done = 0;
             for (double bg : buyGaps) {
                 for (double pg : profitGaps) {
@@ -778,13 +779,18 @@ public class TradingSessionManager {
                         ReversalPointStrategyBackTester tester = new ReversalPointStrategyBackTester(
                                 coin, chart, tradingSum, bg, pg, lg, exchangeName, commissionRate);
                         ReversalPointStrategyBackTester.BackTestResult r = tester.startBackTest();
-                        if (r != null) resultPairs.add(new Object[]{r, tester});
+                        if (r != null) {
+                            topHeap.add(new Object[]{r, tester});
+                            if (topHeap.size() > topN) topHeap.poll(); // remove worst, keep topN
+                        }
                         done++;
                         if (progressInfo != null) progressInfo.backtestProgressCurrent = done;
                     }
                 }
             }
 
+            // Sort descending by profit
+            List<Object[]> resultPairs = new java.util.ArrayList<>(topHeap);
             resultPairs.sort(Comparator.comparingDouble(p -> -((ReversalPointStrategyBackTester.BackTestResult) p[0]).getProfitInUsdAfterCommission()));
             List<Map<String, Object>> top = new java.util.ArrayList<>();
             for (int i = 0; i < Math.min(topN, resultPairs.size()); i++) {

@@ -18,7 +18,7 @@ import java.util.function.BiConsumer;
 
 
 public class ReversalPointStrategyBackTester {
-    TreeMap<Double, Double> prices = new TreeMap<>();
+    boolean hasPrices = false;
     ArrayList<ReversalPointStrategyBackTester.Reversal> reversalArrayList = new ArrayList<>();
     boolean trading = false;
     boolean max = false;
@@ -208,6 +208,10 @@ public class ReversalPointStrategyBackTester {
             account.wallet().getAllAssets().replace(USDT, USDTinWallet);
             account.wallet().getAllAssets().replace(coin, 0d);
         }
+        // Free memory - reversalArrayList is not needed after backtest
+        reversalArrayList.clear();
+        reversalArrayList.trimToSize();
+
         double rawProfit = account.wallet().getAllAssets().get(USDT) - tradingSum;
         backTestResult = new BackTestResult(buyGap, sellWithProfitGap, sellWithLossGap,
                 rawProfit, rawProfit / tradingSum * 100,
@@ -223,7 +227,7 @@ public class ReversalPointStrategyBackTester {
     private boolean startBackTestingPoint(double pointTimestamp, double pointPrice) throws NoSuchSymbolException, InsufficientAmountOfUsdtException {
 
         this.pointPrice = pointPrice;
-        prices.put(pointTimestamp, pointPrice);
+        hasPrices = true;
 
         if (trading) {
             if (((pointPrice - buyPrice) / buyPrice * 100) > sellWithProfitGap) {
@@ -282,7 +286,7 @@ public class ReversalPointStrategyBackTester {
                 return true;
             }
         }
-        if (!prices.isEmpty() && !trading) {
+        if (hasPrices && !trading) {
 
             ReversalPointStrategyBackTester.Reversal previousRec = reversalArrayList.get(reversalArrayList.toArray().length - 1);
             if (pointPrice > currentMaxPrice[0]) {
