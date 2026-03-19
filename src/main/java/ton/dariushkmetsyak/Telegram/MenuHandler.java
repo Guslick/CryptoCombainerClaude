@@ -370,7 +370,7 @@ private void sendSessionScreenshot(long chatId) {
         TradingSessionManager mgr = TradingSessionManager.forUser(chatId);
         List<Map<String, Object>> sessions = mgr.getAllSessions();
 
-        // Find active (RUNNING) session
+        // Find active (RUNNING) or paused session
         Map<String, Object> activeSession = null;
         for (Map<String, Object> sess : sessions) {
             if ("RUNNING".equals(sess.get("status"))) {
@@ -380,51 +380,168 @@ private void sendSessionScreenshot(long chatId) {
         }
 
         if (activeSession == null) {
-            // Check for any sessions at all
             if (sessions.isEmpty()) {
                 sendText(chatId, "📭 Нет сессий.\n\nСоздайте сессию через MiniApp.");
             } else {
-                // Show last session status
                 Map<String, Object> lastSess = sessions.get(0);
                 String status = String.valueOf(lastSess.getOrDefault("status", "UNKNOWN"));
                 String coinName = String.valueOf(lastSess.getOrDefault("coinName", "—"));
-                String id = String.valueOf(lastSess.getOrDefault("id", "—"));
                 sendText(chatId, "📊 Нет активных сессий.\n\n" +
-                        "Последняя сессия:\n" +
-                        "Монета: " + coinName + "\n" +
-                        "Статус: " + status + "\n" +
-                        "ID: " + id);
+                        "Последняя: " + coinName + " [" + status + "]");
             }
             return;
         }
 
-        // Build session info text
-        String coinName = String.valueOf(activeSession.getOrDefault("coinName", "—"));
+        // Fetch full session details (including events)
         String sessionId = String.valueOf(activeSession.getOrDefault("id", "—"));
-        double currentPrice = activeSession.get("currentPrice") != null ? ((Number) activeSession.get("currentPrice")).doubleValue() : 0;
-        boolean isTrading = Boolean.TRUE.equals(activeSession.get("isTrading"));
-        int profitTrades = activeSession.get("profitTradeCount") != null ? ((Number) activeSession.get("profitTradeCount")).intValue() : 0;
-        int lossTrades = activeSession.get("lossTradeCount") != null ? ((Number) activeSession.get("lossTradeCount")).intValue() : 0;
-        double profitSum = activeSession.get("profitSum") != null ? ((Number) activeSession.get("profitSum")).doubleValue() : 0;
-        double lossSum = activeSession.get("lossSum") != null ? ((Number) activeSession.get("lossSum")).doubleValue() : 0;
+        Map<String, Object> detail = mgr.getSessionDetail(sessionId);
+
+        String coinName = String.valueOf(detail.getOrDefault("coinName", "—"));
+        String typeStr = String.valueOf(detail.getOrDefault("type", "UNKNOWN"));
+        double currentPrice = detail.get("currentPrice") != null ? ((Number) detail.get("currentPrice")).doubleValue() : 0;
+        boolean isTrading = Boolean.TRUE.equals(detail.get("isTrading"));
+        int profitTrades = detail.get("profitTradeCount") != null ? ((Number) detail.get("profitTradeCount")).intValue() : 0;
+        int lossTrades = detail.get("lossTradeCount") != null ? ((Number) detail.get("lossTradeCount")).intValue() : 0;
+        double profitSum = detail.get("profitSum") != null ? ((Number) detail.get("profitSum")).doubleValue() : 0;
+        double lossSum = detail.get("lossSum") != null ? ((Number) detail.get("lossSum")).doubleValue() : 0;
+        double commission = detail.get("estimatedCommission") != null ? ((Number) detail.get("estimatedCommission")).doubleValue() : 0;
         double netPnl = profitSum + lossSum;
 
-        StringBuilder sb = new StringBuilder();
-        sb.append("📸 Сессия: ").append(coinName.toUpperCase()).append("\n");
-        sb.append("Статус: 🟢 RUNNING\n");
-        sb.append("Текущая цена: $").append(String.format("%.4f", currentPrice)).append("\n");
-        sb.append("В позиции: ").append(isTrading ? "Да" : "Нет").append("\n");
-        sb.append("Сделок +: ").append(profitTrades).append("\n");
-        sb.append("Сделок -: ").append(lossTrades).append("\n");
-        sb.append("PnL: ").append(String.format("%.2f", netPnl)).append(" USD\n");
-        sb.append("ID: ").append(sessionId);
+        // Session type label
+        String typeLabel;
+        switch (typeStr) {
+            case "BINANCE_REAL": typeLabel = "🔴 Реальная торговля (Mainnet)"; break;
+            case "BINANCE_TEST": typeLabel = "🟡 Тестовая торговля (Testnet)"; break;
+            case "TESTER":       typeLabel = "🔵 Исследование (виртуальный)"; break;
+            case "RESEARCH":     typeLabel = "🟣 Исследование в реальном времени"; break;
+            case "BACKTEST":     typeLabel = "⚪ Бэктест"; break;
+            default:             typeLabel = typeStr; break;
+        }
 
-        sendText(chatId, sb.toString());
+        // Session parameters
+        @SuppressWarnings("unchecked")
+        Map<String, Object> params = (Map<String, Object>) detail.getOrDefault("params", Collections.emptyMap());
+        double buyGap = params.get("buyGap") != null ? ((Number) params.get("buyGap")).doubleValue() : 0;
+        double sellProfit = params.get("sellWithProfitGap") != null ? ((Number) params.get("sellWithProfitGap")).doubleValue() : 0;
+        double sellLoss = params.get("sellWithLossGap") != null ? ((Number) params.get("sellWithLossGap")).doubleValue() : 0;
+        double tradingSum = params.get("tradingSum") != null ? ((Number) params.get("tradingSum")).doubleValue() : 0;
+
+        // Target prices and distance
+        Double maxPrice = detail.get("maxPrice") != null ? ((Number) detail.get("maxPrice")).doubleValue() : null;
+        Double buyTargetPrice = detail.get("buyTargetPrice") != null ? ((Number) detail.get("buyTargetPrice")).doubleValue() : null;
+        Double boughtAtPrice = detail.get("boughtAtPrice") != null ? ((Number) detail.get("boughtAtPrice")).doubleValue() : null;
+        Double sellProfitPrice = detail.get("sellProfitPrice") != null ? ((Number) detail.get("sellProfitPrice")).doubleValue() : null;
+        Double sellLossPrice = detail.get("sellLossPrice") != null ? ((Number) detail.get("sellLossPrice")).doubleValue() : null;
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("📸 ").append(coinName.toUpperCase()).append("\n");
+        sb.append("Режим: ").append(typeLabel).append("\n");
+        sb.append("Статус: 🟢 Активна\n\n");
+
+        // Parameters
+        sb.append("⚙️ Параметры:\n");
+        sb.append("  Сумма сделки: ").append(String.format("%.0f", tradingSum)).append(" USDT\n");
+        sb.append("  Покупка: ").append(String.format("%.1f", buyGap)).append("%");
+        sb.append("  Продажа+: ").append(String.format("%.1f", sellProfit)).append("%");
+        sb.append("  Продажа-: ").append(String.format("%.1f", sellLoss)).append("%\n\n");
+
+        // Current state
+        sb.append("💰 Текущая цена: $").append(String.format("%.4f", currentPrice)).append("\n");
+
+        if (isTrading) {
+            sb.append("📍 В ПОЗИЦИИ\n");
+            if (boughtAtPrice != null) {
+                sb.append("  Куплено по: $").append(String.format("%.4f", boughtAtPrice)).append("\n");
+                double pnlPct = (currentPrice - boughtAtPrice) / boughtAtPrice * 100;
+                sb.append("  Текущий P/L: ").append(String.format("%+.2f%%", pnlPct)).append("\n");
+            }
+            if (sellProfitPrice != null && currentPrice > 0) {
+                double distProfit = (sellProfitPrice - currentPrice) / currentPrice * 100;
+                sb.append("  До продажи+: $").append(String.format("%.4f", sellProfitPrice))
+                  .append(" (").append(String.format("%.2f%%", distProfit)).append(")\n");
+            }
+            if (sellLossPrice != null && currentPrice > 0) {
+                double distLoss = (sellLossPrice - currentPrice) / currentPrice * 100;
+                sb.append("  До продажи-: $").append(String.format("%.4f", sellLossPrice))
+                  .append(" (").append(String.format("%.2f%%", distLoss)).append(")\n");
+            }
+        } else {
+            sb.append("🔍 ОЖИДАНИЕ СИГНАЛА\n");
+            if (maxPrice != null) {
+                sb.append("  Макс. цена волны: $").append(String.format("%.4f", maxPrice)).append("\n");
+            }
+            if (buyTargetPrice != null && currentPrice > 0) {
+                double distBuy = (currentPrice - buyTargetPrice) / currentPrice * 100;
+                sb.append("  До покупки: $").append(String.format("%.4f", buyTargetPrice))
+                  .append(" (").append(String.format("%.2f%%", distBuy)).append(" вниз)\n");
+            }
+        }
+
+        sb.append("\n📊 Статистика:\n");
+        sb.append("  Прибыльных: ").append(profitTrades).append(" | Убыточных: ").append(lossTrades).append("\n");
+        sb.append("  PnL: ").append(String.format("%+.2f", netPnl)).append(" USD\n");
+        if (commission > 0) {
+            sb.append("  Комиссия: ").append(String.format("%.4f", commission)).append(" USD\n");
+        }
+
+        // Generate chart screenshot and send as photo
+        String screenshotPath = "session_screenshot_" + chatId + "_" + System.currentTimeMillis() + ".png";
+        boolean hasChart = false;
+        try {
+            // Build chart from session events
+            TradingChart tc = new TradingChart();
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> events = (List<Map<String, Object>>) detail.get("events");
+            if (events != null && !events.isEmpty()) {
+                // Find price data from events (INFO type with price mentions)
+                for (Map<String, Object> ev : events) {
+                    long ts = ev.get("timestamp") != null ? ((Number) ev.get("timestamp")).longValue() : 0;
+                    String evType = String.valueOf(ev.getOrDefault("type", ""));
+                    String msg = String.valueOf(ev.getOrDefault("message", ""));
+
+                    if ("BUY".equals(evType)) {
+                        double price = extractPrice(msg);
+                        if (price > 0) tc.addBuyIntervalMarkerI(ts, price);
+                    } else if ("SELL".equals(evType)) {
+                        double price = extractPrice(msg);
+                        if (price > 0) {
+                            boolean profit = msg.contains("прибыль") || msg.contains("profit") || msg.contains("📈");
+                            tc.addSellIntervalMarkerI(ts, price, profit);
+                        }
+                    }
+                }
+                // Add current price point
+                if (currentPrice > 0) {
+                    tc.addSimplePointI(System.currentTimeMillis(), currentPrice);
+                }
+                tc.makeScreenShotI(screenshotPath);
+                hasChart = true;
+            }
+        } catch (Exception chartErr) {
+            log.warn("Failed to generate chart for screenshot: {}", chartErr.getMessage());
+        }
+
+        if (hasChart) {
+            ImageAndMessageSender.sendPhoto(screenshotPath, sb.toString(), chatId);
+            try { java.nio.file.Files.deleteIfExists(java.nio.file.Path.of(screenshotPath)); } catch (Exception ignored) {}
+        } else {
+            sendText(chatId, sb.toString());
+        }
 
     } catch (Exception e) {
         log.error("Error sending session screenshot", e);
         sendText(chatId, "❌ Ошибка получения данных сессии: " + e.getMessage());
     }
+}
+
+/** Extract first numeric price from event message text */
+private double extractPrice(String msg) {
+    if (msg == null) return 0;
+    java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d+\\.\\d+)").matcher(msg);
+    if (m.find()) {
+        try { return Double.parseDouble(m.group(1)); } catch (Exception e) { return 0; }
+    }
+    return 0;
 }
 
 private void setCancelKeyboard(long chatId, SendMessage message) {

@@ -418,18 +418,33 @@ public class UserProfileManager {
             for (var e : assets.entrySet()) {
                 Double amount = e.getValue();
                 if (amount == null || amount <= 0) continue;
+                String symbol = e.getKey().getSymbol() != null ? e.getKey().getSymbol() : "???";
                 Map<String, Object> b = new LinkedHashMap<>();
-                b.put("symbol", e.getKey().getSymbol() != null ? e.getKey().getSymbol() : "???");
+                b.put("symbol", symbol);
                 b.put("name",   e.getKey().getName()   != null ? e.getKey().getName()   : "Unknown");
                 b.put("amount", amount);
+                // Calculate USDT value
+                double usdtValue = 0;
+                if ("USDT".equalsIgnoreCase(symbol) || "USDC".equalsIgnoreCase(symbol)
+                        || "BUSD".equalsIgnoreCase(symbol) || "FDUSD".equalsIgnoreCase(symbol)) {
+                    usdtValue = amount;
+                } else {
+                    try {
+                        double price = ton.dariushkmetsyak.TradingApi.ApiService.Account.getCurrentPrice(e.getKey());
+                        usdtValue = amount * price;
+                    } catch (Exception priceErr) {
+                        log.debug("Could not get price for {}: {}", symbol, priceErr.getMessage());
+                    }
+                }
+                b.put("usdtValue", usdtValue);
                 list.add(b);
             }
-            // Sort: USDT first, then by amount descending
+            // Sort: USDT first, then by usdtValue descending
             list.sort((a, b) -> {
                 boolean aU = "USDT".equalsIgnoreCase((String)a.get("symbol"));
                 boolean bU = "USDT".equalsIgnoreCase((String)b.get("symbol"));
                 if (aU) return -1; if (bU) return 1;
-                return Double.compare((Double)b.get("amount"), (Double)a.get("amount"));
+                return Double.compare((Double)b.get("usdtValue"), (Double)a.get("usdtValue"));
             });
             log.info("Fetched {} assets for {} ({} balances > 0)",
                 assets.size(), testnet ? "testnet" : "mainnet", list.size());

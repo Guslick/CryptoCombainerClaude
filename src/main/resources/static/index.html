@@ -449,32 +449,17 @@
             <label class="input-label">СУММА (USDT)</label>
             <input type="number" id="btTradingSum" value="100" min="10" step="10" oninput="saveField('btTradingSum')">
           </div>
-          <div class="form-full" style="margin-top:4px;padding-top:8px;border-top:1px solid var(--border)">
-            <div style="font-family:var(--font-head);font-size:10px;color:var(--accent);margin-bottom:8px">📥 КОЭ. ПОКУПКИ (%)</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
-              <div class="input-wrap"><label class="input-label">МИН</label><input type="number" id="btBuyMin" value="3.5" min="0.1" step="0.1" oninput="updateBtCombinations()"></div>
-              <div class="input-wrap"><label class="input-label">МАКС</label><input type="number" id="btBuyMax" value="3.5" min="0.1" step="0.1" oninput="updateBtCombinations()"></div>
-              <div class="input-wrap"><label class="input-label">ШАГ</label><input type="number" id="btBuyStep" value="1" min="0.1" step="0.1" oninput="updateBtCombinations()"></div>
-            </div>
+          <div class="input-wrap">
+            <label class="input-label">КОЭ. ПОКУПКИ (%)</label>
+            <input type="number" id="btBuyGap" value="3.5" min="0.1" step="0.1" oninput="saveField('btBuyGap')">
           </div>
-          <div class="form-full" style="margin-top:4px">
-            <div style="font-family:var(--font-head);font-size:10px;color:var(--green);margin-bottom:8px">📈 КОЭ. ПРОДАЖИ + (%)</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
-              <div class="input-wrap"><label class="input-label">МИН</label><input type="number" id="btProfitMin" value="2.0" min="0.1" step="0.1" oninput="updateBtCombinations()"></div>
-              <div class="input-wrap"><label class="input-label">МАКС</label><input type="number" id="btProfitMax" value="2.0" min="0.1" step="0.1" oninput="updateBtCombinations()"></div>
-              <div class="input-wrap"><label class="input-label">ШАГ</label><input type="number" id="btProfitStep" value="0.5" min="0.1" step="0.1" oninput="updateBtCombinations()"></div>
-            </div>
+          <div class="input-wrap">
+            <label class="input-label">КОЭ. ПРОДАЖИ + (%)</label>
+            <input type="number" id="btSellProfit" value="2.0" min="0.1" step="0.1" oninput="saveField('btSellProfit')">
           </div>
-          <div class="form-full" style="margin-top:4px">
-            <div style="font-family:var(--font-head);font-size:10px;color:var(--red);margin-bottom:8px">📉 КОЭ. ПРОДАЖИ - (%)</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
-              <div class="input-wrap"><label class="input-label">МИН</label><input type="number" id="btLossMin" value="8.0" min="0.1" step="0.1" oninput="updateBtCombinations()"></div>
-              <div class="input-wrap"><label class="input-label">МАКС</label><input type="number" id="btLossMax" value="8.0" min="0.1" step="0.1" oninput="updateBtCombinations()"></div>
-              <div class="input-wrap"><label class="input-label">ШАГ</label><input type="number" id="btLossStep" value="1" min="0.1" step="0.1" oninput="updateBtCombinations()"></div>
-            </div>
-          </div>
-          <div class="form-full" style="margin-top:6px">
-            <div style="font-size:10px;color:var(--muted)" id="btCombinationsCount">Комбинаций: 1</div>
+          <div class="input-wrap">
+            <label class="input-label">КОЭ. ПРОДАЖИ - (%)</label>
+            <input type="number" id="btSellLoss" value="8.0" min="0.1" step="0.1" oninput="saveField('btSellLoss')">
           </div>
           <div class="input-wrap form-full">
             <label class="input-label">БИРЖА / КОМИССИЯ</label>
@@ -628,7 +613,7 @@
     <!-- SESSIONS -->
     <div class="page" id="page-sessions">
       <div class="card">
-        <div class="card-title">🎮 СЕССИИ <span id="activeSessionCount" style="font-size:10px;color:var(--muted);font-weight:400;"></span><button class="btn btn-secondary btn-sm" onclick="loadSessions()" style="margin-left:auto;">🔄</button></div>
+        <div class="card-title">🎮 СЕССИИ <span id="activeSessionCount" style="font-size:10px;color:var(--muted);font-weight:400;"></span><button class="btn btn-sm" style="margin-left:auto;background:rgba(255,23,68,0.15);color:var(--red);border:1px solid rgba(255,23,68,0.3);font-size:9px" onclick="deleteInactiveSessions()">🗑 Очистить</button><button class="btn btn-secondary btn-sm" onclick="loadSessions()" style="margin-left:4px;">🔄</button></div>
         <div id="sessionsList"><div class="empty-state"><span class="icon">🎮</span>Нет сессий</div></div>
       </div>
 
@@ -1064,10 +1049,8 @@ async function loadChartData(coinId, interval) {
 }
 
 function dedupeChartData(raw) {
-  // Shift timestamps by local timezone offset so chart displays local time
-  const tzOffsetSec = -(new Date().getTimezoneOffset()) * 60;
   const seen = new Set();
-  return raw.map(p => ({time: Math.floor(p[0]/1000) + tzOffsetSec, value:p[1]}))
+  return raw.map(p => ({time: Math.floor(p[0]/1000), value:p[1]}))
     .filter(p => p.value > 0).sort((a,b) => a.time - b.time)
     .filter(p => { if(seen.has(p.time)) return false; seen.add(p.time); return true; });
 }
@@ -1176,16 +1159,6 @@ function updateOptCommission() {
 let _btSessionId = null;
 let _btLastResult = null;
 
-function updateBtCombinations() {
-  const buyMin = +document.getElementById('btBuyMin').value||1, buyMax = +document.getElementById('btBuyMax').value||1, buyStep = +document.getElementById('btBuyStep').value||1;
-  const profMin = +document.getElementById('btProfitMin').value||1, profMax = +document.getElementById('btProfitMax').value||1, profStep = +document.getElementById('btProfitStep').value||0.5;
-  const lossMin = +document.getElementById('btLossMin').value||1, lossMax = +document.getElementById('btLossMax').value||1, lossStep = +document.getElementById('btLossStep').value||1;
-  const count = (s, mn, mx) => s > 0 && mx > mn ? Math.floor((mx - mn) / s) + 1 : 1;
-  const total = count(buyStep, buyMin, buyMax) * count(profStep, profMin, profMax) * count(lossStep, lossMin, lossMax);
-  const el = document.getElementById('btCombinationsCount');
-  if (el) el.textContent = 'Комбинаций: ' + total;
-}
-
 async function startBacktest() {
   const coin = document.getElementById('btCoinInput').value.trim();
   if (!coin) { showAlert('btAlert','error','⚠️ Введите название монеты!'); return; }
@@ -1202,81 +1175,11 @@ async function startBacktest() {
   const exchange = document.getElementById('btExchange')?.value || 'Binance';
   const commissionRate = EXCHANGE_COMMISSIONS[exchange] || 0.1;
 
-  // Read range parameters
-  const buyMin = +document.getElementById('btBuyMin').value||3.5;
-  const buyMax = +document.getElementById('btBuyMax').value||3.5;
-  const buyStep = +document.getElementById('btBuyStep').value||1;
-  const profitMin = +document.getElementById('btProfitMin').value||2;
-  const profitMax = +document.getElementById('btProfitMax').value||2;
-  const profitStep = +document.getElementById('btProfitStep').value||0.5;
-  const lossMin = +document.getElementById('btLossMin').value||8;
-  const lossMax = +document.getElementById('btLossMax').value||8;
-  const lossStep = +document.getElementById('btLossStep').value||1;
-
-  // Determine if this is a single or range backtest
-  const isRange = (buyMin !== buyMax) || (profitMin !== profitMax) || (lossMin !== lossMax);
-
-  if (isRange) {
-    // Use optimize endpoint for range backtests
-    const body = {
-      coin, tradingSum: +document.getElementById('btTradingSum').value||100,
-      chartType: document.getElementById('btChartType').value,
-      exchangeName: exchange, commissionRate, topN: 999,
-      buyMin, buyMax, buyStep, profitMin, profitMax, profitStep, lossMin, lossMax, lossStep,
-    };
-    try {
-      const r = await fetch(`${API_BASE}/api/backtest/optimize`,{method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
-      const sessionData = await r.json();
-      if (sessionData.error) throw new Error(sessionData.error);
-      showAlert('btAlert','info','⏳ Перебор стратегий...');
-      btn.innerHTML='<div class="spinner"></div> Перебор...';
-      const pollId = setInterval(async ()=>{
-        try {
-          const sr = await fetch(`${API_BASE}/api/trading/sessions/${sessionData.id}`,{headers:authHeaders()}).catch(()=>null);
-          if (!sr?.ok) return;
-          const sess = await sr.json();
-          const cur = sess.backtestProgressCurrent||0, tot = sess.backtestProgressTotal||0;
-          const pct = tot>0?Math.round(cur/tot*100):0;
-          document.getElementById('btProgressBar').style.width=pct+'%';
-          document.getElementById('btProgressText').textContent=cur+' / '+tot;
-          document.getElementById('btProgressPct').textContent=pct+'%';
-          if (sess.status==='DONE') {
-            clearInterval(pollId);
-            document.getElementById('btProgressBar').style.width='100%';
-            document.getElementById('btProgressPct').textContent='100%';
-            setTimeout(()=>{document.getElementById('btProgressWrap').style.display='none';},300);
-            const rr = await fetch(`${API_BASE}/api/backtest/result`,{headers:authHeaders()});
-            const optResult = await rr.json();
-            // Show as Top-N style results
-            _optResults = optResult.topStrategies || [];
-            Object.values(_optChartInstances).forEach(ch=>{try{ch.remove();}catch(e){}});
-            _optChartInstances = {};
-            Object.values(_optYieldInstances).forEach(ch=>{try{ch.remove();}catch(e){}});
-            _optYieldInstances = {};
-            showOptimizeResult(_optResults);
-            document.getElementById('optResultCard').style.display='block';
-            btn.disabled=false; btn.innerHTML='🧪 ЗАПУСТИТЬ БЭКТЕСТ';
-            document.getElementById('btAlert').style.display='none';
-          } else if (sess.status==='ERROR') {
-            clearInterval(pollId);
-            document.getElementById('btProgressWrap').style.display='none';
-            showAlert('btAlert','error','❌ '+(sess.lastMessage||'Ошибка'));
-            btn.disabled=false; btn.innerHTML='🧪 ЗАПУСТИТЬ БЭКТЕСТ';
-          }
-        } catch(e) {}
-      }, 700);
-    } catch(e) {
-      document.getElementById('btProgressWrap').style.display='none';
-      showAlert('btAlert','error','❌ '+e.message);
-      btn.disabled=false; btn.innerHTML='🧪 ЗАПУСТИТЬ БЭКТЕСТ';
-    }
-    return;
-  }
-
-  // Single value backtest
   const body = {
     coin, tradingSum: +document.getElementById('btTradingSum').value||100,
-    buyGap: buyMin, sellWithProfitGap: profitMin, sellWithLossGap: lossMin,
+    buyGap: +document.getElementById('btBuyGap').value||3.5,
+    sellWithProfitGap: +document.getElementById('btSellProfit').value||2.0,
+    sellWithLossGap: +document.getElementById('btSellLoss').value||8.0,
     chartType: document.getElementById('btChartType').value,
     exchangeName: exchange, commissionRate,
   };
@@ -2101,9 +2004,8 @@ function getChartIntervalForSession(sess) {
  *  Before session: dim gray. During session: accent cyan. After session: dim gray.
  *  Uses two line series stored in entry.lineBefore and entry.lineAfter. */
 function applySessionRangeColoring(entry, data, sess) {
-  const tzOff = -(new Date().getTimezoneOffset()) * 60;
-  const sessionStartSec = sess.startedAt ? Math.floor(sess.startedAt / 1000) + tzOff : null;
-  const sessionEndSec   = sess.endedAt   ? Math.floor(sess.endedAt   / 1000) + tzOff : null;
+  const sessionStartSec = sess.startedAt ? Math.floor(sess.startedAt / 1000) : null;
+  const sessionEndSec   = sess.endedAt   ? Math.floor(sess.endedAt   / 1000) : null;
   const GRAY  = 'rgba(104,120,168,0.35)';
   const CYAN  = '#00e5ff';
 
@@ -2397,21 +2299,36 @@ async function resumeSession(id) {
 
 async function deleteSession(id) {
   if (!confirm('Удалить сессию и все её данные?')) return;
-  const r = await fetch(`${API_BASE}/api/trading/delete`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ sessionId: id }) });
-  const data = await r.json();
-  if (data.deleted) {
-    showToast('🗑 Сессия удалена');
+  // Remove from UI immediately
+  const card = document.getElementById('scard-' + id);
+  if (card) card.remove();
+  delete _sessionsData[id];
+  clearChartTimer(id);
+  if (inlineCharts[id]) {
+    try { inlineCharts[id].chart.remove(); } catch(e) {}
+    delete inlineCharts[id];
+  }
+  if (currentDrawerSession === id) closeDrawer();
+  showToast('🗑 Сессия удалена');
+  // Fire-and-forget API call
+  fetch(`${API_BASE}/api/trading/delete`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ sessionId: id }) }).catch(() => {});
+}
+
+async function deleteInactiveSessions() {
+  if (!confirm('Удалить все завершённые сессии?')) return;
+  const toDelete = Object.entries(_sessionsData)
+    .filter(([_, s]) => s.status !== 'RUNNING' && s.status !== 'PAUSED')
+    .map(([id]) => id);
+  if (!toDelete.length) { showToast('Нет неактивных сессий'); return; }
+  for (const id of toDelete) {
+    const card = document.getElementById('scard-' + id);
+    if (card) card.remove();
     delete _sessionsData[id];
     clearChartTimer(id);
-    if (inlineCharts[id]) {
-      try { inlineCharts[id].chart.remove(); } catch(e) {}
-      delete inlineCharts[id];
-    }
-    loadSessions();
-    if (currentDrawerSession === id) closeDrawer();
-  } else {
-    showToast('❌ ' + (data.error || 'Ошибка'));
+    if (inlineCharts[id]) { try { inlineCharts[id].chart.remove(); } catch(e) {} delete inlineCharts[id]; }
+    fetch(`${API_BASE}/api/trading/delete`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ sessionId: id }) }).catch(() => {});
   }
+  showToast(`🗑 Удалено ${toDelete.length} сессий`);
 }
 
 // ── Per-session chart refresh timers ───────────────────────────────────────
@@ -3134,21 +3051,28 @@ async function profSaveKeys(testnet) {
 
 function renderBalanceTable(balances, netLabel, color) {
   if (!balances) return '';
-  // Handle top-level error (from backend returning {error:...} object)
   if (balances.error) return `<div style="margin-bottom:14px"><div style="font-family:var(--font-head);font-size:9px;color:${color};margin-bottom:6px">${netLabel}</div><div style="color:var(--red);font-size:11px">⚠️ ${escHtml(balances.error)}</div></div>`;
   if (!Array.isArray(balances) || !balances.length) return '';
-  // Handle error item inside array (e.g. [{error: "PEM не найден"}])
   if (balances[0]?.error) return `<div style="margin-bottom:14px"><div style="font-family:var(--font-head);font-size:9px;color:${color};margin-bottom:6px">${netLabel}</div><div style="color:var(--red);font-size:11px">⚠️ ${escHtml(balances[0].error)}</div></div>`;
-  // Normal balance rows
+  // Calculate total portfolio value
+  let totalUsdt = 0;
   const rows = balances.map(b => {
     if (!b.symbol) return '';
-    return `<div style="display:grid;grid-template-columns:52px 1fr;gap:4px;padding:5px 0;border-bottom:1px solid rgba(42,53,96,0.4);align-items:center">
+    const usdtVal = b.usdtValue || 0;
+    totalUsdt += usdtVal;
+    const usdtStr = usdtVal > 0 ? '$' + fmtNum(usdtVal) : '—';
+    return `<div style="display:grid;grid-template-columns:52px 1fr 1fr;gap:4px;padding:5px 0;border-bottom:1px solid rgba(42,53,96,0.4);align-items:center">
       <span style="font-family:var(--font-head);font-size:10px;color:${color}">${escHtml(b.symbol)}</span>
       <span style="font-size:11px;color:var(--text);text-align:right">${fmtNum(b.amount)}</span>
+      <span style="font-size:11px;color:var(--muted);text-align:right">${usdtStr}</span>
     </div>`;
   }).join('');
+  const totalStr = totalUsdt > 0 ? '$' + fmtNum(totalUsdt) : '';
   return `<div style="margin-bottom:16px">
-    <div style="font-family:var(--font-head);font-size:9px;color:${color};margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid ${color}44">${netLabel} — ${balances.length} актив(ов)</div>
+    <div style="display:flex;justify-content:space-between;align-items:baseline;font-family:var(--font-head);font-size:9px;color:${color};margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid ${color}44">
+      <span>${netLabel} — ${balances.length} актив(ов)</span>
+      ${totalStr ? `<span style="font-size:13px;color:var(--green)">${totalStr}</span>` : ''}
+    </div>
     <div style="max-height:240px;overflow-y:auto;-webkit-overflow-scrolling:touch">${rows}</div>
   </div>`;
 }
