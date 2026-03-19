@@ -87,13 +87,13 @@ public class TradingChart {
     public static void addSimplePoint(double timestamp, double price) {
         getForCurrentThread().addSimplePointI(timestamp, price);
     }
-    void addSimplePointI(double timestamp, double price) {
+    public void addSimplePointI(double timestamp, double price) {
         series.addOrUpdate(new Millisecond(Date.from(Instant.ofEpochMilli((long)timestamp))), price);
     }
     public static void addBuyIntervalMarker(double timestamp, double price) {
         getForCurrentThread().addBuyIntervalMarkerI(timestamp, price);
     }
-    void addBuyIntervalMarkerI(double timestamp, double price) {
+    public void addBuyIntervalMarkerI(double timestamp, double price) {
         addSimplePointI(timestamp, price);
         intervalMarker = new IntervalMarker(timestamp, timestamp);
         intervalMarker.setPaint(Color.decode("#F0E68C"));
@@ -134,7 +134,7 @@ public class TradingChart {
     public static void addSellProfitMarker(double timestamp, double price) {
         getForCurrentThread().addSellIntervalMarkerI(timestamp, price, true);
     }
-    void addSellIntervalMarkerI(double timestamp, double price, boolean isProfit) {
+    public void addSellIntervalMarkerI(double timestamp, double price, boolean isProfit) {
         addSimplePointI(timestamp, price);
         if (intervalMarker == null) {
             intervalMarker = new IntervalMarker(timestamp, timestamp);
@@ -165,7 +165,7 @@ public class TradingChart {
     public static void makeScreenShot(String path) {
         getForCurrentThread().makeScreenShotI(path);
     }
-    void makeScreenShotI(String path) {
+    public void makeScreenShotI(String path) {
         File file = new File(path);
         try {
             ChartUtils.saveChartAsPNG(file, chart, 1920, 1080);
