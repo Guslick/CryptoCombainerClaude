@@ -351,12 +351,32 @@ public class TradingSessionManager {
     }
 
     private TradingState loadTradingState(String sessionId) {
+        // Try user-scoped directory first
         StateManager sm = stateManager();
-        if (!sm.hasState(sessionId)) return null;
-        TradingState state = sm.loadState(sessionId);
-        if (state != null)
-            log.info("Loaded TradingState for session {}: isTrading={}", sessionId, state.isTrading());
-        return state;
+        if (sm.hasState(sessionId)) {
+            TradingState state = sm.loadState(sessionId);
+            if (state != null) {
+                log.info("Loaded TradingState for session {} from user dir: isTrading={}", sessionId, state.isTrading());
+                return state;
+            }
+        }
+        // Fallback: check global/legacy directory (state saved before path fix)
+        if (userId != 0) {
+            StateManager globalSm = new StateManager(0L);
+            if (globalSm.hasState(sessionId)) {
+                TradingState state = globalSm.loadState(sessionId);
+                if (state != null) {
+                    log.info("Loaded TradingState for session {} from GLOBAL fallback: isTrading={}", sessionId, state.isTrading());
+                    // Migrate: save to correct user dir and delete from global
+                    sm.saveState(state);
+                    globalSm.deleteState(sessionId);
+                    log.info("Migrated state for session {} from global to user_{}", sessionId, userId);
+                    return state;
+                }
+            }
+        }
+        log.warn("No TradingState found for session {} (checked user_{} and global)", sessionId, userId);
+        return null;
     }
 
     /**
