@@ -26,6 +26,21 @@ import java.util.concurrent.TimeUnit;
 public class ReversalPointsStrategyTrader {
     private static final Logger log = LoggerFactory.getLogger(ReversalPointsStrategyTrader.class);
 
+    // ── Global shutdown hook (registered once) to save state of all active traders ──
+    private static final Set<ReversalPointsStrategyTrader> activeTraders =
+            Collections.synchronizedSet(new HashSet<>());
+    static {
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            log.info("[Trader] JVM shutdown — saving state for {} active trader(s)...", activeTraders.size());
+            synchronized (activeTraders) {
+                for (ReversalPointsStrategyTrader trader : activeTraders) {
+                    try { trader.persistState(); trader.stateManager.shutdown(); }
+                    catch (Exception e) { log.error("[Trader] Failed to save state on shutdown", e); }
+                }
+            }
+        }, "Trader-ShutdownHook"));
+    }
+
     TreeMap<Double, Double> prices = new TreeMap<>();
     ArrayList<Reversal> reversalArrayList = new ArrayList<>();
     boolean trading = false;
@@ -123,10 +138,9 @@ public class ReversalPointsStrategyTrader {
         this.chatID = chatID;
         this.sessionId = sessionId != null ? sessionId : "trader_" + System.currentTimeMillis();
         this.accountType = account.getClass().getSimpleName().toUpperCase();
-        // Pass userId to StateManager so state files are stored in user-namespaced directory
-        long smUserId = 0L;
-        if (savedState != null && savedState.getChatId() != null) smUserId = savedState.getChatId();
-        this.stateManager = new StateManager(smUserId);
+        // Pass userId (chatID) to StateManager so state files are stored in user-namespaced directory.
+        // Always use chatID (not savedState.getChatId()) to avoid path mismatch on fresh sessions.
+        this.stateManager = new StateManager(chatID != null ? chatID : 0L);
         this.isResume = isResume;
 
         if (savedState != null && tryRestoreFromState(savedState)) {
@@ -173,13 +187,8 @@ public class ReversalPointsStrategyTrader {
             }
         }
 
-        // Register shutdown hook for JVM kill (SIGTERM / kill)
+        // Start periodic autosave (shutdown hook registered once globally — see static block)
         stateManager.startAutosave();
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            log.info("[Trader] JVM shutdown — final state save...");
-            persistState();
-            stateManager.shutdown();
-        }));
     }
 
     // ---- State Restore ----
@@ -525,6 +534,7 @@ public class ReversalPointsStrategyTrader {
     // ---- Main trading loop ----
 
     public void startTrading() {
+        activeTraders.add(this);
         log.info("[Trader] Starting trading for {} (restored={})", coin.getName(), restoredFromState);
 
         if (!restoredFromState) {
@@ -627,6 +637,7 @@ public class ReversalPointsStrategyTrader {
                 log.info("[Trader] Trading interrupted — saving and shutting down");
                 persistState();
                 stateManager.shutdown();
+                activeTraders.remove(this);
                 try {
                     ImageAndMessageSender.sendTelegramMessage(
                         "🛑 Торговля остановлена по команде пользователя\nСостояние сохранено.");
@@ -649,6 +660,7 @@ public class ReversalPointsStrategyTrader {
         log.info("[Trader] Trading stopped");
         persistState();
         stateManager.shutdown();
+        activeTraders.remove(this);
         try {
             ImageAndMessageSender.sendTelegramMessage(
                 "⛔ Торговля остановлена из-за критических ошибок\nСостояние сохранено.");

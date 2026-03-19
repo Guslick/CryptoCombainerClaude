@@ -465,7 +465,12 @@ public class TradingSessionManager {
                 info.status = "ERROR"; info.endedAt = System.currentTimeMillis();
                 info.addEvent("ERROR", "Ошибка: " + e.getMessage());
                 log.error("Tester trading error for user {}", userId, e);
-            } finally { unregisterThread(); saveSessions(); }
+            } finally {
+                unregisterThread();
+                ton.dariushkmetsyak.Graphics.DrawTradingChart.TradingChart.releaseForCurrentThread();
+                ImageAndMessageSender.clearChatId();
+                saveSessions();
+            }
         });
         t.setDaemon(true); info.thread = t; info.status = "RUNNING"; t.start();
     }
@@ -525,7 +530,12 @@ public class TradingSessionManager {
                 info.status = "ERROR"; info.endedAt = System.currentTimeMillis();
                 info.addEvent("ERROR", "Ошибка: " + e.getMessage());
                 log.error("Binance trading error (testnet={}) for user {}", testnet, userId, e);
-            } finally { unregisterThread(); saveSessions(); }
+            } finally {
+                unregisterThread();
+                ton.dariushkmetsyak.Graphics.DrawTradingChart.TradingChart.releaseForCurrentThread();
+                ImageAndMessageSender.clearChatId();
+                saveSessions();
+            }
         });
         t.setDaemon(true); info.thread = t; info.status = "RUNNING"; t.start();
     }
@@ -539,6 +549,17 @@ public class TradingSessionManager {
         if ("RUNNING".equals(info.status)) return Map.of("error", "Сессия уже запущена");
         if (hasActiveSession()) return Map.of("error", "Уже есть активная сессия");
         if (info.type == SessionType.BACKTEST) return Map.of("error", "Бэктест нельзя возобновить");
+
+        // Kill old thread if still alive (e.g. stop+resume in quick succession)
+        if (info.thread != null && info.thread.isAlive()) {
+            log.warn("Old thread for session {} still alive — interrupting before resume", sessionId);
+            info.thread.interrupt();
+            try { info.thread.join(5000); } catch (InterruptedException ignored) {}
+            if (info.thread.isAlive()) {
+                log.error("Old thread for session {} did not stop within 5s", sessionId);
+                return Map.of("error", "Предыдущий поток не удалось остановить. Попробуйте позже.");
+            }
+        }
 
         TradingState savedState = loadTradingState(sessionId);
         info.status = "RUNNING"; info.stoppedUnexpectedly = false; info.endedAt = 0;
