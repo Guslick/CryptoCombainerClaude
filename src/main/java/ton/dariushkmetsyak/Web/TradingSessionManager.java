@@ -326,6 +326,11 @@ public class TradingSessionManager {
                     info.endedAt = System.currentTimeMillis();
                     info.addEvent("ERROR", "Сессия прервана (JVM завершён) — ожидает возобновления");
                 }
+                // Skip sessions already in memory (e.g. already running after resume)
+                SessionInfo existing = sessions.get(info.id);
+                if (existing != null && "RUNNING".equals(existing.status)) {
+                    continue; // don't overwrite a running session with stale file data
+                }
                 sessions.put(info.id, info);
             }
             log.info("Loaded {} sessions for user {}", sessions.size(), userId);
@@ -502,7 +507,7 @@ public class TradingSessionManager {
                 boolean resume = savedState != null || info.events.stream()
                     .anyMatch(e -> "START".equals(e.type) && e.message != null && e.message.contains("возобновлена"));
                 new ReversalPointsStrategyTrader(account, coin, tradingSum, buyGap, spg, slg,
-                        timeout, chatId, savedState, info.id, resume).startTrading();
+                        timeout, chatId, savedState, info.id, resume, userId).startTrading();
                 setFinalStatus(info);
             } catch (Exception e) {
                 info.status = "ERROR"; info.endedAt = System.currentTimeMillis();
@@ -568,7 +573,7 @@ public class TradingSessionManager {
                 boolean resume = savedState != null || info.events.stream()
                     .anyMatch(e -> "START".equals(e.type) && e.message != null && e.message.contains("возобновлена"));
                 new ReversalPointsStrategyTrader(account, coin, tradingSum, buyGap, spg, slg,
-                        timeout, chatId, savedState, info.id, resume).startTrading();
+                        timeout, chatId, savedState, info.id, resume, userId).startTrading();
                 setFinalStatus(info);
             } catch (Exception e) {
                 info.status = "ERROR"; info.endedAt = System.currentTimeMillis();
@@ -648,7 +653,14 @@ public class TradingSessionManager {
     public boolean stopSession(String sessionId) {
         SessionInfo info = sessions.get(sessionId);
         if (info == null) return false;
-        if (info.thread != null && info.thread.isAlive()) info.thread.interrupt();
+        if (info.thread != null && info.thread.isAlive()) {
+            info.thread.interrupt();
+            // Wait for the thread to actually die, so resume doesn't start a duplicate
+            try { info.thread.join(10_000); } catch (InterruptedException ignored) {}
+            if (info.thread.isAlive()) {
+                log.warn("Thread for session {} still alive after 10s interrupt", sessionId);
+            }
+        }
         info.status = "STOPPED"; info.stoppedUnexpectedly = false;
         info.endedAt = System.currentTimeMillis();
         info.addEvent("STOP", "Остановлено пользователем");

@@ -126,21 +126,36 @@ public class ReversalPointsStrategyTrader {
                                         double sellWithLossGap, int updateTimeout, Long chatID,
                                         TradingState savedState, String sessionId) {
         this(account, coin, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap,
-             updateTimeout, chatID, savedState, sessionId, false);
+             updateTimeout, chatID, savedState, sessionId, false, 0L);
     }
 
     public ReversalPointsStrategyTrader(Account account, Coin coin, double tradingSum,
                                         double buyGap, double sellWithProfitGap,
                                         double sellWithLossGap, int updateTimeout, Long chatID,
                                         TradingState savedState, String sessionId, boolean isResume) {
+        this(account, coin, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap,
+             updateTimeout, chatID, savedState, sessionId, isResume, 0L);
+    }
+
+    /**
+     * Full constructor with storageUserId.
+     * storageUserId controls which directory state files are saved to / loaded from.
+     * If storageUserId == 0, falls back to chatID for backward compatibility.
+     */
+    public ReversalPointsStrategyTrader(Account account, Coin coin, double tradingSum,
+                                        double buyGap, double sellWithProfitGap,
+                                        double sellWithLossGap, int updateTimeout, Long chatID,
+                                        TradingState savedState, String sessionId, boolean isResume,
+                                        long storageUserId) {
         this.account = account;
         this.coin = coin;
         this.chatID = chatID;
         this.sessionId = sessionId != null ? sessionId : "trader_" + System.currentTimeMillis();
         this.accountType = account.getClass().getSimpleName().toUpperCase();
-        // Pass userId (chatID) to StateManager so state files are stored in user-namespaced directory.
-        // Always use chatID (not savedState.getChatId()) to avoid path mismatch on fresh sessions.
-        this.stateManager = new StateManager(chatID != null ? chatID : 0L);
+        // Use storageUserId for state file path (matches TradingSessionManager.userId).
+        // Falls back to chatID only if storageUserId not provided (legacy callers).
+        long stateUserId = storageUserId > 0 ? storageUserId : (chatID != null ? chatID : 0L);
+        this.stateManager = new StateManager(stateUserId);
         this.isResume = isResume;
 
         if (savedState != null && tryRestoreFromState(savedState)) {

@@ -231,9 +231,10 @@ public class MiniAppServer {
                 }
             }
             UserProfileManager.UserProfile profile = upm.updateFromTelegram(tgUser);
-            // Load user's sessions on first login
+            // Load user's sessions on first login and auto-resume crashed sessions
             TradingSessionManager userMgr = TradingSessionManager.forUser(profile.telegramUserId);
             userMgr.loadSessions();
+            userMgr.autoResumeSessions(profile.telegramUserId);
             String token = upm.createSession(profile.telegramUserId);
             Map<String, Object> resp = new LinkedHashMap<>(profile.toPublicMap());
             resp.put("token", token);
