@@ -339,7 +339,30 @@ public class TradingSessionManager {
             .filter(s -> s.stoppedUnexpectedly && s.type != SessionType.BACKTEST)
             .forEach(s -> {
                 log.info("Auto-resuming session {} for user {}", s.id, userId);
-                s.addEvent("INFO", "Авто-возобновление после сбоя JVM");
+
+                // Find last error/stop event to report the cause
+                String cause = "JVM остановлен";
+                for (int i = s.events.size() - 1; i >= 0; i--) {
+                    SessionEvent ev = s.events.get(i);
+                    if ("ERROR".equals(ev.type) || "STOP".equals(ev.type)) {
+                        cause = ev.message != null ? ev.message : cause;
+                        break;
+                    }
+                }
+
+                // Send Telegram notification about the crash
+                try {
+                    String notifyMsg = "⚠️ Сессия остановлена!\n" +
+                        "Монета: " + s.coinName + "\n" +
+                        "Причина: " + cause + "\n" +
+                        "Остановлена: " + new java.util.Date(s.endedAt) + "\n\n" +
+                        "🔄 Автоматическое возобновление...";
+                    ImageAndMessageSender.sendTelegramMessage(notifyMsg, chatId);
+                } catch (Exception e) {
+                    log.warn("Failed to send auto-resume notification for session {}", s.id, e);
+                }
+
+                s.addEvent("INFO", "Авто-возобновление после сбоя (причина: " + cause + ")");
                 resumeSession(s.id, chatId, null);
             });
     }
@@ -483,6 +506,7 @@ public class TradingSessionManager {
                 setFinalStatus(info);
             } catch (Exception e) {
                 info.status = "ERROR"; info.endedAt = System.currentTimeMillis();
+                info.stoppedUnexpectedly = true;
                 info.addEvent("ERROR", "Ошибка: " + e.getMessage());
                 log.error("Tester trading error for user {}", userId, e);
             } finally {
@@ -548,6 +572,7 @@ public class TradingSessionManager {
                 setFinalStatus(info);
             } catch (Exception e) {
                 info.status = "ERROR"; info.endedAt = System.currentTimeMillis();
+                info.stoppedUnexpectedly = true;
                 info.addEvent("ERROR", "Ошибка: " + e.getMessage());
                 log.error("Binance trading error (testnet={}) for user {}", testnet, userId, e);
             } finally {

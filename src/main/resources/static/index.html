@@ -1782,9 +1782,11 @@ const PC = {
 };
 
 function buildTargetPricesHtml(s) {
-  if (s.status !== 'RUNNING') return '';
+  if (s.type === 'BACKTEST') return '';
   const curVal = s.currentPrice;
+  const isStopped = s.status !== 'RUNNING';
   const curStr = curVal ? `<span class="tp-val" style="color:${PC.cur}">$${formatPrice(curVal)}</span>` : '<span class="tp-val">—</span>';
+  const stoppedLabel = isStopped ? `<span class="tp-label" style="color:var(--muted)">⏹ Остановлена:</span><span class="tp-val" style="color:var(--muted);font-size:11px">${s.endedAt ? fmtDateTime(s.endedAt) : '—'}${s.stoppedUnexpectedly ? ' ⚡' : ''}</span><span class="tp-rem"></span><span></span>` : '';
 
   if (!s.isTrading) {
     if (!s.maxPrice && !s.buyTargetPrice && !curVal) return '';
@@ -1811,8 +1813,9 @@ function buildTargetPricesHtml(s) {
       <span class="tp-label">📊 Сделки:</span><span class="tp-val"><span style="color:${PC.sellProfit}">+${profitTradesNT}($${profitSumNT.toFixed(2)})</span> <span style="color:${PC.sold}">-${lossTradesNT}($${Math.abs(lossSumNT).toFixed(2)})</span></span><span class="tp-rem"></span><span></span>
       ${isTesterNT ? `<span class="tp-label">💸 Комиссия:</span><span class="tp-val" style="color:#ffea00">$${commissionNT.toFixed(4)}</span><span class="tp-rem" style="font-size:9px;color:var(--muted)">(Binance est.)</span><span></span>` : ''}` : '';
     return `<div class="target-prices">
+      ${stoppedLabel}
       <span class="tp-label">🔭 Макс. волна:</span><span class="tp-val" style="color:${PC.max}">${s.maxPrice ? '$' + formatPrice(s.maxPrice) : '—'}</span><span class="tp-rem"></span><span></span>
-      <span class="tp-label">💹 Текущая:</span>${curStr}<span class="tp-rem">${dropStr}</span><span></span>
+      <span class="tp-label">💹 Последняя:</span>${curStr}<span class="tp-rem">${dropStr}</span><span></span>
       <span class="tp-label">🎯 Цена покупки:</span><span class="tp-val" style="color:${PC.buy}">${s.buyTargetPrice ? '$' + formatPrice(s.buyTargetPrice) : '—'}</span><span class="tp-rem">${leftToBuyStr}</span><span></span>
       ${tradeStatsNT}
     </div>`;
@@ -1847,8 +1850,9 @@ function buildTargetPricesHtml(s) {
       <span class="tp-label">📊 Сделки:</span><span class="tp-val"><span style="color:${PC.sellProfit}">+${profitTrades}($${profitSumVal.toFixed(2)})</span> <span style="color:${PC.sold}">-${lossTrades}($${Math.abs(lossSumVal).toFixed(2)})</span></span><span class="tp-rem"></span><span></span>
       ${isTester ? `<span class="tp-label">💸 Комиссия:</span><span class="tp-val" style="color:#ffea00">$${commissionVal.toFixed(4)}</span><span class="tp-rem" style="font-size:9px;color:var(--muted)">(Binance est.)</span><span></span>` : ''}` : '';
     return `<div class="target-prices">
+      ${stoppedLabel}
       <span class="tp-label">💰 Куплено за:</span><span class="tp-val" style="color:${PC.buy}">${s.boughtAtPrice ? '$' + formatPrice(s.boughtAtPrice) : '—'}</span><span class="tp-rem"></span><span></span>
-      <span class="tp-label">💹 Текущая:</span>${curStr}<span class="tp-rem">${changeCol}</span><span></span>
+      <span class="tp-label">💹 Последняя:</span>${curStr}<span class="tp-rem">${changeCol}</span><span></span>
       <span class="tp-label">📈 Продажа+:</span><span class="tp-val" style="color:${PC.sellProfit}">${s.sellProfitPrice ? '$' + formatPrice(s.sellProfitPrice) : '—'}</span><span class="tp-rem">${remProfitCol}</span><span></span>
       <span class="tp-label">📉 Продажа−:</span><span class="tp-val" style="color:${PC.sold}">${s.sellLossPrice ? '$' + formatPrice(s.sellLossPrice) : '—'}</span><span class="tp-rem">${remLossCol}</span><span></span>
       ${tradeStatsRow}

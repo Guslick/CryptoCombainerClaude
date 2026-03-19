@@ -484,38 +484,14 @@ private void sendSessionScreenshot(long chatId) {
             sb.append("  Комиссия: ").append(String.format("%.4f", commission)).append(" USD\n");
         }
 
-        // Generate chart screenshot and send as photo
+        // Generate chart screenshot from CoinGecko price data (same source as frontend)
         String screenshotPath = "session_screenshot_" + chatId + "_" + System.currentTimeMillis() + ".png";
         boolean hasChart = false;
         try {
-            // Build chart from session events
-            TradingChart tc = new TradingChart();
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> events = (List<Map<String, Object>>) detail.get("events");
-            if (events != null && !events.isEmpty()) {
-                // Find price data from events (INFO type with price mentions)
-                for (Map<String, Object> ev : events) {
-                    long ts = ev.get("timestamp") != null ? ((Number) ev.get("timestamp")).longValue() : 0;
-                    String evType = String.valueOf(ev.getOrDefault("type", ""));
-                    String msg = String.valueOf(ev.getOrDefault("message", ""));
-
-                    if ("BUY".equals(evType)) {
-                        double price = extractPrice(msg);
-                        if (price > 0) tc.addBuyIntervalMarkerI(ts, price);
-                    } else if ("SELL".equals(evType)) {
-                        double price = extractPrice(msg);
-                        if (price > 0) {
-                            boolean profit = msg.contains("прибыль") || msg.contains("profit") || msg.contains("📈");
-                            tc.addSellIntervalMarkerI(ts, price, profit);
-                        }
-                    }
-                }
-                // Add current price point
-                if (currentPrice > 0) {
-                    tc.addSimplePointI(System.currentTimeMillis(), currentPrice);
-                }
-                tc.makeScreenShotI(screenshotPath);
-                hasChart = true;
+            Coin coin = CoinsList.getCoinByName(coinName);
+            Chart chartData = Chart.get1DayUntilNowChart_5MinuteInterval(coin);
+            if (chartData != null && chartData.getPrices() != null && !chartData.getPrices().isEmpty()) {
+                hasChart = buildScreenshotChart(chartData, detail, coinName, currentPrice, screenshotPath);
             }
         } catch (Exception chartErr) {
             log.warn("Failed to generate chart for screenshot: {}", chartErr.getMessage());
@@ -537,11 +513,128 @@ private void sendSessionScreenshot(long chatId) {
 /** Extract first numeric price from event message text */
 private double extractPrice(String msg) {
     if (msg == null) return 0;
-    java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d+\\.\\d+)").matcher(msg);
+    java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\$?(\\d+\\.\\d+)").matcher(msg);
     if (m.find()) {
         try { return Double.parseDouble(m.group(1)); } catch (Exception e) { return 0; }
     }
     return 0;
+}
+
+/** Build a dark-themed chart from CoinGecko price data + session buy/sell markers */
+@SuppressWarnings("unchecked")
+private boolean buildScreenshotChart(Chart chartData, Map<String, Object> detail,
+                                      String coinName, double currentPrice, String screenshotPath) {
+    try {
+        java.awt.Color bgColor = new java.awt.Color(30, 30, 40);
+        java.awt.Color gridColor = new java.awt.Color(60, 60, 80);
+        java.awt.Color lineColor = new java.awt.Color(100, 181, 246);  // Light blue
+        java.awt.Color textColor = new java.awt.Color(220, 220, 220);
+
+        org.jfree.data.time.TimeSeries priceSeries = new org.jfree.data.time.TimeSeries("Price");
+        for (double[] p : chartData.getPrices()) {
+            priceSeries.addOrUpdate(
+                new org.jfree.data.time.Millisecond(java.util.Date.from(java.time.Instant.ofEpochMilli((long) p[0]))),
+                p[1]);
+        }
+        org.jfree.data.time.TimeSeriesCollection dataset = new org.jfree.data.time.TimeSeriesCollection(priceSeries);
+        org.jfree.chart.JFreeChart chart = org.jfree.chart.ChartFactory.createTimeSeriesChart(
+                coinName.toUpperCase() + " — 24h", null, "USD", dataset, false, false, false);
+
+        // Dark theme
+        chart.setBackgroundPaint(bgColor);
+        chart.getTitle().setPaint(textColor);
+        chart.getTitle().setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 18));
+        org.jfree.chart.plot.XYPlot plot = chart.getXYPlot();
+        plot.setBackgroundPaint(bgColor);
+        plot.setDomainGridlinePaint(gridColor);
+        plot.setRangeGridlinePaint(gridColor);
+        plot.setOutlinePaint(gridColor);
+        plot.getDomainAxis().setTickLabelPaint(textColor);
+        plot.getDomainAxis().setLabelPaint(textColor);
+        plot.getRangeAxis().setTickLabelPaint(textColor);
+        plot.getRangeAxis().setLabelPaint(textColor);
+
+        // Line renderer — smooth blue line
+        org.jfree.chart.renderer.xy.XYLineAndShapeRenderer renderer =
+            new org.jfree.chart.renderer.xy.XYLineAndShapeRenderer(true, false);
+        renderer.setSeriesPaint(0, lineColor);
+        renderer.setSeriesStroke(0, new java.awt.BasicStroke(2.0f));
+        plot.setRenderer(renderer);
+
+        // Add buy/sell markers from session events
+        List<Map<String, Object>> events = (List<Map<String, Object>>) detail.get("events");
+        if (events != null) {
+            for (Map<String, Object> ev : events) {
+                long ts = ev.get("timestamp") != null ? ((Number) ev.get("timestamp")).longValue() : 0;
+                String evType = String.valueOf(ev.getOrDefault("type", ""));
+                String msg = String.valueOf(ev.getOrDefault("message", ""));
+                if ("BUY".equals(evType)) {
+                    double price = extractPrice(msg);
+                    if (price > 0) {
+                        org.jfree.chart.plot.ValueMarker vm = new org.jfree.chart.plot.ValueMarker(ts);
+                        vm.setPaint(new java.awt.Color(33, 150, 243));
+                        vm.setStroke(new java.awt.BasicStroke(2.5f));
+                        vm.setLabel("BUY $" + String.format("%.2f", price));
+                        vm.setLabelPaint(new java.awt.Color(33, 150, 243));
+                        vm.setLabelFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 12));
+                        vm.setLabelAnchor(org.jfree.chart.ui.RectangleAnchor.TOP_RIGHT);
+                        vm.setLabelTextAnchor(org.jfree.chart.ui.TextAnchor.TOP_LEFT);
+                        plot.addDomainMarker(vm);
+                    }
+                } else if ("SELL".equals(evType)) {
+                    double price = extractPrice(msg);
+                    if (price > 0) {
+                        boolean profit = msg.contains("ПРИБЫЛЬ") || msg.contains("📈");
+                        java.awt.Color color = profit ? new java.awt.Color(0, 200, 83) : new java.awt.Color(255, 23, 68);
+                        org.jfree.chart.plot.ValueMarker vm = new org.jfree.chart.plot.ValueMarker(ts);
+                        vm.setPaint(color);
+                        vm.setStroke(new java.awt.BasicStroke(2.5f));
+                        vm.setLabel((profit ? "SELL+ $" : "SELL- $") + String.format("%.2f", price));
+                        vm.setLabelPaint(color);
+                        vm.setLabelFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 12));
+                        vm.setLabelAnchor(org.jfree.chart.ui.RectangleAnchor.TOP_RIGHT);
+                        vm.setLabelTextAnchor(org.jfree.chart.ui.TextAnchor.TOP_LEFT);
+                        plot.addDomainMarker(vm);
+                    }
+                }
+            }
+        }
+
+        // Add horizontal line for current price
+        if (currentPrice > 0) {
+            org.jfree.chart.plot.ValueMarker curLine = new org.jfree.chart.plot.ValueMarker(currentPrice);
+            curLine.setPaint(new java.awt.Color(255, 234, 0, 160));
+            curLine.setStroke(new java.awt.BasicStroke(1.5f, java.awt.BasicStroke.CAP_BUTT,
+                java.awt.BasicStroke.JOIN_MITER, 10.0f, new float[]{6.0f, 4.0f}, 0.0f));
+            curLine.setLabel("$" + String.format("%.2f", currentPrice));
+            curLine.setLabelPaint(new java.awt.Color(255, 234, 0));
+            curLine.setLabelFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 11));
+            curLine.setLabelAnchor(org.jfree.chart.ui.RectangleAnchor.TOP_RIGHT);
+            curLine.setLabelTextAnchor(org.jfree.chart.ui.TextAnchor.BOTTOM_RIGHT);
+            plot.addRangeMarker(curLine);
+        }
+
+        // Add bought-at price line if in position
+        Double boughtAt = detail.get("boughtAtPrice") != null ? ((Number) detail.get("boughtAtPrice")).doubleValue() : null;
+        if (boughtAt != null && Boolean.TRUE.equals(detail.get("isTrading"))) {
+            org.jfree.chart.plot.ValueMarker boughtLine = new org.jfree.chart.plot.ValueMarker(boughtAt);
+            boughtLine.setPaint(new java.awt.Color(33, 150, 243, 160));
+            boughtLine.setStroke(new java.awt.BasicStroke(1.5f, java.awt.BasicStroke.CAP_BUTT,
+                java.awt.BasicStroke.JOIN_MITER, 10.0f, new float[]{6.0f, 4.0f}, 0.0f));
+            boughtLine.setLabel("Куплено $" + String.format("%.2f", boughtAt));
+            boughtLine.setLabelPaint(new java.awt.Color(33, 150, 243));
+            boughtLine.setLabelFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 11));
+            boughtLine.setLabelAnchor(org.jfree.chart.ui.RectangleAnchor.BOTTOM_RIGHT);
+            boughtLine.setLabelTextAnchor(org.jfree.chart.ui.TextAnchor.TOP_RIGHT);
+            plot.addRangeMarker(boughtLine);
+        }
+
+        org.jfree.chart.ChartUtils.saveChartAsPNG(new java.io.File(screenshotPath), chart, 1200, 600);
+        return true;
+    } catch (Exception e) {
+        log.warn("Failed to build chart screenshot: {}", e.getMessage());
+        return false;
+    }
 }
 
 private void setCancelKeyboard(long chatId, SendMessage message) {
