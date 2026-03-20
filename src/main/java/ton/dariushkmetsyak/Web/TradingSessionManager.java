@@ -281,10 +281,18 @@ public class TradingSessionManager {
         }
     }
 
+    private volatile boolean sessionsLoaded = false;
+
     @SuppressWarnings("unchecked")
     public void loadSessions() {
+        // Only load from disk once — subsequent calls are no-ops.
+        // This prevents overwriting live in-memory sessions on page refresh.
+        if (sessionsLoaded) {
+            log.debug("Sessions already loaded for user {}, skipping reload", userId);
+            return;
+        }
         File f = new File(sessionStoreFile);
-        if (!f.exists()) return;
+        if (!f.exists()) { sessionsLoaded = true; return; }
         try {
             List<Map<String, Object>> list = mapper.readValue(f, List.class);
             for (Map<String, Object> m : list) {
@@ -330,11 +338,17 @@ public class TradingSessionManager {
                 }
                 // Skip sessions already in memory (e.g. already running after resume)
                 SessionInfo existing = sessions.get(info.id);
-                if (existing != null && "RUNNING".equals(existing.status)) {
-                    continue; // don't overwrite a running session with stale file data
+                if (existing != null) {
+                    // Never overwrite a session that has a live thread
+                    if ("RUNNING".equals(existing.status) ||
+                            (existing.thread != null && existing.thread.isAlive())) {
+                        log.info("Skipping reload of session {} — still active in memory", info.id);
+                        continue;
+                    }
                 }
                 sessions.put(info.id, info);
             }
+            sessionsLoaded = true;
             log.info("Loaded {} sessions for user {}", sessions.size(), userId);
         } catch (Exception e) {
             log.warn("Failed to load sessions for user {}: {}", userId, e.getMessage());
@@ -344,7 +358,15 @@ public class TradingSessionManager {
     public void autoResumeSessions(long chatId) {
         sessions.values().stream()
             .filter(s -> s.stoppedUnexpectedly && s.type != SessionType.BACKTEST)
+            .filter(s -> !"RUNNING".equals(s.status))  // never resume already-running
+            .filter(s -> s.thread == null || !s.thread.isAlive())  // never resume if thread alive
             .forEach(s -> {
+                // Extra guard: don't resume if another session is already active
+                if (hasActiveSession()) {
+                    log.info("Skipping auto-resume of session {} — another session already active", s.id);
+                    return;
+                }
+
                 log.info("Auto-resuming session {} for user {}", s.id, userId);
 
                 // Find last error/stop event to report the cause
