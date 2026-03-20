@@ -473,8 +473,10 @@ public class MiniAppServer {
         String chartType = (String) body.getOrDefault("chartType", "1d");
         String exchangeName = (String) body.getOrDefault("exchangeName", "Binance");
         double commissionRate = toDouble(body.get("commissionRate"), 0.1);
+        long customFrom = toLong(body.get("customFrom"), 0L);
+        long customTo = toLong(body.get("customTo"), 0L);
         TradingSessionManager.SessionInfo info = TradingSessionManager.forUser(userId)
-                .startBacktest(coinName, tradingSum, buyGap, spg, slg, chartType, exchangeName, commissionRate);
+                .startBacktest(coinName, tradingSum, buyGap, spg, slg, chartType, exchangeName, commissionRate, customFrom, customTo);
         return info.toMap();
     }
 

@@ -48,6 +48,17 @@ public  class Chart {
         return new ChartYearly_1hourInterval(coin);
     }
 
+    /** Get chart via Binance klines API (supports 1-5 years, with local caching). */
+    public static Chart getBinanceChart(Coin coin, int years) {
+        return BinanceKlinesProvider.getChart(coin, years);
+    }
+
+    /** Get chart via Binance klines API with custom date range. */
+    public static Chart getBinanceChart(Coin coin, long startTimeMs, long endTimeMs) {
+        String interval = (endTimeMs - startTimeMs) > 3L * 365 * 24 * 3600 * 1000 ? "4h" : "1h";
+        return BinanceKlinesProvider.getChart(coin, interval, startTimeMs, endTimeMs);
+    }
+
 
     public void saveToJson (File file) throws IOException {
         ObjectMapper mapper = new ObjectMapper();

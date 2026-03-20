@@ -140,6 +140,8 @@ public class TradingSessionManager {
         if (lower.contains("завершен") || lower.contains("done")) return "DONE";
         if (lower.contains("✅ покупка") || lower.contains("покупка совершена")) return "BUY";
         if (lower.contains("📈 продажа") || lower.contains("📉 продажа")) return "SELL";
+        if (lower.contains("🆕 новая торговая") || lower.contains("состояние восстановлено")
+                || lower.contains("сессия возобновлена")) return "START";
         return "INFO";
     }
 
@@ -653,7 +655,8 @@ public class TradingSessionManager {
     public boolean stopSession(String sessionId) {
         SessionInfo info = sessions.get(sessionId);
         if (info == null) return false;
-        if (info.thread != null && info.thread.isAlive()) {
+        boolean threadWasAlive = info.thread != null && info.thread.isAlive();
+        if (threadWasAlive) {
             info.thread.interrupt();
             // Wait for the thread to actually die, so resume doesn't start a duplicate
             try { info.thread.join(10_000); } catch (InterruptedException ignored) {}
@@ -661,9 +664,13 @@ public class TradingSessionManager {
                 log.warn("Thread for session {} still alive after 10s interrupt", sessionId);
             }
         }
-        info.status = "STOPPED"; info.stoppedUnexpectedly = false;
-        info.endedAt = System.currentTimeMillis();
-        info.addEvent("STOP", "Остановлено пользователем");
+        // setFinalStatus (called from the dying thread) already sets status/event.
+        // Only add STOP event here if thread wasn't alive (i.e. setFinalStatus didn't run).
+        if (!threadWasAlive || info.thread.isAlive()) {
+            info.status = "STOPPED"; info.stoppedUnexpectedly = false;
+            info.endedAt = System.currentTimeMillis();
+            info.addEvent("STOP", "Остановлено пользователем");
+        }
         saveSessions();
         return true;
     }
@@ -705,11 +712,20 @@ public class TradingSessionManager {
     public SessionInfo startBacktest(String coinName, double tradingSum, double buyGap,
                                      double spg, double slg, String chartType,
                                      String exchangeName, double commissionRate) {
+        return startBacktest(coinName, tradingSum, buyGap, spg, slg, chartType, exchangeName, commissionRate, 0, 0);
+    }
+
+    public SessionInfo startBacktest(String coinName, double tradingSum, double buyGap,
+                                     double spg, double slg, String chartType,
+                                     String exchangeName, double commissionRate,
+                                     long customFrom, long customTo) {
         String id = "backtest_" + System.currentTimeMillis();
         Map<String, Object> params = buildParams(tradingSum, buyGap, spg, slg, 30, 60);
         params.put("chartType", chartType);
         params.put("exchangeName", exchangeName);
         params.put("commissionRate", commissionRate);
+        if (customFrom > 0) params.put("customFrom", customFrom);
+        if (customTo > 0) params.put("customTo", customTo);
         SessionInfo info = new SessionInfo(id, SessionType.BACKTEST, coinName, params, userId);
         lastBacktestResult.set(null);
         info.addEvent("START", "Бэктест запущен: " + coinName);
@@ -719,18 +735,37 @@ public class TradingSessionManager {
                 Coin coin = CoinsList.getCoinByName(coinName);
                 Chart chart;
                 switch (chartType) {
+                    case "5yr":
+                        info.addEvent("INFO", "Загрузка 5-летних данных через Binance...");
+                        chart = Chart.getBinanceChart(coin, 5);
+                        break;
+                    case "3yr":
+                        info.addEvent("INFO", "Загрузка 3-летних данных через Binance...");
+                        chart = Chart.getBinanceChart(coin, 3);
+                        break;
                     case "yearly":
-                        chart = Chart.getYearlyChart_1hourInterval(coin);
+                        info.addEvent("INFO", "Загрузка годовых данных через Binance...");
+                        chart = Chart.getBinanceChart(coin, 1);
                         break;
                     case "monthly":
                         java.time.YearMonth ym = java.time.YearMonth.now().minusMonths(1);
                         chart = Chart.getMonthlyChart_1hourInterval(coin, ym);
                         break;
+                    case "custom":
+                        long customFrom = toLong(params.get("customFrom"));
+                        long customTo = toLong(params.get("customTo"));
+                        if (customFrom <= 0 || customTo <= 0) {
+                            customTo = System.currentTimeMillis();
+                            customFrom = customTo - 365L * 24 * 3600 * 1000;
+                        }
+                        info.addEvent("INFO", "Загрузка данных за произвольный период через Binance...");
+                        chart = Chart.getBinanceChart(coin, customFrom, customTo);
+                        break;
                     default:
                         chart = Chart.get1DayUntilNowChart_5MinuteInterval(coin);
                         break;
                 }
-                info.addEvent("INFO", "Данные загружены, запуск бэктеста...");
+                info.addEvent("INFO", "Данные загружены (" + chart.getPrices().size() + " точек), запуск бэктеста...");
                 ReversalPointStrategyBackTester tester = new ReversalPointStrategyBackTester(
                         coin, chart, tradingSum, buyGap, spg, slg, exchangeName, commissionRate);
                 info.backtestProgressTotal = chart.getPrices().size();
@@ -837,7 +872,9 @@ public class TradingSessionManager {
             Coin coin = CoinsList.getCoinByName(coinName);
             Chart chart;
             switch (chartType) {
-                case "yearly": chart = Chart.getYearlyChart_1hourInterval(coin); break;
+                case "5yr": chart = Chart.getBinanceChart(coin, 5); break;
+                case "3yr": chart = Chart.getBinanceChart(coin, 3); break;
+                case "yearly": chart = Chart.getBinanceChart(coin, 1); break;
                 case "monthly":
                     java.time.YearMonth ym = java.time.YearMonth.now().minusMonths(1);
                     chart = Chart.getMonthlyChart_1hourInterval(coin, ym);

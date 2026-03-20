@@ -439,11 +439,22 @@
           </div>
           <div class="input-wrap form-full">
             <label class="input-label">ПЕРИОД ДАННЫХ</label>
-            <select id="btChartType" oninput="saveField('btChartType')">
+            <select id="btChartType" oninput="saveField('btChartType');toggleCustomDateRange('bt')">
               <option value="1d">1 день (5-мин интервалы)</option>
               <option value="monthly">1 месяц (часовые интервалы)</option>
-              <option value="yearly" selected>Год (часовые интервалы)</option>
+              <option value="yearly" selected>1 год (Binance, часовые)</option>
+              <option value="3yr">3 года (Binance, часовые)</option>
+              <option value="5yr">5 лет (Binance, 4-часовые)</option>
+              <option value="custom">Произвольный период</option>
             </select>
+          </div>
+          <div id="btCustomDateWrap" style="display:none" class="input-wrap form-full">
+            <label class="input-label">ДИАПАЗОН ДАТ</label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="date" id="btCustomFrom" style="flex:1">
+              <span style="color:var(--muted)">—</span>
+              <input type="date" id="btCustomTo" style="flex:1">
+            </div>
           </div>
           <div class="input-wrap">
             <label class="input-label">СУММА (USDT)</label>
@@ -497,6 +508,7 @@
           <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn btn-secondary" id="btShowChartBtn" onclick="showBacktestChart()" style="display:none">📈 ПОКАЗАТЬ ГРАФИК</button>
             <button class="btn btn-secondary" id="btShowYieldBtn" onclick="showBacktestYieldCurve()" style="display:none">📊 КРИВАЯ ДОХОДНОСТИ</button>
+            <button class="btn btn-primary btn-sm" id="btStartTradingBtn" onclick="startTradingFromBacktest()" style="display:none">▶ ТОРГОВАТЬ</button>
           </div>
         </div>
       </div>
@@ -538,11 +550,22 @@
           </div>
           <div class="input-wrap form-full">
             <label class="input-label">ПЕРИОД ДАННЫХ</label>
-            <select id="optChartType" oninput="saveField('optChartType')">
+            <select id="optChartType" oninput="saveField('optChartType');toggleCustomDateRange('opt')">
               <option value="1d">1 день (5-мин интервалы)</option>
               <option value="monthly">1 месяц (часовые интервалы)</option>
-              <option value="yearly" selected>Год (часовые интервалы)</option>
+              <option value="yearly" selected>1 год (Binance, часовые)</option>
+              <option value="3yr">3 года (Binance, часовые)</option>
+              <option value="5yr">5 лет (Binance, 4-часовые)</option>
+              <option value="custom">Произвольный период</option>
             </select>
+          </div>
+          <div id="optCustomDateWrap" style="display:none" class="input-wrap form-full">
+            <label class="input-label">ДИАПАЗОН ДАТ</label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="date" id="optCustomFrom" style="flex:1">
+              <span style="color:var(--muted)">—</span>
+              <input type="date" id="optCustomTo" style="flex:1">
+            </div>
           </div>
           <div class="input-wrap">
             <label class="input-label">СУММА (USDT)</label>
@@ -1077,6 +1100,12 @@ function setChartInterval(interval) {
 // ============================================================
 // TRADE
 // ============================================================
+function toggleCustomDateRange(prefix) {
+  const sel = document.getElementById(prefix + 'ChartType');
+  const wrap = document.getElementById(prefix + 'CustomDateWrap');
+  if (sel && wrap) wrap.style.display = sel.value === 'custom' ? '' : 'none';
+}
+
 function updateTradeForm() {
   const type = document.getElementById('tradeType').value;
   document.querySelectorAll('.tester-only').forEach(f => f.style.display = type==='tester'?'':'none');
@@ -1183,6 +1212,12 @@ async function startBacktest() {
     chartType: document.getElementById('btChartType').value,
     exchangeName: exchange, commissionRate,
   };
+  if (body.chartType === 'custom') {
+    const fromVal = document.getElementById('btCustomFrom').value;
+    const toVal = document.getElementById('btCustomTo').value;
+    if (fromVal) body.customFrom = new Date(fromVal).getTime();
+    if (toVal) body.customTo = new Date(toVal + 'T23:59:59').getTime();
+  }
   try {
     const r = await fetch(`${API_BASE}/api/backtest/start`,{method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
     const sessionData = await r.json();
@@ -1243,7 +1278,7 @@ function showBacktestResult(result) {
   const profitSum = result.totalProfit || 0;
   const lossSum = Math.abs(result.totalLoss || 0);
   const chartType = result.chartType || '';
-  const periodLabel = chartType === 'yearly' ? '1 год' : chartType === 'monthly' ? '1 месяц' : '1 день';
+  const periodLabel = {'5yr':'5 лет','3yr':'3 года','yearly':'1 год','monthly':'1 месяц','1d':'1 день','custom':'Произвольный'}[chartType] || chartType;
 
   document.getElementById('btProfitDisplay').innerHTML = `
     <div style="font-family:var(--font-head);font-size:22px;font-weight:900;text-align:center;color:${pos?'var(--green)':'var(--red)'}">
@@ -1279,6 +1314,32 @@ function showBacktestResult(result) {
   if (btShowChartBtn) btShowChartBtn.style.display = hasTrades ? '' : 'none';
   const btShowYieldBtn = document.getElementById('btShowYieldBtn');
   if (btShowYieldBtn) btShowYieldBtn.style.display = (result.equityCurve && result.equityCurve.length > 1) ? '' : 'none';
+  const btStartTradingBtn = document.getElementById('btStartTradingBtn');
+  if (btStartTradingBtn) btStartTradingBtn.style.display = '';
+}
+
+function startTradingFromBacktest() {
+  const r = _btLastResult;
+  if (!r) return;
+  const coin = document.getElementById('btCoinInput')?.value || r.coinName || '';
+  prefillTradingForm(coin, r.tradingSum, r.buyGap, r.sellWithProfitGap, r.sellWithLossGap);
+}
+
+function startTradingFromOptResult(idx) {
+  const r = _optResults[idx];
+  if (!r) return;
+  const coin = document.getElementById('optCoinInput')?.value || r.coinName || '';
+  prefillTradingForm(coin, r.tradingSum, r.buyGap, r.sellWithProfitGap, r.sellWithLossGap);
+}
+
+function prefillTradingForm(coin, tradingSum, buyGap, sellProfit, sellLoss) {
+  showPage('trade');
+  if (coin) document.getElementById('tradeCoinInput').value = coin;
+  if (tradingSum) document.getElementById('tradeTradingSum').value = tradingSum;
+  if (buyGap) document.getElementById('tradeBuyGap').value = buyGap;
+  if (sellProfit) document.getElementById('tradeSellProfit').value = sellProfit;
+  if (sellLoss) document.getElementById('tradeSellLoss').value = sellLoss;
+  showToast('Параметры загружены в форму торговли');
 }
 
 let _btChartInstance = null;
@@ -1536,6 +1597,7 @@ function showOptimizeResult(results) {
       <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
         ${hasTrades ? `<button class="btn btn-secondary btn-sm" onclick="toggleOptChart(${i})" id="optChartBtn-${i}">📈 График</button>` : ''}
         ${hasEquity ? `<button class="btn btn-secondary btn-sm" onclick="toggleOptYield(${i})">📊 Доходность</button>` : ''}
+        <button class="btn btn-primary btn-sm" onclick="startTradingFromOptResult(${i})">▶ Торговать</button>
       </div>
       ${hasTrades ? `<div id="optChartWrap-${i}" style="display:none;margin-top:8px">
         <div style="font-size:10px;color:var(--muted);margin-bottom:4px">

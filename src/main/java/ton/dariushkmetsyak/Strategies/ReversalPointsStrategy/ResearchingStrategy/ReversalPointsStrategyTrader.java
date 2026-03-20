@@ -170,8 +170,6 @@ public class ReversalPointsStrategyTrader {
                 "Параметры: buy=" + this.buyGap + "%, profit=" + this.sellWithProfitGap +
                 "%, loss=" + this.sellWithLossGap + "%";
             ImageAndMessageSender.sendTelegramMessage(restoreMsg, chatID);
-            // Use explicit INFO type so detectEventType doesn't misclassify as BUY/SELL
-            ton.dariushkmetsyak.Web.TradingSessionManager.logTypedEventFromCurrentThread("INFO", restoreMsg);
             log.info("[Trader] Restored state for session {}: isTrading={}, boughtFor={}",
                     this.sessionId, trading, boughtFor);
         } else {
@@ -191,14 +189,12 @@ public class ReversalPointsStrategyTrader {
                     "Баланс: " + Prices.round(coinBal) + " " + coin.getSymbol() +
                     ", " + Prices.round(usdtBal) + " USDT";
                 ImageAndMessageSender.sendTelegramMessage(newMsg, chatID);
-                ton.dariushkmetsyak.Web.TradingSessionManager.logTypedEventFromCurrentThread("START", newMsg);
             } else {
                 String resumeNoStateMsg = "🔄 Сессия возобновлена (без сохранённого состояния)\n" +
                     "Монета: " + coin.getName() + "\n" +
                     "Текущий баланс: " + Prices.round(coinBal) + " " + coin.getSymbol() +
                     ", " + Prices.round(usdtBal) + " USDT\nВход в рынок ищется заново.";
                 ImageAndMessageSender.sendTelegramMessage(resumeNoStateMsg, chatID);
-                ton.dariushkmetsyak.Web.TradingSessionManager.logTypedEventFromCurrentThread("START", resumeNoStateMsg);
             }
         }
 
@@ -364,7 +360,6 @@ public class ReversalPointsStrategyTrader {
                     commissionNote
                 );
                 ImageAndMessageSender.sendTelegramMessage(sellProfitMsg, chatID);
-                ton.dariushkmetsyak.Web.TradingSessionManager.logTypedEventFromCurrentThread("SELL", sellProfitMsg);
                 log.info("[Trader] SELL (profit): {} @ ${}, profit=+{:.2f}%", coin.getSymbol(), Prices.round(soldFor), profitPct);
                 sendPhotoToTelegram();
                 prevMessageId = 0;
@@ -415,7 +410,6 @@ public class ReversalPointsStrategyTrader {
                     commissionNoteLoss
                 );
                 ImageAndMessageSender.sendTelegramMessage(sellLossMsg, chatID);
-                ton.dariushkmetsyak.Web.TradingSessionManager.logTypedEventFromCurrentThread("SELL", sellLossMsg);
                 log.info("[Trader] SELL (loss): {} @ ${}, loss={:.2f}%", coin.getSymbol(), Prices.round(soldFor), lossPct);
                 sendPhotoToTelegram();
                 prevMessageId = 0;
@@ -517,7 +511,6 @@ public class ReversalPointsStrategyTrader {
                 coinAmt, coin.getSymbol(), usdtAmt
             );
             ImageAndMessageSender.sendTelegramMessage(buyMsg, chatID);
-            ton.dariushkmetsyak.Web.TradingSessionManager.logTypedEventFromCurrentThread("BUY", buyMsg);
             log.info("[Trader] BUY executed: {} @ ${}", coin.getSymbol(), Prices.round(boughtFor));
             persistState(); // Immediate save on buy — most critical moment
             return;
