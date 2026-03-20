@@ -774,14 +774,14 @@ public class TradingSessionManager {
                         chart = Chart.getMonthlyChart_1hourInterval(coin, ym);
                         break;
                     case "custom":
-                        long customFrom = toLong(params.get("customFrom"));
-                        long customTo = toLong(params.get("customTo"));
-                        if (customFrom <= 0 || customTo <= 0) {
-                            customTo = System.currentTimeMillis();
-                            customFrom = customTo - 365L * 24 * 3600 * 1000;
+                        long cfrom = customFrom > 0 ? customFrom : toLong(params.get("customFrom"));
+                        long cto = customTo > 0 ? customTo : toLong(params.get("customTo"));
+                        if (cfrom <= 0 || cto <= 0) {
+                            cto = System.currentTimeMillis();
+                            cfrom = cto - 365L * 24 * 3600 * 1000;
                         }
                         info.addEvent("INFO", "Загрузка данных за произвольный период через Binance...");
-                        chart = Chart.getBinanceChart(coin, customFrom, customTo);
+                        chart = Chart.getBinanceChart(coin, cfrom, cto);
                         break;
                     default:
                         chart = Chart.get1DayUntilNowChart_5MinuteInterval(coin);
