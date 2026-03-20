@@ -19,14 +19,10 @@ import java.util.*;
  * Fetches historical klines (candlestick) data from Binance public API.
  * Supports up to 5+ years of data with local file caching.
  *
- * Binance klines API: GET /api/v3/klines
- *   - symbol: e.g. BTCUSDT
- *   - interval: 1h, 4h, 1d, etc.
- *   - startTime/endTime: milliseconds
- *   - limit: max 1000 per request
+ * Stores full OHLCV data in KlineRecord format (ready for PostgreSQL migration).
+ * The Chart interface is preserved for backward compatibility (prices as [timestamp, close]).
  *
- * Cache strategy:
- *   - Data cached per month files: chart_cache/{SYMBOL}/{YYYY-MM}.json
+ * Cache files: chart_cache/{SYMBOL}/{interval}/{YYYY-MM}.json
  *   - Completed months are immutable (never re-fetched)
  *   - Current month is re-fetched if older than 1 hour
  */
@@ -64,9 +60,32 @@ public class BinanceKlinesProvider {
         log.info("[BinanceKlines] Fetching {} {} from {} to {}", symbol, interval,
                 Instant.ofEpochMilli(startTimeMs), Instant.ofEpochMilli(endTimeMs));
 
-        List<double[]> allPrices = new ArrayList<>();
+        List<KlineRecord> allRecords = fetchKlineRecords(symbol, interval, startTimeMs, endTimeMs);
 
-        // Iterate month-by-month for cache granularity
+        // Build Chart object with backward-compatible [timestamp, close] format
+        ArrayList<double[]> prices = new ArrayList<>(allRecords.size());
+        for (KlineRecord r : allRecords) {
+            prices.add(r.toPriceArray());
+        }
+
+        Chart chart = new Chart();
+        chart.coin = coin.getName();
+        chart.prices = prices;
+        chart.market_caps = new ArrayList<>();
+        chart.total_volumes = new ArrayList<>();
+
+        log.info("[BinanceKlines] Loaded {} data points for {} ({})", prices.size(), symbol, interval);
+        return chart;
+    }
+
+    /**
+     * Fetch full OHLCV KlineRecords for a symbol — suitable for DB storage.
+     * Uses the same month-by-month caching strategy.
+     */
+    public static List<KlineRecord> fetchKlineRecords(String symbol, String interval,
+                                                       long startTimeMs, long endTimeMs) {
+        List<KlineRecord> allRecords = new ArrayList<>();
+
         YearMonth startYm = YearMonth.from(Instant.ofEpochMilli(startTimeMs).atZone(ZoneOffset.UTC).toLocalDate());
         YearMonth endYm = YearMonth.from(Instant.ofEpochMilli(endTimeMs).atZone(ZoneOffset.UTC).toLocalDate());
         YearMonth currentYm = YearMonth.now(ZoneOffset.UTC);
@@ -76,19 +95,17 @@ public class BinanceKlinesProvider {
             long monthEnd = Math.min(endTimeMs, ymEndToMs(ym));
 
             boolean isCurrentMonth = ym.equals(currentYm);
-            List<double[]> monthData = loadFromCache(symbol, interval, ym);
+            List<KlineRecord> monthData = loadFromCache(symbol, interval, ym);
 
             if (monthData != null && !isCurrentMonth) {
-                // Completed month — cache is definitive
-                filterAndAdd(allPrices, monthData, monthStart, monthEnd);
+                filterAndAdd(allRecords, monthData, monthStart, monthEnd);
                 continue;
             }
 
             if (monthData != null && isCurrentMonth) {
-                // Current month — check if cache is fresh enough
                 long cacheAge = getCacheAge(symbol, interval, ym);
                 if (cacheAge < CURRENT_MONTH_CACHE_MAX_AGE_MS) {
-                    filterAndAdd(allPrices, monthData, monthStart, monthEnd);
+                    filterAndAdd(allRecords, monthData, monthStart, monthEnd);
                     continue;
                 }
             }
@@ -97,32 +114,22 @@ public class BinanceKlinesProvider {
             monthData = fetchFromBinance(symbol, interval, monthStart, monthEnd);
             if (monthData != null && !monthData.isEmpty()) {
                 saveToCache(symbol, interval, ym, monthData);
-                filterAndAdd(allPrices, monthData, monthStart, monthEnd);
+                filterAndAdd(allRecords, monthData, monthStart, monthEnd);
             }
 
-            // Small delay between requests to avoid rate limits
             try { Thread.sleep(200); } catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
         }
 
-        // Sort by timestamp
-        allPrices.sort(Comparator.comparingDouble(a -> a[0]));
-
-        // Build Chart object
-        Chart chart = new Chart();
-        chart.coin = coin.getName();
-        chart.prices = new ArrayList<>(allPrices);
-        chart.market_caps = new ArrayList<>();
-        chart.total_volumes = new ArrayList<>();
-
-        log.info("[BinanceKlines] Loaded {} data points for {} ({})", allPrices.size(), symbol, interval);
-        return chart;
+        allRecords.sort(Comparator.comparingLong(KlineRecord::getOpenTime));
+        return allRecords;
     }
 
     /**
      * Fetch klines from Binance API, paginating as needed (max 1000 per request).
      */
-    private static List<double[]> fetchFromBinance(String symbol, String interval, long startTime, long endTime) {
-        List<double[]> result = new ArrayList<>();
+    private static List<KlineRecord> fetchFromBinance(String symbol, String interval,
+                                                       long startTime, long endTime) {
+        List<KlineRecord> result = new ArrayList<>();
         long cursor = startTime;
 
         while (cursor < endTime) {
@@ -144,15 +151,12 @@ public class BinanceKlinesProvider {
                     break;
                 }
 
-                // Binance returns: [[openTime, open, high, low, close, volume, closeTime, ...], ...]
                 List<List<Object>> klines = mapper.readValue(response.body(), new TypeReference<>() {});
 
                 if (klines == null || klines.isEmpty()) break;
 
                 for (List<Object> k : klines) {
-                    double timestamp = ((Number) k.get(0)).doubleValue();  // open time in ms
-                    double closePrice = Double.parseDouble(k.get(4).toString()); // close price
-                    result.add(new double[]{timestamp, closePrice});
+                    result.add(KlineRecord.fromBinanceArray(k, symbol, interval));
                 }
 
                 // Move cursor past last received kline
@@ -181,11 +185,11 @@ public class BinanceKlinesProvider {
         return Path.of(CACHE_DIR, symbol, interval, ym.toString() + ".json");
     }
 
-    private static List<double[]> loadFromCache(String symbol, String interval, YearMonth ym) {
+    private static List<KlineRecord> loadFromCache(String symbol, String interval, YearMonth ym) {
         Path path = cachePath(symbol, interval, ym);
         if (!Files.exists(path)) return null;
         try {
-            return mapper.readValue(path.toFile(), new TypeReference<List<double[]>>() {});
+            return mapper.readValue(path.toFile(), new TypeReference<List<KlineRecord>>() {});
         } catch (Exception e) {
             log.warn("[BinanceKlines] Failed to read cache {}: {}", path, e.getMessage());
             return null;
@@ -201,7 +205,7 @@ public class BinanceKlinesProvider {
         }
     }
 
-    private static void saveToCache(String symbol, String interval, YearMonth ym, List<double[]> data) {
+    private static void saveToCache(String symbol, String interval, YearMonth ym, List<KlineRecord> data) {
         Path path = cachePath(symbol, interval, ym);
         try {
             Files.createDirectories(path.getParent());
@@ -221,10 +225,11 @@ public class BinanceKlinesProvider {
         return ym.plusMonths(1).atDay(1).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli() - 1;
     }
 
-    private static void filterAndAdd(List<double[]> target, List<double[]> source, long startMs, long endMs) {
-        for (double[] p : source) {
-            if (p[0] >= startMs && p[0] <= endMs) {
-                target.add(p);
+    private static void filterAndAdd(List<KlineRecord> target, List<KlineRecord> source,
+                                      long startMs, long endMs) {
+        for (KlineRecord r : source) {
+            if (r.getOpenTime() >= startMs && r.getOpenTime() <= endMs) {
+                target.add(r);
             }
         }
     }
