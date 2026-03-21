@@ -361,7 +361,6 @@ public class ReversalPointsStrategyTrader {
                 );
                 ImageAndMessageSender.sendTelegramMessage(sellProfitMsg, chatID);
                 log.info("[Trader] SELL (profit): {} @ ${}, profit=+{:.2f}%", coin.getSymbol(), Prices.round(soldFor), profitPct);
-                sendPhotoToTelegram();
                 prevMessageId = 0;
                 TradingChart.clearChart();
                 trading = false;
@@ -411,7 +410,6 @@ public class ReversalPointsStrategyTrader {
                 );
                 ImageAndMessageSender.sendTelegramMessage(sellLossMsg, chatID);
                 log.info("[Trader] SELL (loss): {} @ ${}, loss={:.2f}%", coin.getSymbol(), Prices.round(soldFor), lossPct);
-                sendPhotoToTelegram();
                 prevMessageId = 0;
                 TradingChart.clearChart();
                 trading = false;
@@ -455,7 +453,6 @@ public class ReversalPointsStrategyTrader {
         tickCounter++;
         if (tickCounter % 5 == 0) persistState();
 
-        sendPhotoToTelegram();
         return false;
     }
 
