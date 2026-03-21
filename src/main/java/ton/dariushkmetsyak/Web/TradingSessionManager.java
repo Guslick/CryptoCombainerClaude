@@ -765,6 +765,12 @@ public class TradingSessionManager {
 
     public SessionInfo startBacktest(String coinName, double tradingSum, double buyGap,
                                      double spg, double slg, String chartType,
+                                     String exchangeName) {
+        return startBacktest(coinName, tradingSum, buyGap, spg, slg, chartType, exchangeName, 0.1);
+    }
+
+    public SessionInfo startBacktest(String coinName, double tradingSum, double buyGap,
+                                     double spg, double slg, String chartType,
                                      String exchangeName, double commissionRate) {
         return startBacktest(coinName, tradingSum, buyGap, spg, slg, chartType, exchangeName, commissionRate, 0, 0);
     }

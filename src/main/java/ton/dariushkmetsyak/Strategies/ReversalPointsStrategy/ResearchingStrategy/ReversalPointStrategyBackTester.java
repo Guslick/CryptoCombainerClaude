@@ -89,6 +89,10 @@ public class ReversalPointStrategyBackTester {
         this(coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, new CommissionCalculator(CommissionCalculator.Exchange.BINANCE));
     }
 
+    public ReversalPointStrategyBackTester(Coin coin, Chart chart, double tradingSum, double buyGap, double sellWithProfitGap, double sellWithLossGap, String exchangeName, double commissionRate) {
+        this(coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, new CommissionCalculator(CommissionCalculator.Exchange.BINANCE));
+    }
+
     public ReversalPointStrategyBackTester(Coin coin, Chart chart, double tradingSum, double buyGap, double sellWithProfitGap, double sellWithLossGap, CommissionCalculator commissionCalc) {
         try {
             this.coin=Coin.createCoin(chart.getCoinName());
@@ -118,6 +122,8 @@ public class ReversalPointStrategyBackTester {
         int lossCount;
         double totalProfitAmount;
         double totalLossAmount;
+        String exchangeName;
+        double commissionRate;
 
         public double getProfitInUsd() { return profitInUsd; }
         public double getBuyGap() { return buyGap; }
@@ -126,11 +132,20 @@ public class ReversalPointStrategyBackTester {
         public double getPercentageProfit() { return percentageProfit; }
         public double getTotalCommission() { return totalCommission; }
         public double getProfitAfterCommission() { return profitAfterCommission; }
+        public double getProfitInUsdAfterCommission() { return profitAfterCommission; }
+        public double getPercentageProfitAfterCommission() { return percentageProfit != 0 && profitInUsd != 0 ? profitAfterCommission / profitInUsd * percentageProfit : 0; }
         public int getWinCount() { return winCount; }
         public int getLossCount() { return lossCount; }
         public int getTotalTrades() { return winCount + lossCount; }
+        public int getProfitTradeCount() { return winCount; }
+        public int getLossTradeCount() { return lossCount; }
+        public int getTotalTradeCount() { return winCount + lossCount; }
         public double getTotalProfitAmount() { return totalProfitAmount; }
         public double getTotalLossAmount() { return totalLossAmount; }
+        public double getTotalProfit() { return totalProfitAmount; }
+        public double getTotalLoss() { return totalLossAmount; }
+        public String getExchangeName() { return exchangeName; }
+        public double getCommissionRate() { return commissionRate; }
 
         @Override
         public String toString() {
@@ -160,6 +175,8 @@ public class ReversalPointStrategyBackTester {
             this.lossCount = lossCount;
             this.totalProfitAmount = totalProfitAmount;
             this.totalLossAmount = totalLossAmount;
+            this.exchangeName = commissionCalc.getExchange().getDisplayName();
+            this.commissionRate = commissionCalc.getFeePercent();
         }
 
         @Override
