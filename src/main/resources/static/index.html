@@ -38,6 +38,9 @@
   .content::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
   .page{display:none;flex-direction:column;gap:12px}
   .page.active{display:flex}
+  .sub-page{display:none;flex-direction:column;gap:12px}
+  .sub-page.active{display:flex}
+  .sub-tabs{margin:0 -14px;padding:0 8px;background:var(--bg2);border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
   .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;position:relative;overflow:hidden}
   .card::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(0,229,255,0.4),transparent)}
   .card-title{font-family:var(--font-head);font-size:11px;font-weight:700;letter-spacing:1px;color:var(--accent);margin-bottom:12px;display:flex;align-items:center;gap:6px}
@@ -240,10 +243,7 @@
   <div class="tabs">
     <button class="tab active" onclick="showPage('dashboard')" id="tab-dashboard">📊 РЫНОК</button>
     <button class="tab" onclick="showPage('chart')" id="tab-chart">📈 ГРАФИК</button>
-    <button class="tab" onclick="showPage('trade')" id="tab-trade">⚡ ТОРГОВЛЯ</button>
-    <button class="tab" onclick="showPage('research')" id="tab-research">🔬 ИССЛ.</button>
-    <button class="tab" onclick="showPage('backtest')" id="tab-backtest">🧪 БЭКТЕСТ</button>
-    <button class="tab" onclick="showPage('optimize')" id="tab-optimize">🏆 ТОП-10</button>
+    <button class="tab" onclick="showPage('strategies')" id="tab-strategies">🧬 СТРАТЕГИИ</button>
     <button class="tab" onclick="showPage('sessions')" id="tab-sessions">🎮 СЕССИИ</button>
     <button class="tab" onclick="showPage('profile')" id="tab-profile">👤 КАБИНЕТ</button>
   </div>
@@ -305,8 +305,32 @@
       </div>
     </div>
 
+    <!-- STRATEGIES WRAPPER -->
+    <div class="page" id="page-strategies">
+      <div class="card" id="strategySelector">
+        <div class="card-title">🧬 ВЫБЕРИТЕ СТРАТЕГИЮ</div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+          <button class="btn btn-primary" style="text-align:left;padding:12px 16px" onclick="selectStrategy('reversal')">
+            <div style="font-family:var(--font-head);font-size:13px;font-weight:700">📐 Стратегия разворотных точек</div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:4px">Покупка при падении от максимума, продажа по целям прибыли/убытка</div>
+          </button>
+        </div>
+      </div>
+      <div id="strategyWorkspace" style="display:none">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <button class="btn btn-secondary btn-sm" onclick="deselectStrategy()" style="font-size:10px">← Назад</button>
+          <span id="strategyTitle" style="font-family:var(--font-head);font-size:12px;color:var(--accent)"></span>
+        </div>
+        <div class="tabs sub-tabs" id="strategySubTabs">
+          <button class="tab active" onclick="showStrategyTab('trade')" id="stab-trade">⚡ ТОРГОВЛЯ</button>
+          <button class="tab" onclick="showStrategyTab('research')" id="stab-research">🔬 ИССЛ.</button>
+          <button class="tab" onclick="showStrategyTab('backtest')" id="stab-backtest">🧪 БЭКТЕСТ</button>
+          <button class="tab" onclick="showStrategyTab('optimize')" id="stab-optimize">🏆 ТОП</button>
+        </div>
+      </div>
+
     <!-- TRADE -->
-    <div class="page" id="page-trade">
+    <div class="sub-page active" id="page-trade">
       <div class="card">
         <div class="card-title">🎮 ТИП ТОРГОВЛИ</div>
         <select id="tradeType" onchange="saveField('tradeType');updateTradeForm()">
@@ -373,7 +397,7 @@
     </div>
 
     <!-- RESEARCH -->
-    <div class="page" id="page-research">
+    <div class="sub-page" id="page-research">
       <div class="card">
         <div class="card-title">🔬 ИССЛЕДОВАНИЕ В РЕАЛЬНОМ ВРЕМЕНИ</div>
         <div class="research-hint" style="margin-bottom:12px;">Стратегия запускается на виртуальном аккаунте с реальными ценами.</div>
@@ -424,7 +448,7 @@
     </div>
 
     <!-- BACKTEST -->
-    <div class="page" id="page-backtest">
+    <div class="sub-page" id="page-backtest">
       <div class="card">
         <div class="card-title">🧪 БЭКТЕСТ СТРАТЕГИИ</div>
         <div class="research-hint" style="margin-bottom:12px;">Проверяет стратегию на исторических данных.</div>
@@ -517,7 +541,10 @@
         <div class="card-title">📊 КРИВАЯ ДОХОДНОСТИ
           <button class="btn btn-secondary btn-sm" onclick="document.getElementById('btYieldCard').style.display='none'" style="margin-left:auto">✕</button>
         </div>
-        <div style="font-size:10px;color:var(--muted);margin-bottom:8px">Изменение прибыли (USD) после каждой сделки</div>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:8px">
+          <span style="color:#00e676">━</span> Стратегия &nbsp;
+          <span style="color:#ff1744">╌</span> Просто лонг (без сделок)
+        </div>
         <div id="btYieldContainer" style="width:100%;height:220px;background:var(--bg3);border-radius:var(--radius-sm)"></div>
       </div>
       <!-- Backtest chart -->
@@ -534,10 +561,10 @@
       </div>
     </div>
 
-    <!-- OPTIMIZE / TOP-10 -->
-    <div class="page" id="page-optimize">
+    <!-- OPTIMIZE / TOP -->
+    <div class="sub-page" id="page-optimize">
       <div class="card">
-        <div class="card-title">🏆 ТОП-10 ЛУЧШИХ СТРАТЕГИЙ</div>
+        <div class="card-title">🏆 ТОП ЛУЧШИХ СТРАТЕГИЙ</div>
         <div class="research-hint" style="margin-bottom:12px;">Перебирает комбинации параметров и находит 10 наиболее прибыльных стратегий с учётом комиссии.</div>
         <div class="form-grid">
           <div class="input-wrap form-full">
@@ -632,6 +659,7 @@
         <div id="optResultList"></div>
       </div>
     </div>
+    </div><!-- /page-strategies -->
 
     <!-- SESSIONS -->
     <div class="page" id="page-sessions">
@@ -826,18 +854,17 @@ async function checkHealth() {
 // ============================================================
 // NAVIGATION
 // ============================================================
-const AUTH_REQUIRED_PAGES = new Set(['trade', 'research', 'backtest', 'sessions', 'optimize']);
+const AUTH_REQUIRED_PAGES = new Set(['strategies', 'sessions']);
 
 function showPage(pageId) {
   // Auth gate — protected pages require login
   if (AUTH_REQUIRED_PAGES.has(pageId) && !isAuthed()) {
-    // Activate the page so the lock screen shows
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.getElementById('page-' + pageId)?.classList.add('active');
     document.getElementById('tab-' + pageId)?.classList.add('active');
     const lockTarget = {
-      trade: 'page-trade', research: 'page-research', backtest: 'page-backtest', sessions: 'sessionsList', optimize: 'page-optimize'
+      strategies: 'page-strategies', sessions: 'sessionsList'
     }[pageId] || 'page-' + pageId;
     showAuthRequired(lockTarget, 'Войдите через Telegram, чтобы торговать и видеть сессии.');
     return;
@@ -851,9 +878,45 @@ function showPage(pageId) {
   if (pageId === 'chart') initChart();
   if (pageId === 'sessions') { loadSessions(); startSessionsRefresh(); }
   else stopSessionsRefresh();
-  if (pageId === 'trade' || pageId === 'research') checkActiveSessionBanner();
+  if (pageId === 'strategies') {
+    const activeSubTab = document.querySelector('#strategySubTabs .tab.active')?.id?.replace('stab-', '');
+    if (activeSubTab === 'trade' || activeSubTab === 'research') checkActiveSessionBanner();
+    if (activeSubTab === 'optimize') { updateOptCommission(); updateCombinationsCount(); }
+  }
   if (pageId === 'profile') initProfilePage();
-  if (pageId === 'optimize') { updateOptCommission(); updateCombinationsCount(); }
+}
+
+let _selectedStrategy = null;
+
+function goToStrategyTab(tabId) {
+  showPage('strategies');
+  if (!_selectedStrategy) selectStrategy('reversal');
+  showStrategyTab(tabId);
+}
+
+function selectStrategy(strategyId) {
+  _selectedStrategy = strategyId;
+  document.getElementById('strategySelector').style.display = 'none';
+  document.getElementById('strategyWorkspace').style.display = 'block';
+  const titles = { reversal: '📐 Стратегия разворотных точек' };
+  document.getElementById('strategyTitle').textContent = titles[strategyId] || strategyId;
+  showStrategyTab('trade');
+}
+
+function deselectStrategy() {
+  _selectedStrategy = null;
+  document.getElementById('strategySelector').style.display = '';
+  document.getElementById('strategyWorkspace').style.display = 'none';
+  document.querySelectorAll('.sub-page').forEach(p => p.classList.remove('active'));
+}
+
+function showStrategyTab(tabId) {
+  document.querySelectorAll('.sub-page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('#strategySubTabs .tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('page-' + tabId)?.classList.add('active');
+  document.getElementById('stab-' + tabId)?.classList.add('active');
+  if (tabId === 'trade' || tabId === 'research') checkActiveSessionBanner();
+  if (tabId === 'optimize') { updateOptCommission(); updateCombinationsCount(); }
 }
 
 // ============================================================
@@ -1025,7 +1088,7 @@ async function loadDashPrices() {
   });
 }
 function goToChartForCoin() { document.getElementById('chartCoinInput').value = currentCoin.name; showPage('chart'); }
-function goToTradeForCoin() { document.getElementById('tradeCoinInput').value = currentCoin.name; showPage('trade'); }
+function goToTradeForCoin() { document.getElementById('tradeCoinInput').value = currentCoin.name; goToStrategyTab('trade'); }
 
 // ============================================================
 // MAIN CHART
@@ -1333,7 +1396,7 @@ function startTradingFromOptResult(idx) {
 }
 
 function prefillTradingForm(coin, tradingSum, buyGap, sellProfit, sellLoss) {
-  showPage('trade');
+  goToStrategyTab('trade');
   if (coin) document.getElementById('tradeCoinInput').value = coin;
   if (tradingSum) document.getElementById('tradeTradingSum').value = tradingSum;
   if (buyGap) document.getElementById('tradeBuyGap').value = buyGap;
@@ -1363,7 +1426,7 @@ function showBacktestChart() {
     layout: { background: { type: 'solid', color: '#0a0e1a' }, textColor: '#6878a8' },
     grid: { vertLines: { color: 'rgba(42,53,96,0.2)' }, horzLines: { color: 'rgba(42,53,96,0.2)' } },
     timeScale: { timeVisible: true, secondsVisible: false },
-    rightPriceScale: { borderColor: '#2a3560' },
+    rightPriceScale: { borderColor: '#2a3560', scaleMargins: { top: 0.12, bottom: 0.12 } },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
   });
 
@@ -1421,10 +1484,10 @@ function showBacktestYieldCurve() {
   const card = document.getElementById('btYieldCard');
   card.style.display = 'block';
   card.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  renderYieldChart('btYieldContainer', result.equityCurve, _btYieldChartInstance, inst => { _btYieldChartInstance = inst; });
+  renderYieldChart('btYieldContainer', result.equityCurve, _btYieldChartInstance, inst => { _btYieldChartInstance = inst; }, result.holdCurve);
 }
 
-function renderYieldChart(containerId, equityCurve, oldInstance, saveInstance) {
+function renderYieldChart(containerId, equityCurve, oldInstance, saveInstance, holdCurve) {
   const container = document.getElementById(containerId);
   if (!container) return;
   if (oldInstance) { try { oldInstance.remove(); } catch(e){} }
@@ -1460,6 +1523,26 @@ function renderYieldChart(containerId, equityCurve, oldInstance, saveInstance) {
     deduped.push(d);
   }
   baselineSeries.setData(deduped);
+
+  // Hold curve (buy & hold comparison) — red line
+  if (holdCurve && holdCurve.length > 1) {
+    const holdSeries = ch.addLineSeries({
+      color: '#ff1744', lineWidth: 1, lineStyle: 2,
+      priceLineVisible: false, lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    });
+    const holdData = holdCurve.map(eq => ({
+      time: Math.floor((eq.timestamp || eq[0]) / 1000),
+      value: eq.equity != null ? eq.equity : eq[1]
+    })).sort((a, b) => a.time - b.time);
+    const holdDeduped = [];
+    for (const d of holdData) {
+      if (holdDeduped.length && holdDeduped[holdDeduped.length-1].time >= d.time) continue;
+      holdDeduped.push(d);
+    }
+    holdSeries.setData(holdDeduped);
+  }
+
   ch.timeScale().fitContent();
   new ResizeObserver(() => { ch.applyOptions({ width: container.clientWidth }); }).observe(container);
 }
@@ -1608,7 +1691,10 @@ function showOptimizeResult(results) {
         <div id="optChartContainer-${i}" style="width:100%;height:220px;background:var(--bg);border-radius:var(--radius-sm)"></div>
       </div>` : ''}
       ${hasEquity ? `<div id="optYieldWrap-${i}" style="display:none;margin-top:8px">
-        <div style="font-size:10px;color:var(--muted);margin-bottom:4px">Изменение прибыли (USD)</div>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:4px">
+          <span style="color:#00e676">━</span> Стратегия &nbsp;
+          <span style="color:#ff1744">╌</span> Просто лонг
+        </div>
         <div id="optYieldContainer-${i}" style="width:100%;height:180px;background:var(--bg);border-radius:var(--radius-sm)"></div>
       </div>` : ''}
     </div>`;
@@ -1645,7 +1731,7 @@ function renderOptChart(idx) {
     layout: { background: { type: 'solid', color: '#0a0e1a' }, textColor: '#6878a8' },
     grid: { vertLines: { color: 'rgba(42,53,96,0.2)' }, horzLines: { color: 'rgba(42,53,96,0.2)' } },
     timeScale: { timeVisible: true, secondsVisible: false },
-    rightPriceScale: { borderColor: '#2a3560' },
+    rightPriceScale: { borderColor: '#2a3560', scaleMargins: { top: 0.12, bottom: 0.12 } },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
   });
   _optChartInstances[idx] = ch;
@@ -1703,7 +1789,7 @@ function toggleOptYield(idx) {
   wrap.style.display = 'block';
   const r = _optResults[idx];
   if (!r || !r.equityCurve || r.equityCurve.length < 2) return;
-  renderYieldChart('optYieldContainer-' + idx, r.equityCurve, _optYieldInstances[idx], inst => { _optYieldInstances[idx] = inst; });
+  renderYieldChart('optYieldContainer-' + idx, r.equityCurve, _optYieldInstances[idx], inst => { _optYieldInstances[idx] = inst; }, r.holdCurve);
 }
 
 function updateCombinationsCount() {
@@ -1771,10 +1857,28 @@ async function loadSessions() {
         const prev = _sessionsData[s.id];
         _sessionsData[s.id] = s;
         patchSessionCard(s, prev);
-        // Chart data is refreshed by per-session timer (startChartTimer)
-        // Only init chart if it hasn't been created yet
-        if (s.status === 'RUNNING' && s.type !== 'BACKTEST' && !inlineCharts[s.id]) {
-          requestAnimationFrame(() => requestAnimationFrame(() => initInlineChart(s)));
+        if (s.status === 'RUNNING' && s.type !== 'BACKTEST') {
+          const entry = inlineCharts[s.id];
+          if (!entry) {
+            // Chart not created yet
+            requestAnimationFrame(() => requestAnimationFrame(() => initInlineChart(s)));
+          } else {
+            // Chart exists — validate it's still rendering; resize & restart timer if needed
+            const c = document.getElementById('ichart-' + s.id);
+            if (c && c.clientWidth > 0) {
+              try { entry.chart.applyOptions({ width: c.clientWidth }); } catch(e) {
+                // Chart instance broken — destroy and reinit
+                try { entry.chart.remove(); } catch(ex) {}
+                delete inlineCharts[s.id];
+                requestAnimationFrame(() => initInlineChart(s));
+              }
+            }
+            // Restart chart timer if not running (e.g. after tab switch)
+            if (!_chartTimers[s.id]) {
+              const refreshSec = parseInt(s.params?.chartRefreshSec || 60, 10);
+              startChartTimer(s.id, refreshSec);
+            }
+          }
         }
       });
     }
@@ -2028,13 +2132,12 @@ function initInlineChart(sess) {
     layout: { background: { type: 'solid', color: '#0a0e1a' }, textColor: '#6878a8' },
     grid: { vertLines: { color: 'rgba(42,53,96,0.25)' }, horzLines: { color: 'rgba(42,53,96,0.25)' } },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-    rightPriceScale: { borderColor: '#2a3560', visible: true, minimumWidth: 60 },
+    rightPriceScale: { borderColor: '#2a3560', visible: true, minimumWidth: 60, scaleMargins: { top: 0.15, bottom: 0.15 } },
     timeScale: {
       borderColor: '#2a3560', timeVisible: true,
-      fixLeftEdge: false, fixRightEdge: true,   // keep latest candle pinned to right edge
+      fixLeftEdge: false, fixRightEdge: true,
       lockVisibleTimeRangeOnResize: true,
     },
-    // Disable ALL scroll/scale on inline chart — prevents accidental drift on touch
     handleScroll: false,
     handleScale: false,
   });
@@ -2282,7 +2385,7 @@ function openFullscreenChart(sessionId, coinName) {
       layout: { background: { type: 'solid', color: '#0a0e1a' }, textColor: '#8899cc' },
       grid: { vertLines: { color: 'rgba(42,53,96,0.3)' }, horzLines: { color: 'rgba(42,53,96,0.3)' } },
       crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-      rightPriceScale: { borderColor: '#2a3560', visible: true },
+      rightPriceScale: { borderColor: '#2a3560', visible: true, scaleMargins: { top: 0.1, bottom: 0.1 } },
       timeScale: { borderColor: '#2a3560', timeVisible: true },
       handleScroll: true, handleScale: true,
     });
@@ -2406,8 +2509,6 @@ function startSessionsRefresh() {
 }
 function stopSessionsRefresh() {
   if (sessionsRefreshTimer) { clearInterval(sessionsRefreshTimer); sessionsRefreshTimer = null; }
-  // Also stop all chart timers
-  Object.keys(_chartTimers).forEach(id => clearChartTimer(id));
 }
 
 function clearChartTimer(id) {

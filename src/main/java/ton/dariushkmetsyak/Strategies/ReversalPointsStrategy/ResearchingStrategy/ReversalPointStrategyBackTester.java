@@ -62,6 +62,9 @@ public class ReversalPointStrategyBackTester {
     // Equity curve: [timestamp, equityValue] — recorded at each trade event, starting from 0
     private final List<double[]> equityCurve = new ArrayList<>();
 
+    // Hold curve: [timestamp, holdEquity] — shows profit if user just held long from start
+    private final List<double[]> holdCurve = new ArrayList<>();
+
     static {
         try {
             USDT=Coin.createCoin("Tether");
@@ -79,6 +82,7 @@ public class ReversalPointStrategyBackTester {
 
     public List<double[]> getTradeEvents() { return tradeEvents; }
     public List<double[]> getEquityCurve() { return equityCurve; }
+    public List<double[]> getHoldCurve() { return holdCurve; }
 
     public ReversalPointStrategyBackTester(Coin coin, Chart chart, double tradingSum, double buyGap, double sellWithProfitGap, double sellWithLossGap) {
         this(coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, "Binance", 0.1);
@@ -225,6 +229,22 @@ public class ReversalPointStrategyBackTester {
         double lastTs = chart.getPrices().get(chart.getPrices().size()-1)[0];
         double lastPrice = chart.getPrices().get(chart.getPrices().size()-1)[1];
         recordEquity(lastTs, lastPrice);
+
+        // Build hold curve: profit if user just bought at first price and held
+        double firstPrice = chart.getPrices().get(0)[1];
+        List<double[]> prices = chart.getPrices();
+        // Sample up to ~500 points to keep response size reasonable
+        int step = Math.max(1, prices.size() / 500);
+        for (int hi = 0; hi < prices.size(); hi += step) {
+            double ts = prices.get(hi)[0];
+            double pr = prices.get(hi)[1];
+            double holdProfit = (pr - firstPrice) / firstPrice * tradingSum;
+            holdCurve.add(new double[]{ts, holdProfit});
+        }
+        // Always include last point
+        if (holdCurve.isEmpty() || holdCurve.get(holdCurve.size()-1)[0] != lastTs) {
+            holdCurve.add(new double[]{lastTs, (lastPrice - firstPrice) / firstPrice * tradingSum});
+        }
 
         // Free memory - reversalArrayList is not needed after backtest
         reversalArrayList.clear();

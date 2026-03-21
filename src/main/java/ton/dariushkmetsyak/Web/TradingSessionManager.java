@@ -848,6 +848,15 @@ public class TradingSessionManager {
                     eqList.add(eqm);
                 }
                 rm.put("equityCurve", eqList);
+                // Hold curve for comparison line
+                List<Map<String, Object>> holdList = new java.util.ArrayList<>();
+                for (double[] h : tester.getHoldCurve()) {
+                    Map<String, Object> hm = new LinkedHashMap<>();
+                    hm.put("timestamp", (long) h[0]);
+                    hm.put("equity", h[1]);
+                    holdList.add(hm);
+                }
+                rm.put("holdCurve", holdList);
                 lastBacktestResult.set(rm);
                 info.status = "DONE"; info.endedAt = System.currentTimeMillis();
                 info.backtestProgressCurrent = info.backtestProgressTotal;
@@ -976,6 +985,15 @@ public class TradingSessionManager {
                     eqList.add(eqm);
                 }
                 m.put("equityCurve", eqList);
+                // Hold curve for comparison line
+                List<Map<String, Object>> holdList = new java.util.ArrayList<>();
+                for (double[] h : tester.getHoldCurve()) {
+                    Map<String, Object> hm = new LinkedHashMap<>();
+                    hm.put("timestamp", (long) h[0]);
+                    hm.put("equity", h[1]);
+                    holdList.add(hm);
+                }
+                m.put("holdCurve", holdList);
                 top.add(m);
             }
             return top;
