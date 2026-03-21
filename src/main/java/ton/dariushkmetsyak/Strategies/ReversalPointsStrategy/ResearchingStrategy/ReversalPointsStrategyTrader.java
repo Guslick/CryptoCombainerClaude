@@ -728,15 +728,6 @@ public class ReversalPointsStrategyTrader {
     // ---- Telegram ----
 
     public void sendPhotoToTelegram() {
-        String currentPicturePath = LocalDateTime.now().toString();
-        try {
-            TradingChart.makeScreenShot(currentPicturePath);
-        } catch (Exception e) {
-            log.error("Failed to create chart screenshot", e);
-            ErrorHandler.handleWarning(e, "Chart Screenshot", "Creating chart image");
-            return;
-        }
-
         if (!trading) {
             double dropFromMax = getDropFromMaxPercent(pointPrice);
             double leftToDrop = buyGap - dropFromMax;
@@ -769,16 +760,13 @@ public class ReversalPointsStrategyTrader {
         }
 
         try {
-            prevMessageId = ImageAndMessageSender.sendPhoto(currentPicturePath, chartScreenshotMessage);
+            // Send text message only, no chart screenshot
+            if (prevMessageId > 0) {
+                ImageAndMessageSender.deleteMessage(prevMessageId);
+            }
+            prevMessageId = ImageAndMessageSender.sendTelegramMessage(chartScreenshotMessage);
         } catch (Exception e) {
-            log.error("Failed to send photo to Telegram", e);
-            ErrorHandler.handleWarning(e, "Telegram Photo", "Sending chart to Telegram");
-        }
-
-        try {
-            Files.delete(Path.of(currentPicturePath));
-        } catch (IOException e) {
-            log.warn("Failed to delete temp file: {}", currentPicturePath);
+            log.error("Failed to send message to Telegram", e);
         }
     }
 }

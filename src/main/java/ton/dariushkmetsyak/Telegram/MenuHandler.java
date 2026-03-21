@@ -484,25 +484,8 @@ private void sendSessionScreenshot(long chatId) {
             sb.append("  Комиссия: ").append(String.format("%.4f", commission)).append(" USD\n");
         }
 
-        // Generate chart screenshot from CoinGecko price data (same source as frontend)
-        String screenshotPath = "session_screenshot_" + chatId + "_" + System.currentTimeMillis() + ".png";
-        boolean hasChart = false;
-        try {
-            Coin coin = CoinsList.getCoinByName(coinName);
-            Chart chartData = Chart.get1DayUntilNowChart_5MinuteInterval(coin);
-            if (chartData != null && chartData.getPrices() != null && !chartData.getPrices().isEmpty()) {
-                hasChart = buildScreenshotChart(chartData, detail, coinName, currentPrice, screenshotPath);
-            }
-        } catch (Exception chartErr) {
-            log.warn("Failed to generate chart for screenshot: {}", chartErr.getMessage());
-        }
-
-        if (hasChart) {
-            ImageAndMessageSender.sendPhoto(screenshotPath, sb.toString(), chatId);
-            try { java.nio.file.Files.deleteIfExists(java.nio.file.Path.of(screenshotPath)); } catch (Exception ignored) {}
-        } else {
-            sendText(chatId, sb.toString());
-        }
+        // Send text message only (no chart image)
+        sendText(chatId, sb.toString());
 
     } catch (Exception e) {
         log.error("Error sending session screenshot", e);

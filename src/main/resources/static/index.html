@@ -322,7 +322,7 @@
           <span id="strategyTitle" style="font-family:var(--font-head);font-size:12px;color:var(--accent)"></span>
         </div>
         <div class="tabs sub-tabs" id="strategySubTabs">
-          <button class="tab active" onclick="showStrategyTab('trade')" id="stab-trade">⚡ ТОРГОВЛЯ</button>
+          <button class="tab" onclick="showStrategyTab('trade')" id="stab-trade">⚡ ТОРГОВЛЯ</button>
           <button class="tab" onclick="showStrategyTab('research')" id="stab-research">🔬 ИССЛ.</button>
           <button class="tab" onclick="showStrategyTab('backtest')" id="stab-backtest">🧪 БЭКТЕСТ</button>
           <button class="tab" onclick="showStrategyTab('optimize')" id="stab-optimize">🏆 ТОП</button>
@@ -330,7 +330,7 @@
       </div>
 
     <!-- TRADE -->
-    <div class="sub-page active" id="page-trade">
+    <div class="sub-page" id="page-trade">
       <div class="card">
         <div class="card-title">🎮 ТИП ТОРГОВЛИ</div>
         <select id="tradeType" onchange="saveField('tradeType');updateTradeForm()">
@@ -1844,6 +1844,12 @@ async function loadSessions() {
     const setsMatch = existingIds.size === newIds.size && [...newIds].every(id => existingIds.has(id));
 
     if (!setsMatch) {
+      // Clean up old chart instances before rebuilding DOM
+      Object.keys(inlineCharts).forEach(id => {
+        try { inlineCharts[id].chart.remove(); } catch(e) {}
+        clearChartTimer(id);
+        delete inlineCharts[id];
+      });
       // Rebuild entirely
       list.innerHTML = sessions.map(s => buildSessionCard(s)).join('');
       sessions.forEach(s => { _sessionsData[s.id] = s; });
@@ -2267,6 +2273,7 @@ async function loadInlineChartData(sess) {
 
     applyChartPriceLines(entry.line, entry.lines, live);
     applyChartMarkers(entry.line, data, live.events || [], true /* inlineMode */);
+    ensurePriceLinesVisible(entry.chart, entry, data, live);
 
     entry.chart.timeScale().fitContent();
   } catch(e) { console.error('Inline chart error', e); }
@@ -2288,6 +2295,45 @@ function applyChartPriceLines(lineSeries, linesArr, live) {
     if (live.sellProfitPrice) linesArr.push(lineSeries.createPriceLine({ price: live.sellProfitPrice, color: PC.sellProfit, lineWidth: 1, lineStyle: 1, title: 'Продажа+' }));
     if (live.sellLossPrice)   linesArr.push(lineSeries.createPriceLine({ price: live.sellLossPrice,  color: PC.sold,      lineWidth: 1, lineStyle: 1, title: 'Продажа−' }));
   }
+}
+
+/** Ensure all price lines and markers are visible by adding invisible anchor series */
+function ensurePriceLinesVisible(chart, entry, data, live) {
+  if (!data || !data.length || !live) return;
+  // Collect target prices to include
+  const targets = [];
+  if (live.maxPrice) targets.push(live.maxPrice);
+  if (live.buyTargetPrice) targets.push(live.buyTargetPrice);
+  if (live.sellProfitPrice) targets.push(live.sellProfitPrice);
+  if (live.sellLossPrice) targets.push(live.sellLossPrice);
+  if (!targets.length) return;
+
+  // Find data range
+  let minVal = Infinity, maxVal = -Infinity;
+  for (const d of data) {
+    if (d.value < minVal) minVal = d.value;
+    if (d.value > maxVal) maxVal = d.value;
+  }
+  // Check if any targets are outside data range
+  const needsAnchor = targets.some(t => t < minVal || t > maxVal);
+  if (!needsAnchor) return;
+
+  // Create invisible anchor series with points at target prices
+  if (entry._anchorSeries) { try { chart.removeSeries(entry._anchorSeries); } catch(e){} }
+  entry._anchorSeries = chart.addLineSeries({
+    color: 'transparent', lineWidth: 0, lineVisible: false,
+    lastValueVisible: false, priceLineVisible: false,
+    crosshairMarkerVisible: false,
+  });
+  const lastTime = data[data.length - 1].time;
+  const anchorData = targets.map(t => ({ time: lastTime, value: t }));
+  // Deduplicate by picking min/max only
+  const allTargetsMin = Math.min(...targets);
+  const allTargetsMax = Math.max(...targets);
+  entry._anchorSeries.setData([
+    { time: lastTime, value: allTargetsMin },
+    ...(allTargetsMin !== allTargetsMax ? [{ time: lastTime + 1, value: allTargetsMax }] : []),
+  ]);
 }
 
 /** Apply BUY/SELL markers.
@@ -2434,6 +2480,7 @@ async function loadInlineChartDataInto(sess, lineSeries, chart) {
     const lines = [];
     applyChartPriceLines(lineSeries, lines, live);
     applyChartMarkers(lineSeries, data, (live || sess).events || []);
+    ensurePriceLinesVisible(chart, fsEntry, data, live);
     chart.timeScale().fitContent();
   } catch(e) { console.error('FS chart error', e); }
 }
@@ -2527,7 +2574,24 @@ function startChartTimer(sessionId, refreshSec) {
     if (countdown <= 0) {
       countdown = refreshSec;
       const sess = _sessionsData[sessionId];
-      if (sess) loadInlineChartData(sess);
+      if (!sess) return;
+      // Self-healing: check if chart DOM still exists and chart is valid
+      const container = document.getElementById('ichart-' + sessionId);
+      const entry = inlineCharts[sessionId];
+      if (!container || !entry) {
+        // Chart was lost — try to reinitialize
+        if (entry) { try { entry.chart.remove(); } catch(e){} delete inlineCharts[sessionId]; }
+        if (container) initInlineChart(sess);
+        return;
+      }
+      // Check if canvas still exists inside container
+      if (!container.querySelector('canvas')) {
+        try { entry.chart.remove(); } catch(e){}
+        delete inlineCharts[sessionId];
+        initInlineChart(sess);
+        return;
+      }
+      loadInlineChartData(sess);
     }
   }, 1000);
   _chartTimers[sessionId] = { interval: iv, refreshSec };
