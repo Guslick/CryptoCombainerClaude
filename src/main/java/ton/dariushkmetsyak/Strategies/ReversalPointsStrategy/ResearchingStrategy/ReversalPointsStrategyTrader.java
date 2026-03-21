@@ -724,46 +724,8 @@ public class ReversalPointsStrategyTrader {
 
     // ---- Telegram ----
 
+    /** @deprecated No longer sends periodic messages to Telegram. Kept for API compat. */
     public void sendPhotoToTelegram() {
-        if (!trading) {
-            double dropFromMax = getDropFromMaxPercent(pointPrice);
-            double leftToDrop = buyGap - dropFromMax;
-            String buySignalStatus = leftToDrop > 0
-                    ? "Осталось снизиться на " + String.format("%.2f", leftToDrop) + "%"
-                    : "Сигнал входа превышен на " + String.format("%.2f", Math.abs(leftToDrop)) + "%";
-            chartScreenshotMessage =
-                "Ищу точку входа...\n" +
-                "Текущая цена: " + Prices.round(pointPrice) + "\n" +
-                "Максимальная цена: " + Prices.round(currentMaxPrice[0]) + "\n" +
-                "Коэффициент покупки: " + buyGap + "%\n" +
-                buySignalStatus + "\n" +
-                "Баланс USDT: " + account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin());
-        }
-        if (trading && !isSold) {
-            chartScreenshotMessage =
-                "ТОРГУЕМ\n" +
-                "Цена ТЕКУЩАЯ: " + Prices.round(pointPrice) + "\n" +
-                "Цена продажи в ПРИБЫЛЬ: " + Prices.round(boughtFor + (boughtFor / 100 * sellWithProfitGap)) + "\n" +
-                "Цена продажи в УБЫТОК: " + Prices.round(boughtFor - (buyPrice / 100 * sellWithLossGap)) + "\n" +
-                "Изменение цены: " + String.format("%.2f", ((pointPrice - boughtFor) / boughtFor * 100)) + "%\n" +
-                "Баланс USDT: " + account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin());
-        }
-        if (trading && isSold) {
-            chartScreenshotMessage += "\nКуплено за: " + Prices.round(boughtFor) +
-                "\nПродано за: " + Prices.round(soldFor) +
-                "\nРост: " + String.format("%.2f", (soldFor - boughtFor) / boughtFor * 100) + "%" +
-                "\nБаланс USDT: " + account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin());
-            boughtFor = soldFor = null;
-        }
-
-        try {
-            // Send text message only, no chart screenshot
-            if (prevMessageId > 0) {
-                ImageAndMessageSender.deleteMessage(prevMessageId);
-            }
-            prevMessageId = ImageAndMessageSender.sendTelegramMessage(chartScreenshotMessage);
-        } catch (Exception e) {
-            log.error("Failed to send message to Telegram", e);
-        }
+        // No-op: periodic Telegram messages disabled
     }
 }
