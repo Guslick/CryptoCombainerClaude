@@ -173,33 +173,49 @@ public class MiniAppServer {
             });
         });
 
-        server.createContext("/api/backtest/optimize", exchange -> {
+        server.createContext("/api/backtest/chart", exchange -> {
+            if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
+            Long userId = requireUser(exchange); if (userId == null) return;
+            String chartPath = TradingSessionManager.forUser(userId).getLastBacktestChartPath();
+            if (chartPath == null || !new File(chartPath).exists()) {
+                handleJson(exchange, () -> errorMap("График не найден"));
+                return;
+            }
+            File chartFile = new File(chartPath);
+            exchange.getResponseHeaders().set("Content-Type", "image/png");
+            exchange.sendResponseHeaders(200, chartFile.length());
+            try (OutputStream os = exchange.getResponseBody();
+                 InputStream is = new FileInputStream(chartFile)) {
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = is.read(buf)) != -1) os.write(buf, 0, n);
+            }
+        });
+
+        server.createContext("/api/top10/start", exchange -> {
             if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
             Long userId = requireUser(exchange); if (userId == null) return;
             handleJson(exchange, () -> {
                 Map<String, Object> body = parseBody(exchange);
                 String coinName = (String) body.getOrDefault("coin", "bitcoin");
                 double tradingSum = toDouble(body.get("tradingSum"), 100.0);
-                String chartType = (String) body.getOrDefault("chartType", "yearly");
-                String exchangeName = (String) body.getOrDefault("exchangeName", "Binance");
-                double commissionRate = toDouble(body.get("commissionRate"), 0.1);
-                int topN = toInt(body.get("topN"), 10);
-                double buyMin = toDouble(body.get("buyMin"), 1.0);
-                double buyMax = toDouble(body.get("buyMax"), 10.0);
-                double buyStep = toDouble(body.get("buyStep"), 1.0);
-                double profitMin = toDouble(body.get("profitMin"), 1.0);
-                double profitMax = toDouble(body.get("profitMax"), 5.0);
-                double profitStep = toDouble(body.get("profitStep"), 0.5);
-                double lossMin = toDouble(body.get("lossMin"), 3.0);
-                double lossMax = toDouble(body.get("lossMax"), 15.0);
-                double lossStep = toDouble(body.get("lossStep"), 1.0);
+                String chartType = (String) body.getOrDefault("chartType", "1d");
+                String exch = (String) body.getOrDefault("exchange", "binance");
                 TradingSessionManager.SessionInfo info = TradingSessionManager.forUser(userId)
-                        .startTopStrategies(coinName, tradingSum, chartType, exchangeName, commissionRate, topN,
-                                buyMin, buyMax, buyStep, profitMin, profitMax, profitStep,
-                                lossMin, lossMax, lossStep);
+                        .startTop10Search(coinName, tradingSum, chartType, exch);
                 return info.toMap();
             });
         });
+
+        server.createContext("/api/top10/result", exchange -> {
+            if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
+            Long userId = requireUser(exchange); if (userId == null) return;
+            handleJson(exchange, () -> {
+                Map<String, Object> result = TradingSessionManager.forUser(userId).getLastTop10Result();
+                return result != null ? result : Map.of("ready", false, "message", "Результатов нет");
+            });
+        });
+
 
         // ── Profile / Auth ────────────────────────────────────────────────────
 
@@ -471,12 +487,9 @@ public class MiniAppServer {
         double spg = toDouble(body.get("sellWithProfitGap"), 2.0);
         double slg = toDouble(body.get("sellWithLossGap"), 8.0);
         String chartType = (String) body.getOrDefault("chartType", "1d");
-        String exchangeName = (String) body.getOrDefault("exchangeName", "Binance");
-        double commissionRate = toDouble(body.get("commissionRate"), 0.1);
-        long customFrom = toLong(body.get("customFrom"), 0L);
-        long customTo = toLong(body.get("customTo"), 0L);
+        String exch = (String) body.getOrDefault("exchange", "binance");
         TradingSessionManager.SessionInfo info = TradingSessionManager.forUser(userId)
-                .startBacktest(coinName, tradingSum, buyGap, spg, slg, chartType, exchangeName, commissionRate, customFrom, customTo);
+                .startBacktest(coinName, tradingSum, buyGap, spg, slg, chartType, exch);
         return info.toMap();
     }
 

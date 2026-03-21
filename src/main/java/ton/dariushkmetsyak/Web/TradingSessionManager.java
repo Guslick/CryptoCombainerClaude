@@ -9,6 +9,7 @@ import ton.dariushkmetsyak.GeckoApiService.geckoEntities.Coin;
 import ton.dariushkmetsyak.GeckoApiService.geckoEntities.CoinsList;
 import ton.dariushkmetsyak.Persistence.StateManager;
 import ton.dariushkmetsyak.Persistence.TradingState;
+import ton.dariushkmetsyak.Commission.CommissionCalculator;
 import ton.dariushkmetsyak.Strategies.ReversalPointsStrategy.ResearchingStrategy.ReversalPointStrategyBackTester;
 import ton.dariushkmetsyak.Strategies.ReversalPointsStrategy.ResearchingStrategy.ReversalPointsStrategyTrader;
 import ton.dariushkmetsyak.Telegram.ImageAndMessageSender;
@@ -17,6 +18,7 @@ import ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder;
 
 import java.io.*;
 import java.nio.file.*;
+import java.time.YearMonth;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
@@ -76,7 +78,7 @@ public class TradingSessionManager {
                                        Double maxPrice, Double buyTargetPrice, Double boughtAtPrice,
                                        Double sellProfitPrice, Double sellLossPrice) {
         updateLiveState(coinBalance, usdtBalance, isTrading, currentPrice, maxPrice, buyTargetPrice,
-                boughtAtPrice, sellProfitPrice, sellLossPrice, 0, 0, 0.0, 0.0, 0.0);
+                boughtAtPrice, sellProfitPrice, sellLossPrice, 0, 0, 0.0, 0.0, 0.0, 0, false);
     }
 
     public static void updateLiveState(double coinBalance, double usdtBalance,
@@ -84,10 +86,10 @@ public class TradingSessionManager {
                                        Double maxPrice, Double buyTargetPrice, Double boughtAtPrice,
                                        Double sellProfitPrice, Double sellLossPrice,
                                        int profitTradeCount, int lossTradeCount,
-                                       double profitSum, double lossSum, double estimatedCommission) {
+                                       double profitSum, double lossSum, double estimatedCommission,
+                                       double startBalance, boolean isTesterAccount) {
         String sid = threadToSession.get(Thread.currentThread().getId());
         if (sid == null) return;
-        // Find which user manager owns this session
         for (TradingSessionManager mgr : userManagers.values()) {
             SessionInfo info = mgr.sessions.get(sid);
             if (info != null) {
@@ -107,6 +109,13 @@ public class TradingSessionManager {
                     info.lossSum          = lossSum;
                     info.estimatedCommission = estimatedCommission;
                 }
+                info.winCount        = profitTradeCount;
+                info.lossCount       = lossTradeCount;
+                info.totalProfit     = profitSum;
+                info.totalLoss       = lossSum;
+                info.totalCommission = estimatedCommission;
+                info.startBalance    = startBalance;
+                info.isTesterAccount = isTesterAccount;
                 mgr.saveSessions();
                 return;
             }
@@ -196,6 +205,14 @@ public class TradingSessionManager {
         // Backtest progress
         public volatile int backtestProgressCurrent = 0;
         public volatile int backtestProgressTotal = 0;
+        // Master fields (aliases / additional)
+        public volatile int winCount = 0;
+        public volatile int lossCount = 0;
+        public volatile double totalProfit = 0;
+        public volatile double totalLoss = 0;
+        public volatile double totalCommission = 0;
+        public volatile double startBalance = 0;
+        public volatile boolean isTesterAccount = false;
         public transient Thread thread;
         public final List<SessionEvent> events = new CopyOnWriteArrayList<>();
 
@@ -231,6 +248,12 @@ public class TradingSessionManager {
             m.put("startUsdtBalance", startUsdtBalance);
             m.put("backtestProgressCurrent", backtestProgressCurrent);
             m.put("backtestProgressTotal", backtestProgressTotal);
+            m.put("winCount", winCount); m.put("lossCount", lossCount);
+            m.put("totalProfit", totalProfit); m.put("totalLoss", totalLoss);
+            m.put("totalCommission", totalCommission); m.put("startBalance", startBalance);
+            m.put("isTesterAccount", isTesterAccount);
+            m.put("netPnl", totalProfit - totalLoss);
+            m.put("netPnlAfterCommission", totalProfit - totalLoss - totalCommission);
             if (includeEvents)
                 m.put("events", events.stream().map(SessionEvent::toMap).collect(Collectors.toList()));
             return m;
@@ -249,6 +272,8 @@ public class TradingSessionManager {
     private final String sessionStoreFile;
     private final ConcurrentHashMap<String, SessionInfo> sessions = new ConcurrentHashMap<>();
     private final AtomicReference<Map<String, Object>> lastBacktestResult = new AtomicReference<>(null);
+    private final AtomicReference<String> lastBacktestChartPath = new AtomicReference<>(null);
+    private final AtomicReference<Map<String, Object>> lastTop10Result = new AtomicReference<>(null);
 
     private TradingSessionManager(long userId) {
         this.userId = userId;
@@ -322,6 +347,13 @@ public class TradingSessionManager {
                 info.boughtAtPrice = m.get("boughtAtPrice") != null ? toDouble(m.get("boughtAtPrice")) : null;
                 info.sellProfitPrice = m.get("sellProfitPrice") != null ? toDouble(m.get("sellProfitPrice")) : null;
                 info.sellLossPrice = m.get("sellLossPrice") != null ? toDouble(m.get("sellLossPrice")) : null;
+                info.winCount = (int) toLong(m.get("winCount"));
+                info.lossCount = (int) toLong(m.get("lossCount"));
+                info.totalProfit = toDouble(m.get("totalProfit"));
+                info.totalLoss = toDouble(m.get("totalLoss"));
+                info.totalCommission = toDouble(m.get("totalCommission"));
+                info.startBalance = toDouble(m.get("startBalance"));
+                info.isTesterAccount = (Boolean) m.getOrDefault("isTesterAccount", false);
                 List<Map<String, Object>> evts = (List<Map<String, Object>>) m.get("events");
                 if (evts != null) for (Map<String, Object> ev : evts) {
                     SessionEvent e = new SessionEvent();
@@ -750,10 +782,12 @@ public class TradingSessionManager {
         if (customTo > 0) params.put("customTo", customTo);
         SessionInfo info = new SessionInfo(id, SessionType.BACKTEST, coinName, params, userId);
         lastBacktestResult.set(null);
+        lastBacktestChartPath.set(null);
         info.addEvent("START", "Бэктест запущен: " + coinName);
         Thread t = new Thread(() -> {
             registerThread(id);
             try {
+                CommissionCalculator commCalc = new CommissionCalculator(CommissionCalculator.Exchange.BINANCE);
                 Coin coin = CoinsList.getCoinByName(coinName);
                 Chart chart;
                 switch (chartType) {
@@ -806,6 +840,10 @@ public class TradingSessionManager {
                 ReversalPointStrategyBackTester.BackTestResult result = tester.startBackTest();
                 progressUpdater.interrupt();
 
+                // Generate chart image
+                String chartPath = tester.generateChartImage();
+                lastBacktestChartPath.set(chartPath);
+
                 if (result == null) {
                     info.status = "ERROR"; info.endedAt = System.currentTimeMillis();
                     info.addEvent("ERROR", "Бэктест завершился без результата (недостаточно данных)");
@@ -829,6 +867,15 @@ public class TradingSessionManager {
                 rm.put("totalCommission", result.getTotalCommission());
                 rm.put("exchangeName", result.getExchangeName());
                 rm.put("commissionRate", result.getCommissionRate());
+                rm.put("profitAfterCommission", result.getProfitAfterCommission());
+                rm.put("winCount", result.getWinCount());
+                rm.put("lossCount", result.getLossCount());
+                rm.put("totalTrades", result.getTotalTrades());
+                rm.put("totalProfitAmount", result.getTotalProfitAmount());
+                rm.put("totalLossAmount", result.getTotalLossAmount());
+                rm.put("exchange", commCalc.getExchange().getDisplayName());
+                rm.put("feePercent", commCalc.getFeePercent());
+                rm.put("chartImageAvailable", chartPath != null);
                 // Store trade events for chart
                 List<Map<String, Object>> evList = new java.util.ArrayList<>();
                 for (double[] ev : tester.getTradeEvents()) {
@@ -874,7 +921,116 @@ public class TradingSessionManager {
                     log.error("Backtest error for user {}", userId, e);
                 }
                 info.endedAt = System.currentTimeMillis();
-            } finally { unregisterThread(); }
+            } finally { unregisterThread(); saveSessions(); }
+        });
+        t.setDaemon(true); info.thread = t;
+        sessions.put(id, info); t.start();
+        return info;
+    }
+
+    // ── Top-10 strategy search ───────────────────────────────────────────────
+
+    public SessionInfo startTop10Search(String coinName, double tradingSum, String chartType, String exchange) {
+        String id = "top10_" + System.currentTimeMillis();
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("tradingSum", tradingSum);
+        params.put("chartType", chartType);
+        params.put("exchange", exchange);
+        SessionInfo info = new SessionInfo(id, SessionType.BACKTEST, coinName, params, userId);
+        lastTop10Result.set(null);
+        info.addEvent("START", "Поиск ТОП-10 стратегий: " + coinName);
+        Thread t = new Thread(() -> {
+            registerThread(id);
+            try {
+                CommissionCalculator commCalc = new CommissionCalculator(CommissionCalculator.Exchange.BINANCE);
+                Coin coin = CoinsList.getCoinByName(coinName);
+                info.addEvent("INFO", "Загрузка данных графика...");
+                Chart chart;
+                switch (chartType) {
+                    case "yearly": chart = Chart.getYearlyChart_1hourInterval(coin); break;
+                    case "monthly": chart = Chart.getMonthlyChart_1hourInterval(coin, YearMonth.now().minusMonths(1)); break;
+                    default: chart = Chart.get1DayUntilNowChart_5MinuteInterval(coin); break;
+                }
+                info.addEvent("INFO", "Данные загружены. Начинаем перебор стратегий...");
+
+                TreeSet<ReversalPointStrategyBackTester.BackTestResult> results = new TreeSet<>();
+                double step = 0.1;
+                double startBuyGap = 0.1, maxBuyGap = 5;
+                double startSPG = 1, maxSPG = 5;
+                double startSLG = 1, maxSLG = 5;
+                int totalIterations = (int) (((maxSLG - startSLG + step) / step)
+                        * ((maxSPG - startSPG + step) / step)
+                        * ((maxBuyGap - startBuyGap + step) / step));
+                int completed = 0;
+                int lastReportedPercent = 0;
+
+                for (double bg = startBuyGap; bg <= maxBuyGap; bg += step) {
+                    if (Thread.currentThread().isInterrupted()) break;
+                    for (double spg = startSPG; spg <= maxSPG; spg += step) {
+                        if (Thread.currentThread().isInterrupted()) break;
+                        for (double slg = startSLG; slg <= maxSLG; slg += step) {
+                            if (Thread.currentThread().isInterrupted()) break;
+                            try {
+                                ReversalPointStrategyBackTester tester = new ReversalPointStrategyBackTester(
+                                        coin, chart, tradingSum, bg, spg, slg, commCalc);
+                                ReversalPointStrategyBackTester.BackTestResult r = tester.startBackTest();
+                                if (r != null) {
+                                    results.add(r);
+                                    if (results.size() > 10) results.pollLast();
+                                }
+                            } catch (Exception ignored) {}
+                            completed++;
+                            int pct = (int) ((double) completed / totalIterations * 100);
+                            if (pct > lastReportedPercent && pct % 5 == 0) {
+                                lastReportedPercent = pct;
+                                info.addEvent("INFO", "Прогресс: " + pct + "% (" + completed + "/" + totalIterations + ")");
+                                saveSessions();
+                            }
+                        }
+                    }
+                }
+
+                List<Map<String, Object>> top10 = new ArrayList<>();
+                int rank = 1;
+                for (ReversalPointStrategyBackTester.BackTestResult r : results) {
+                    Map<String, Object> rm = new LinkedHashMap<>();
+                    rm.put("rank", rank++);
+                    rm.put("buyGap", r.getBuyGap());
+                    rm.put("sellWithProfitGap", r.getSellWithProfit());
+                    rm.put("sellWithLossGap", r.getSellWithLossGap());
+                    rm.put("profitUsd", r.getProfitInUsd());
+                    rm.put("profitPercent", r.getPercentageProfit());
+                    rm.put("totalCommission", r.getTotalCommission());
+                    rm.put("profitAfterCommission", r.getProfitAfterCommission());
+                    rm.put("winCount", r.getWinCount());
+                    rm.put("lossCount", r.getLossCount());
+                    rm.put("totalTrades", r.getTotalTrades());
+                    top10.add(rm);
+                }
+                Map<String, Object> resultMap = new LinkedHashMap<>();
+                resultMap.put("coinName", coinName);
+                resultMap.put("chartType", chartType);
+                resultMap.put("tradingSum", tradingSum);
+                resultMap.put("exchange", commCalc.getExchange().getDisplayName());
+                resultMap.put("feePercent", commCalc.getFeePercent());
+                resultMap.put("totalIterations", totalIterations);
+                resultMap.put("strategies", top10);
+                lastTop10Result.set(resultMap);
+
+                info.status = "DONE"; info.endedAt = System.currentTimeMillis();
+                String best = top10.isEmpty() ? "нет результатов"
+                    : String.format("Лучшая: $%.2f (с комиссией: $%.2f)",
+                        top10.get(0).get("profitUsd"), top10.get(0).get("profitAfterCommission"));
+                info.addEvent("DONE", "ТОП-10 готов! " + best);
+            } catch (Exception e) {
+                if (Thread.currentThread().isInterrupted()) {
+                    info.status = "STOPPED"; info.addEvent("STOP", "Прервано");
+                } else {
+                    info.status = "ERROR"; info.addEvent("ERROR", "Ошибка: " + e.getMessage());
+                    log.error("Top10 search error for user {}", userId, e);
+                }
+                info.endedAt = System.currentTimeMillis();
+            } finally { unregisterThread(); saveSessions(); }
         });
         t.setDaemon(true); info.thread = t;
         sessions.put(id, info); t.start();
@@ -1043,4 +1199,6 @@ public class TradingSessionManager {
     }
 
     public Map<String, Object> getLastBacktestResult() { return lastBacktestResult.get(); }
+    public String getLastBacktestChartPath() { return lastBacktestChartPath.get(); }
+    public Map<String, Object> getLastTop10Result() { return lastTop10Result.get(); }
 }

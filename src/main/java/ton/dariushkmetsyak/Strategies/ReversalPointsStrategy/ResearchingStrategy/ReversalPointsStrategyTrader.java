@@ -8,6 +8,8 @@ import ton.dariushkmetsyak.Graphics.DrawTradingChart.TradingChart;
 import ton.dariushkmetsyak.Persistence.StateManager;
 import ton.dariushkmetsyak.Persistence.TradingState;
 import ton.dariushkmetsyak.Telegram.ImageAndMessageSender;
+import ton.dariushkmetsyak.Commission.CommissionCalculator;
+import ton.dariushkmetsyak.Commission.TradeStatistics;
 import ton.dariushkmetsyak.TradingApi.ApiService.Account;
 import ton.dariushkmetsyak.TradingApi.ApiService.Exceptions.InsufficientAmountOfCoinException;
 import ton.dariushkmetsyak.TradingApi.ApiService.Exceptions.InsufficientAmountOfUsdtException;
@@ -78,14 +80,10 @@ public class ReversalPointsStrategyTrader {
     private String lastBuyFailureSignature = "";
     private static final long BUY_FAILURE_NOTIFICATION_COOLDOWN_MS = TimeUnit.MINUTES.toMillis(5);
 
-    // Trade statistics tracking
-    private int profitTradeCount = 0;
-    private int lossTradeCount = 0;
-    private double profitSum = 0.0;
-    private double lossSum = 0.0;
-    private double estimatedCommission = 0.0;
-    // Binance standard commission = 0.1% per trade
-    private static final double BINANCE_COMMISSION_RATE = 0.1;
+    // Commission and trade statistics
+    private final CommissionCalculator commissionCalc = new CommissionCalculator(CommissionCalculator.Exchange.BINANCE);
+    private final TradeStatistics tradeStats = new TradeStatistics();
+    private boolean isTesterAccount = false;
 
     class Reversal {
         private final double[] data;
@@ -152,6 +150,7 @@ public class ReversalPointsStrategyTrader {
         this.chatID = chatID;
         this.sessionId = sessionId != null ? sessionId : "trader_" + System.currentTimeMillis();
         this.accountType = account.getClass().getSimpleName().toUpperCase();
+        this.isTesterAccount = accountType.contains("TESTER");
         // Use storageUserId for state file path (matches TradingSessionManager.userId).
         // Falls back to chatID only if storageUserId not provided (legacy callers).
         long stateUserId = storageUserId > 0 ? storageUserId : (chatID != null ? chatID : 0L);
@@ -197,6 +196,12 @@ public class ReversalPointsStrategyTrader {
                 ImageAndMessageSender.sendTelegramMessage(resumeNoStateMsg, chatID);
             }
         }
+
+        // Initialize trade statistics start balance
+        try {
+            double initUsdtBal = account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin());
+            tradeStats.setStartBalance(initUsdtBal);
+        } catch (Exception ignored) {}
 
         // Start periodic autosave (shutdown hook registered once globally — see static block)
         stateManager.startAutosave();
@@ -332,32 +337,33 @@ public class ReversalPointsStrategyTrader {
                 chartScreenshotMessage = "Продано в ПРИБЫЛЬ";
                 double profitUsd = (soldFor - boughtFor) * (tradingSum / boughtFor);
                 double profitPct = (soldFor - boughtFor) / boughtFor * 100;
+                double quantity = tradingSum / boughtFor;
+                double commBuy = commissionCalc.calcCommission(tradingSum);
+                double commSell = commissionCalc.calcCommission(soldFor * quantity);
+                double totalComm = commBuy + commSell;
+                tradeStats.recordTrade(boughtFor, soldFor, quantity, totalComm);
                 double coinAmtSell = 0;
                 try { coinAmtSell = account.wallet().getAmountOfCoin(coin); } catch (Exception ignored) {}
                 double usdtAmtSell = 0;
                 try { usdtAmtSell = account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin()); } catch (Exception ignored) {}
-                // Track trade stats
-                profitTradeCount++;
-                profitSum += profitUsd;
-                boolean isTesterAccount = accountType.contains("TESTER");
-                if (isTesterAccount) {
-                    // Estimated commission: buy + sell = 2 * tradingSum * 0.1%
-                    double commForTrade = tradingSum * BINANCE_COMMISSION_RATE / 100.0 * 2;
-                    estimatedCommission += commForTrade;
-                }
-
-                String commissionNote = isTesterAccount
-                    ? String.format("\n💸 Расчётная комиссия (Binance): $%.4f", tradingSum * BINANCE_COMMISSION_RATE / 100.0 * 2)
+                String commLine = isTesterAccount
+                    ? String.format("\nПредп. комиссия %s: $%.4f", commissionCalc.getExchange().getDisplayName(), totalComm)
                     : "";
+                String statsLine = String.format(
+                    "\n📊 Статистика: ✅%d / ❌%d | Итого: $%.2f%s",
+                    tradeStats.getWinCount(), tradeStats.getLossCount(),
+                    tradeStats.getNetPnl(),
+                    isTesterAccount ? String.format(" (с комиссией: $%.2f)", tradeStats.getNetPnlAfterCommission()) : ""
+                );
                 String sellProfitMsg = String.format(
                     "📈 ПРОДАЖА В ПРИБЫЛЬ\nМонета: %s\nКуплено за: $%s\nПродано за: $%s\n" +
                     "Прибыль: +%.2f%% (+$%.2f)\nКоличество: %.6f %s\n" +
-                    "Баланс после: %.6f %s, %.2f USDT%s",
+                    "Баланс после: %.6f %s, %.2f USDT%s%s",
                     coin.getName(), Prices.round(boughtFor), Prices.round(soldFor),
                     profitPct, profitUsd,
-                    tradingSum / boughtFor, coin.getSymbol(),
+                    quantity, coin.getSymbol(),
                     coinAmtSell, coin.getSymbol(), usdtAmtSell,
-                    commissionNote
+                    commLine, statsLine
                 );
                 ImageAndMessageSender.sendTelegramMessage(sellProfitMsg, chatID);
                 log.info("[Trader] SELL (profit): {} @ ${}, profit=+{:.2f}%", coin.getSymbol(), Prices.round(soldFor), profitPct);
@@ -377,36 +383,38 @@ public class ReversalPointsStrategyTrader {
                 } catch (InsufficientAmountOfCoinException e) {
                     throw new RuntimeException(e);
                 }
-                TradingChart.addSellIntervalMarker(pointTimestamp, soldFor);
+                TradingChart.addSellLossMarker(pointTimestamp, soldFor);
                 isSold = true;
                 chartScreenshotMessage = "Продано в УБЫТОК";
                 double lossUsd = (soldFor - boughtFor) * (tradingSum / boughtFor);
                 double lossPct = (soldFor - boughtFor) / boughtFor * 100;
+                double lossQuantity = tradingSum / boughtFor;
+                double lossCommBuy = commissionCalc.calcCommission(tradingSum);
+                double lossCommSell = commissionCalc.calcCommission(soldFor * lossQuantity);
+                double lossTotalComm = lossCommBuy + lossCommSell;
+                tradeStats.recordTrade(boughtFor, soldFor, lossQuantity, lossTotalComm);
                 double coinAmtLoss = 0;
                 try { coinAmtLoss = account.wallet().getAmountOfCoin(coin); } catch (Exception ignored) {}
                 double usdtAmtLoss = 0;
                 try { usdtAmtLoss = account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin()); } catch (Exception ignored) {}
-                // Track trade stats
-                lossTradeCount++;
-                lossSum += lossUsd; // negative value
-                boolean isTesterAccountLoss = accountType.contains("TESTER");
-                if (isTesterAccountLoss) {
-                    double commForTrade = tradingSum * BINANCE_COMMISSION_RATE / 100.0 * 2;
-                    estimatedCommission += commForTrade;
-                }
-
-                String commissionNoteLoss = isTesterAccountLoss
-                    ? String.format("\n💸 Расчётная комиссия (Binance): $%.4f", tradingSum * BINANCE_COMMISSION_RATE / 100.0 * 2)
+                String lossCommLine = isTesterAccount
+                    ? String.format("\nПредп. комиссия %s: $%.4f", commissionCalc.getExchange().getDisplayName(), lossTotalComm)
                     : "";
+                String lossStatsLine = String.format(
+                    "\n📊 Статистика: ✅%d / ❌%d | Итого: $%.2f%s",
+                    tradeStats.getWinCount(), tradeStats.getLossCount(),
+                    tradeStats.getNetPnl(),
+                    isTesterAccount ? String.format(" (с комиссией: $%.2f)", tradeStats.getNetPnlAfterCommission()) : ""
+                );
                 String sellLossMsg = String.format(
                     "📉 ПРОДАЖА В УБЫТОК\nМонета: %s\nКуплено за: $%s\nПродано за: $%s\n" +
                     "Убыток: %.2f%% ($%.2f)\nКоличество: %.6f %s\n" +
-                    "Баланс после: %.6f %s, %.2f USDT%s",
+                    "Баланс после: %.6f %s, %.2f USDT%s%s",
                     coin.getName(), Prices.round(boughtFor), Prices.round(soldFor),
                     lossPct, lossUsd,
-                    tradingSum / boughtFor, coin.getSymbol(),
+                    lossQuantity, coin.getSymbol(),
                     coinAmtLoss, coin.getSymbol(), usdtAmtLoss,
-                    commissionNoteLoss
+                    lossCommLine, lossStatsLine
                 );
                 ImageAndMessageSender.sendTelegramMessage(sellLossMsg, chatID);
                 log.info("[Trader] SELL (loss): {} @ ${}, loss={:.2f}%", coin.getSymbol(), Prices.round(soldFor), lossPct);
@@ -714,10 +722,15 @@ public class ReversalPointsStrategyTrader {
             Double lossTarget = (trading && boughtFor != null)
                 ? boughtFor * (1 - sellWithLossGap / 100.0) : null;
 
+            tradeStats.setCurrentBalance(usdtBal);
+
             ton.dariushkmetsyak.Web.TradingSessionManager.updateLiveState(
                 coinBal, usdtBal, trading, currentPrice,
                 maxPriceVal, buyTarget, boughtFor, profitTarget, lossTarget,
-                profitTradeCount, lossTradeCount, profitSum, lossSum, estimatedCommission
+                tradeStats.getWinCount(), tradeStats.getLossCount(),
+                tradeStats.getTotalProfit(), tradeStats.getTotalLoss(),
+                tradeStats.getTotalCommission(), tradeStats.getStartBalance(),
+                isTesterAccount
             );
         } catch (Exception ignored) {}
     }

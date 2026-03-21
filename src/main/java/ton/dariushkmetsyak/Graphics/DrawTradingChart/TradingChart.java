@@ -96,7 +96,7 @@ public class TradingChart {
     public void addBuyIntervalMarkerI(double timestamp, double price) {
         addSimplePointI(timestamp, price);
         intervalMarker = new IntervalMarker(timestamp, timestamp);
-        intervalMarker.setPaint(Color.decode("#F0E68C"));
+        intervalMarker.setPaint(Color.decode("#D6EAF8"));
         ValueMarker valueMarker = new ValueMarker(timestamp);
         valueMarker.setPaint(Color.decode("#1565C0")); // Blue for BUY
         XYTextAnnotation annotation = new XYTextAnnotation("BUY " + String.valueOf(price), timestamp, price);
@@ -131,10 +131,23 @@ public class TradingChart {
     public static void addSellIntervalMarker(double timestamp, double price) {
         getForCurrentThread().addSellIntervalMarkerI(timestamp, price, false);
     }
-    public static void addSellProfitMarker(double timestamp, double price) {
-        getForCurrentThread().addSellIntervalMarkerI(timestamp, price, true);
+    void addSellIntervalMarkerI(double timestamp, double price, boolean isProfit) {
+        Color color = isProfit ? Color.decode("#00C853") : Color.RED;
+        String label = isProfit ? "SELL+" : "SELL-";
+        addSellMarkerWithColor(timestamp, price, color, label);
     }
-    public void addSellIntervalMarkerI(double timestamp, double price, boolean isProfit) {
+
+    /** Sell with profit — green marker */
+    public static void addSellProfitMarker(double timestamp, double price) {
+        getForCurrentThread().addSellMarkerWithColor(timestamp, price, new Color(0, 153, 0), "SELL+");
+    }
+
+    /** Sell with loss — red marker */
+    public static void addSellLossMarker(double timestamp, double price) {
+        getForCurrentThread().addSellMarkerWithColor(timestamp, price, Color.RED, "SELL-");
+    }
+
+    void addSellMarkerWithColor(double timestamp, double price, Color color, String label) {
         addSimplePointI(timestamp, price);
         if (intervalMarker == null) {
             intervalMarker = new IntervalMarker(timestamp, timestamp);
@@ -142,14 +155,12 @@ public class TradingChart {
             plot.addDomainMarker(intervalMarker);
         }
         intervalMarker.setEndValue(timestamp);
-        Color sellColor = isProfit ? Color.decode("#00C853") : Color.RED; // Green for profit, Red for loss
-        String label = isProfit ? "SELL+" : "SELL-";
         XYTextAnnotation annotation = new XYTextAnnotation(label + " " + String.valueOf(price), timestamp, price);
-        annotation.setPaint(sellColor);
+        annotation.setPaint(color);
         annotation.setFont(new Font("Verdana", Font.BOLD, 20));
         plot.addAnnotation(annotation);
         ValueMarker valueMarker = new ValueMarker(timestamp);
-        valueMarker.setPaint(sellColor);
+        valueMarker.setPaint(color);
         valueMarker.setStroke(new BasicStroke(5));
         plot.addDomainMarker(valueMarker);
         intervalMarker = null;
