@@ -93,8 +93,8 @@
   .chart-toolbar{display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap}
   .interval-btn{padding:4px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--muted);font-family:var(--font-head);font-size:10px;cursor:pointer;transition:all 0.2s}
   .interval-btn.active{background:rgba(0,229,255,0.15);border-color:var(--accent);color:var(--accent)}
-  .chart-coin-label{font-family:var(--font-head);font-size:12px;font-weight:700;color:var(--text);margin-left:auto}
-  .chart-price-display{font-family:var(--font-head);font-size:11px;color:var(--muted)}
+  .chart-coin-label{font-family:var(--font-head);font-size:12px;font-weight:700;color:var(--muted);margin-left:auto}
+  .chart-price-display{font-family:var(--font-head);font-size:16px;font-weight:900;color:var(--accent);letter-spacing:0.5px}
 
   .stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
   .stat-box{background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;text-align:center}
@@ -308,7 +308,7 @@
             <button class="interval-btn" onclick="setChartInterval('1y')" data-int="1y">1Г</button>
           </div>
         </div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px;gap:10px;">
           <span class="chart-coin-label" id="chartCoinLabel">Bitcoin</span>
           <span class="chart-price-display" id="chartPriceDisplay">-</span>
         </div>
@@ -943,9 +943,8 @@ let _headerWalletTimer = null;
 async function loadHeaderWallet() {
   if (!isAuthed()) { document.getElementById('headerWallet').style.display = 'none'; return; }
   try {
-    const net = _activeNet || 'test';
     const [walletRes, sessionsRes] = await Promise.all([
-      fetch(`${API_BASE}/api/profile/wallet?net=${net}`, { headers: authHeaders() }),
+      fetch(`${API_BASE}/api/profile/wallet?net=main`, { headers: authHeaders() }),
       fetch(`${API_BASE}/api/trading/sessions`, { headers: authHeaders() })
     ]);
     const walletData = await walletRes.json();
@@ -2182,21 +2181,19 @@ function buildTargetPricesHtml(s) {
 
 function buildDrawerStatsHtml(s) {
   const startBal = s.startBalance || s.startUsdtBalance || 0;
-  const coinVal = (s.coinBalance && s.currentPrice) ? s.coinBalance * s.currentPrice : 0;
-  const currentBal = (s.usdtBalance || 0) + coinVal;
   const commission = s.totalCommission || s.estimatedCommission || 0;
-  const pnl = currentBal - startBal;
-  const pnlAfterComm = pnl - commission;
+  const netPnl = s.netPnlAfterCommission != null ? s.netPnlAfterCommission : (s.totalProfit || s.profitSum || 0) - (s.totalLoss || s.lossSum || 0) - commission;
+  const currentBal = startBal + netPnl;
   const wins = s.winCount || s.profitTradeCount || 0;
   const losses = s.lossCount || s.lossTradeCount || 0;
-  const pnlColor = pnlAfterComm >= 0 ? 'var(--green)' : 'var(--red)';
-  const pnlSign = pnlAfterComm >= 0 ? '+' : '';
+  const pnlColor = netPnl >= 0 ? 'var(--green)' : 'var(--red)';
+  const pnlSign = netPnl >= 0 ? '+' : '';
   if (!startBal && !wins && !losses && !commission) return '';
   return `<div style="margin-top:8px;padding:8px;background:var(--bg2);border-radius:6px;border:1px solid var(--border);">
     <div class="params-grid" style="grid-template-columns:1fr 1fr;">
       ${startBal ? `<div class="param-item"><div class="param-key">СТАРТ БАЛАНС</div><div class="param-val">${fmtNum(startBal)} USDT</div></div>` : ''}
       ${startBal ? `<div class="param-item"><div class="param-key">ТЕКУЩИЙ БАЛАНС</div><div class="param-val">${fmtNum(currentBal)} USDT</div></div>` : ''}
-      <div class="param-item"><div class="param-key">P&L (С КОМИССИЕЙ)</div><div class="param-val" style="color:${pnlColor}">${pnlSign}${fmtNum(pnlAfterComm)} USDT</div></div>
+      <div class="param-item"><div class="param-key">P&L (С КОМИССИЕЙ)</div><div class="param-val" style="color:${pnlColor}">${pnlSign}${fmtNum(netPnl)} USDT</div></div>
       <div class="param-item"><div class="param-key">КОМИССИЯ</div><div class="param-val" style="color:var(--yellow)">${fmtNum(commission)} USDT</div></div>
       <div class="param-item"><div class="param-key">СДЕЛКИ В +</div><div class="param-val" style="color:var(--green)">${wins}</div></div>
       <div class="param-item"><div class="param-key">СДЕЛКИ В -</div><div class="param-val" style="color:var(--red)">${losses}</div></div>
@@ -2206,21 +2203,19 @@ function buildDrawerStatsHtml(s) {
 
 function buildSessionStatsHtml(s) {
   const startBal = s.startBalance || s.startUsdtBalance || 0;
-  const coinVal = (s.coinBalance && s.currentPrice) ? s.coinBalance * s.currentPrice : 0;
-  const currentBal = (s.usdtBalance || 0) + coinVal;
   const commission = s.totalCommission || s.estimatedCommission || 0;
-  const pnl = currentBal - startBal;
-  const pnlAfterComm = pnl - commission;
+  const netPnl = s.netPnlAfterCommission != null ? s.netPnlAfterCommission : (s.totalProfit || s.profitSum || 0) - (s.totalLoss || s.lossSum || 0) - commission;
+  const currentBal = startBal + netPnl;
   const wins = s.winCount || s.profitTradeCount || 0;
   const losses = s.lossCount || s.lossTradeCount || 0;
-  const pnlColor = pnlAfterComm >= 0 ? 'var(--green)' : 'var(--red)';
-  const pnlSign = pnlAfterComm >= 0 ? '+' : '';
+  const pnlColor = netPnl >= 0 ? 'var(--green)' : 'var(--red)';
+  const pnlSign = netPnl >= 0 ? '+' : '';
   if (!startBal && !wins && !losses && !commission) return '';
   return `<div class="session-stats">
     ${startBal ? `<span title="Стартовый баланс">💰 ${fmtNum(startBal)}</span>` : ''}
     ${startBal ? `<span title="Текущий баланс">→ ${fmtNum(currentBal)}</span>` : ''}
-    <span style="color:${pnlColor}" title="P&L с комиссией">${pnlSign}${fmtNum(pnlAfterComm)}</span>
-    ${commission > 0 ? `<span style="color:var(--yellow)" title="Комиссия">⚡${fmtNum(commission)}</span>` : ''}
+    <span style="color:${pnlColor}" title="P&L с комиссией">${pnlSign}${fmtNum(netPnl)}</span>
+    ${commission > 0 ? `<span style="color:var(--yellow)" title="Комиссия">⚡ ${fmtNum(commission)}</span>` : ''}
     ${(wins||losses) ? `<span title="Сделки +/-"><span style="color:var(--green)">${wins}+</span>/<span style="color:var(--red)">${losses}-</span></span>` : ''}
   </div>`;
 }
