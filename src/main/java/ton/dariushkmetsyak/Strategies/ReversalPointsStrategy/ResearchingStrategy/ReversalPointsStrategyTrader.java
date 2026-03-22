@@ -63,6 +63,8 @@ public class ReversalPointsStrategyTrader {
     Account account;
     Coin coin;
     double tradingSum;
+    double initialTradingSum; // original trading sum (for reporting)
+    boolean recapitalize = false; // when true, tradingSum updates after each sell cycle
     int updateTimeout;
     Long chatID;
     int prevMessageId = 0;
@@ -145,8 +147,18 @@ public class ReversalPointsStrategyTrader {
                                         double sellWithLossGap, int updateTimeout, Long chatID,
                                         TradingState savedState, String sessionId, boolean isResume,
                                         long storageUserId) {
+        this(account, coin, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap,
+             updateTimeout, chatID, savedState, sessionId, isResume, storageUserId, false);
+    }
+
+    public ReversalPointsStrategyTrader(Account account, Coin coin, double tradingSum,
+                                        double buyGap, double sellWithProfitGap,
+                                        double sellWithLossGap, int updateTimeout, Long chatID,
+                                        TradingState savedState, String sessionId, boolean isResume,
+                                        long storageUserId, boolean recapitalize) {
         this.account = account;
         this.coin = coin;
+        this.recapitalize = recapitalize;
         this.chatID = chatID;
         this.sessionId = sessionId != null ? sessionId : "trader_" + System.currentTimeMillis();
         this.accountType = account.getClass().getSimpleName().toUpperCase();
@@ -174,6 +186,7 @@ public class ReversalPointsStrategyTrader {
         } else {
             // Fresh session
             this.tradingSum = tradingSum;
+            this.initialTradingSum = tradingSum;
             this.buyGap = buyGap;
             this.sellWithProfitGap = sellWithProfitGap;
             this.sellWithLossGap = sellWithLossGap;
@@ -213,6 +226,7 @@ public class ReversalPointsStrategyTrader {
         if (state == null) return false;
         try {
             this.tradingSum = state.getTradingSum();
+            this.initialTradingSum = state.getTradingSum();
             this.buyGap = state.getBuyGap();
             this.sellWithProfitGap = state.getSellWithProfitGap();
             this.sellWithLossGap = state.getSellWithLossGap();
@@ -371,6 +385,12 @@ public class ReversalPointsStrategyTrader {
                 TradingChart.clearChart();
                 trading = false;
                 isSold = false;
+                // Recapitalize: next cycle uses current USDT balance
+                if (recapitalize) {
+                    try { tradingSum = account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin()); }
+                    catch (Exception ignored) {}
+                    log.info("[Trader] Recapitalized: next tradingSum = {}", Prices.round(tradingSum));
+                }
                 currentMinPrice[0] = pointPrice;
                 currentMaxPrice[0] = pointPrice;
                 persistState();
@@ -422,6 +442,18 @@ public class ReversalPointsStrategyTrader {
                 TradingChart.clearChart();
                 trading = false;
                 isSold = false;
+                // Recapitalize: next cycle uses current USDT balance
+                if (recapitalize) {
+                    try { tradingSum = account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin()); }
+                    catch (Exception ignored) {}
+                    log.info("[Trader] Recapitalized: next tradingSum = {}", Prices.round(tradingSum));
+                    if (tradingSum < 0.01) {
+                        String zeroMsg = "⛔ Рекапитализация: баланс исчерпан ($" + Prices.round(tradingSum) + "). Торговля остановлена.";
+                        ImageAndMessageSender.sendTelegramMessage(zeroMsg, chatID);
+                        ton.dariushkmetsyak.Web.TradingSessionManager.logTypedEventFromCurrentThread("STOP", zeroMsg);
+                        return true; // will exit trading loop naturally
+                    }
+                }
                 currentMinPrice[0] = pointPrice;
                 currentMaxPrice[0] = pointPrice;
                 persistState();

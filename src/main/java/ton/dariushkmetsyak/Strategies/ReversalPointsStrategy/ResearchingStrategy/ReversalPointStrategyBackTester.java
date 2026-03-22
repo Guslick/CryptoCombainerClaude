@@ -38,6 +38,8 @@ public class ReversalPointStrategyBackTester {
     Coin coin;
     Chart chart;
     double tradingSum;
+    double initialTradingSum; // original trading sum (for P&L calculation)
+    boolean recapitalize = false; // when true, tradingSum updates after each sell cycle
     final static Coin USDT;
     BackTestResult backTestResult;
 
@@ -94,6 +96,10 @@ public class ReversalPointStrategyBackTester {
     }
 
     public ReversalPointStrategyBackTester(Coin coin, Chart chart, double tradingSum, double buyGap, double sellWithProfitGap, double sellWithLossGap, CommissionCalculator commissionCalc) {
+        this(coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, commissionCalc, false);
+    }
+
+    public ReversalPointStrategyBackTester(Coin coin, Chart chart, double tradingSum, double buyGap, double sellWithProfitGap, double sellWithLossGap, CommissionCalculator commissionCalc, boolean recapitalize) {
         try {
             this.coin=Coin.createCoin(chart.getCoinName());
             Map<Coin, Double> testAssets = new HashMap<>();
@@ -101,15 +107,19 @@ public class ReversalPointStrategyBackTester {
             testAssets.put(coin, 0d);
             this.account= AccountBuilder.createNewTester(testAssets);
             this.tradingSum=tradingSum;
+            this.initialTradingSum=tradingSum;
             this.buyGap = buyGap;
             this.chart=chart;
             this.sellWithProfitGap = sellWithProfitGap;
             this.sellWithLossGap = sellWithLossGap;
             this.commissionCalc = commissionCalc;
+            this.recapitalize = recapitalize;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }
+
+    public boolean isRecapitalize() { return recapitalize; }
     public class BackTestResult implements Comparable<BackTestResult>{
         double buyGap;
         double sellWithProfitGap;
@@ -124,6 +134,7 @@ public class ReversalPointStrategyBackTester {
         double totalLossAmount;
         String exchangeName;
         double commissionRate;
+        boolean earlyTermination = false; // true if recapitalize mode hit zero balance
 
         public double getProfitInUsd() { return profitInUsd; }
         public double getBuyGap() { return buyGap; }
@@ -146,6 +157,7 @@ public class ReversalPointStrategyBackTester {
         public double getTotalLoss() { return totalLossAmount; }
         public String getExchangeName() { return exchangeName; }
         public double getCommissionRate() { return commissionRate; }
+        public boolean isEarlyTermination() { return earlyTermination; }
 
         @Override
         public String toString() {
@@ -201,7 +213,7 @@ public class ReversalPointStrategyBackTester {
     private void recordEquity(double timestamp, double currentPrice) {
         double usdt = account.wallet().getAllAssets().get(USDT);
         double coinAmt = account.wallet().getAllAssets().get(coin);
-        double equity = usdt + coinAmt * currentPrice - tradingSum; // profit relative to 0
+        double equity = usdt + coinAmt * currentPrice - initialTradingSum; // profit relative to initial sum
         equityCurve.add(new double[]{timestamp, equity});
     }
 
@@ -211,10 +223,16 @@ public class ReversalPointStrategyBackTester {
         // Record initial equity = 0
         equityCurve.add(new double[]{chart.getPrices().get(0)[0], 0.0});
         init(chart.getPrices().get(0)[0],chart.getPrices().get(0)[1]);
+        boolean earlyTermination = false;
+        int lastProcessedIndex = chart.getPrices().size() - 1;
         for (int i=0; i<chart.getPrices().size();i++){
             try {
                 progressCurrent.set(i + 1);
-                if (!startBackTestingPoint(chart.getPrices().get(i)[0],chart.getPrices().get(i)[1])) return null;
+                if (!startBackTestingPoint(chart.getPrices().get(i)[0],chart.getPrices().get(i)[1])) {
+                    // For recapitalize mode: false means zero-balance, produce result with current data
+                    if (recapitalize) { earlyTermination = true; lastProcessedIndex = i; break; }
+                    return null;
+                }
             } catch (NoSuchSymbolException | InsufficientAmountOfUsdtException e) {
                 throw new RuntimeException(e);
             }
@@ -222,29 +240,30 @@ public class ReversalPointStrategyBackTester {
         }
 
         if (account.wallet().getAllAssets().get(coin)!=0){
-           Double USDTinWallet =  account.wallet().getAllAssets().get(USDT)+(account.wallet().getAllAssets().get(coin)*chart.getPrices().get(chart.getPrices().size()-1)[1]);
+           Double USDTinWallet =  account.wallet().getAllAssets().get(USDT)+(account.wallet().getAllAssets().get(coin)*chart.getPrices().get(lastProcessedIndex)[1]);
             account.wallet().getAllAssets().replace(USDT, USDTinWallet);
             account.wallet().getAllAssets().replace(coin, 0d);
         }
         // Record final equity
-        double lastTs = chart.getPrices().get(chart.getPrices().size()-1)[0];
-        double lastPrice = chart.getPrices().get(chart.getPrices().size()-1)[1];
+        double lastTs = chart.getPrices().get(lastProcessedIndex)[0];
+        double lastPrice = chart.getPrices().get(lastProcessedIndex)[1];
         recordEquity(lastTs, lastPrice);
 
         // Build hold curve: profit if user just bought at first price and held
         double firstPrice = chart.getPrices().get(0)[1];
         List<double[]> prices = chart.getPrices();
         // Sample up to ~500 points to keep response size reasonable
-        int step = Math.max(1, prices.size() / 500);
-        for (int hi = 0; hi < prices.size(); hi += step) {
+        int sampleEnd = earlyTermination ? lastProcessedIndex + 1 : prices.size();
+        int step = Math.max(1, sampleEnd / 500);
+        for (int hi = 0; hi < sampleEnd; hi += step) {
             double ts = prices.get(hi)[0];
             double pr = prices.get(hi)[1];
-            double holdProfit = (pr - firstPrice) / firstPrice * tradingSum;
+            double holdProfit = (pr - firstPrice) / firstPrice * initialTradingSum;
             holdCurve.add(new double[]{ts, holdProfit});
         }
         // Always include last point
         if (holdCurve.isEmpty() || holdCurve.get(holdCurve.size()-1)[0] != lastTs) {
-            holdCurve.add(new double[]{lastTs, (lastPrice - firstPrice) / firstPrice * tradingSum});
+            holdCurve.add(new double[]{lastTs, (lastPrice - firstPrice) / firstPrice * initialTradingSum});
         }
 
         // Free memory - reversalArrayList is not needed after backtest
@@ -252,11 +271,12 @@ public class ReversalPointStrategyBackTester {
         reversalArrayList.trimToSize();
 
         double finalUsdt = account.wallet().getAllAssets().get(USDT);
-        double profitInUsd = finalUsdt - tradingSum;
-        double percentageProfit = profitInUsd / tradingSum * 100;
+        double profitInUsd = finalUsdt - initialTradingSum;
+        double percentageProfit = profitInUsd / initialTradingSum * 100;
         backTestResult = new BackTestResult(buyGap, sellWithProfitGap, sellWithLossGap,
                 profitInUsd, percentageProfit, totalCommission,
                 winCount, lossCount, totalProfitAmount, totalLossAmount);
+        backTestResult.earlyTermination = earlyTermination;
         return backTestResult;
     }
 
@@ -289,6 +309,11 @@ public class ReversalPointStrategyBackTester {
                 tradeEvents.add(new double[]{pointTimestamp, pointPrice, 1}); // 1=sell_profit
                 recordEquity(pointTimestamp, pointPrice);
 
+                // Recapitalize: next cycle uses current USDT balance
+                if (recapitalize) {
+                    tradingSum = account.wallet().getAllAssets().get(USDT);
+                }
+
                 isSold =true;
                 chartScreenshotMessage = "SOLD WITH PROFIT";
                 trading = false;
@@ -314,6 +339,13 @@ public class ReversalPointStrategyBackTester {
                 // Record trade event for chart
                 tradeEvents.add(new double[]{pointTimestamp, pointPrice, 2}); // 2=sell_loss
                 recordEquity(pointTimestamp, pointPrice);
+
+                // Recapitalize: next cycle uses current USDT balance
+                if (recapitalize) {
+                    tradingSum = account.wallet().getAllAssets().get(USDT);
+                    // Zero-balance check: terminate if funds depleted
+                    if (tradingSum < 0.01) return false;
+                }
 
                 isSold=true;
                 chartScreenshotMessage = "SOLD WITH LOSS";

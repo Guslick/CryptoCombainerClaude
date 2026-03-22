@@ -277,8 +277,10 @@ public class MiniAppServer {
                 double tradingSum = toDouble(body.get("tradingSum"), 100.0);
                 String chartType = (String) body.getOrDefault("chartType", "1d");
                 String exch = (String) body.getOrDefault("exchange", "binance");
+                String strategy = (String) body.getOrDefault("strategy", "reversal");
+                boolean recapitalize = "reversal_recap".equals(strategy);
                 TradingSessionManager.SessionInfo info = TradingSessionManager.forUser(userId)
-                        .startTop10Search(coinName, tradingSum, chartType, exch);
+                        .startTop10Search(coinName, tradingSum, chartType, exch, recapitalize);
                 return info.toMap();
             });
         });
@@ -533,6 +535,8 @@ public class MiniAppServer {
         int timeout      = toInt(body.get("updateTimeout"), 30);
         int chartRefresh = toInt(body.get("chartRefreshInterval"), 60);
         long chatId = toLong(body.get("chatId"), AppConfig.getInstance().getDefaultChatId());
+        String strategy = (String) body.getOrDefault("strategy", "reversal");
+        boolean recapitalize = "reversal_recap".equals(strategy);
 
         UserProfileManager.UserProfile profile = userId > 0
             ? UserProfileManager.getInstance().loadProfile(userId) : null;
@@ -542,15 +546,15 @@ public class MiniAppServer {
         switch (type.toLowerCase()) {
             case "binance": case "binance_real":
                 result = mgr.startBinanceTrading(coinName, tradingSum, buyGap, spg, slg,
-                        timeout, chartRefresh, chatId, profile);
+                        timeout, chartRefresh, chatId, profile, recapitalize);
                 break;
             case "binance_test":
                 result = mgr.startBinanceTestTrading(coinName, tradingSum, buyGap, spg, slg,
-                        timeout, chartRefresh, chatId, profile);
+                        timeout, chartRefresh, chatId, profile, recapitalize);
                 break;
             default:
                 result = mgr.startTesterTrading(coinName, startAssets, tradingSum, buyGap, spg, slg,
-                        timeout, chartRefresh, chatId);
+                        timeout, chartRefresh, chatId, recapitalize);
         }
         if (result instanceof TradingSessionManager.SessionInfo)
             return ((TradingSessionManager.SessionInfo) result).toMap();
@@ -566,8 +570,12 @@ public class MiniAppServer {
         double slg = toDouble(body.get("sellWithLossGap"), 8.0);
         String chartType = (String) body.getOrDefault("chartType", "1d");
         String exch = (String) body.getOrDefault("exchange", "binance");
+        String strategy = (String) body.getOrDefault("strategy", "reversal");
+        boolean recapitalize = "reversal_recap".equals(strategy);
+        long customFrom = toLong(body.get("customFrom"), 0);
+        long customTo = toLong(body.get("customTo"), 0);
         TradingSessionManager.SessionInfo info = TradingSessionManager.forUser(userId)
-                .startBacktest(coinName, tradingSum, buyGap, spg, slg, chartType, exch);
+                .startBacktest(coinName, tradingSum, buyGap, spg, slg, chartType, exch, 0.1, customFrom, customTo, recapitalize);
         return info.toMap();
     }
 

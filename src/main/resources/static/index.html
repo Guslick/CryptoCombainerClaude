@@ -327,8 +327,12 @@
         <div class="card-title">🧬 ВЫБЕРИТЕ СТРАТЕГИЮ</div>
         <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
           <button class="btn btn-primary" style="text-align:left;padding:12px 16px" onclick="selectStrategy('reversal')">
-            <div style="font-family:var(--font-head);font-size:13px;font-weight:700">📐 Стратегия разворотных точек</div>
-            <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:4px">Покупка при падении от максимума, продажа по целям прибыли/убытка</div>
+            <div style="font-family:var(--font-head);font-size:13px;font-weight:700">📐 Разворотные точки</div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:4px">Покупка при падении от максимума, продажа по целям прибыли/убытка. Фиксированная сумма сделки.</div>
+          </button>
+          <button class="btn btn-primary" style="text-align:left;padding:12px 16px;border:1px solid var(--green)" onclick="selectStrategy('reversal_recap')">
+            <div style="font-family:var(--font-head);font-size:13px;font-weight:700">📐💹 Разворотные точки + Рекапитализация</div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:4px">Та же логика, но после каждого цикла покупка-продажа сумма сделки обновляется с учётом результата. Прибыль наращивает капитал, убыток уменьшает.</div>
           </button>
         </div>
       </div>
@@ -1048,7 +1052,7 @@ function selectStrategy(strategyId) {
   _selectedStrategy = strategyId;
   document.getElementById('strategySelector').style.display = 'none';
   document.getElementById('strategyWorkspace').style.display = 'block';
-  const titles = { reversal: '📐 Стратегия разворотных точек' };
+  const titles = { reversal: '📐 Разворотные точки', reversal_recap: '📐💹 Разворотные точки + Рекап' };
   document.getElementById('strategyTitle').textContent = titles[strategyId] || strategyId;
   showStrategyTab('trade');
 }
@@ -1332,6 +1336,7 @@ async function startTrading() {
   btn.disabled = true; btn.innerHTML = '<div class="spinner"></div> Запуск...';
   const body = {
     type: document.getElementById('tradeType').value, coin,
+    strategy: _selectedStrategy || 'reversal',
     startAssets: +document.getElementById('tradeStartAssets').value||150,
     tradingSum: +document.getElementById('tradeTradingSum').value||100,
     buyGap: +document.getElementById('tradeBuyGap').value||3.5,
@@ -1364,6 +1369,7 @@ async function startResearch() {
   if (!coin) { showAlert('resAlert','error','⚠️ Введите название монеты!'); return; }
   const body = {
     type:'tester', coin,
+    strategy: _selectedStrategy || 'reversal',
     startAssets: +document.getElementById('resStartAssets').value||150,
     tradingSum: +document.getElementById('resTradingSum').value||100,
     buyGap: +document.getElementById('resBuyGap').value||3.5,
@@ -1424,6 +1430,7 @@ async function startBacktest() {
     sellWithLossGap: +document.getElementById('btSellLoss').value||8.0,
     chartType: document.getElementById('btChartType').value,
     exchangeName: exchange, commissionRate,
+    strategy: _selectedStrategy || 'reversal',
   };
   if (body.chartType === 'custom') {
     const fromVal = document.getElementById('btCustomFrom').value;
@@ -1494,6 +1501,7 @@ function showBacktestResult(result) {
   const periodLabel = {'5yr':'5 лет','3yr':'3 года','yearly':'1 год','monthly':'1 месяц','1d':'1 день','custom':'Произвольный'}[chartType] || chartType;
 
   document.getElementById('btProfitDisplay').innerHTML = `
+    ${result.earlyTermination ? `<div style="background:rgba(255,60,60,0.15);border:1px solid var(--red);border-radius:8px;padding:8px 12px;margin-bottom:10px;text-align:center;font-size:12px;color:var(--red)">⛔ Бэктест завершён досрочно: баланс исчерпан (рекапитализация)</div>` : ''}
     <div style="font-family:var(--font-head);font-size:22px;font-weight:900;text-align:center;color:${pos?'var(--green)':'var(--red)'}">
       ${pos?'+':''}${profit.toFixed(2)} USD
     </div>
@@ -1518,7 +1526,8 @@ function showBacktestResult(result) {
     📅 Период: <b>${periodLabel}</b><br>
     ${profTrades > 0 ? `💚 Прибыль (сделки+): <b>$${profitSum.toFixed(2)}</b><br>` : ''}
     ${lossTrades > 0 ? `❤️ Убыток (сделки-): <b>$${lossSum.toFixed(2)}</b><br>` : ''}
-    ${commission > 0 && pctAfterComm !== pct ? `📊 Доходность с комиссией: <b style="color:${posAfter?'var(--green)':'var(--red)'}">${posAfter?'+':''}${pctAfterComm.toFixed(2)}%</b>` : ''}
+    ${commission > 0 && pctAfterComm !== pct ? `📊 Доходность с комиссией: <b style="color:${posAfter?'var(--green)':'var(--red)'}">${posAfter?'+':''}${pctAfterComm.toFixed(2)}%</b><br>` : ''}
+    ${result.recapitalize ? `💹 Режим: <b style="color:var(--accent)">Рекапитализация</b>` : ''}
   `;
 
   // Show "Show Chart" button only if we have trade events
@@ -1732,6 +1741,7 @@ async function startOptimize() {
     lossMin: +document.getElementById('optLossMin').value || 3,
     lossMax: +document.getElementById('optLossMax').value || 15,
     lossStep: +document.getElementById('optLossStep').value || 1,
+    strategy: _selectedStrategy || 'reversal',
   };
 
   if (_optPollTimer) { clearInterval(_optPollTimer); _optPollTimer = null; }
@@ -1814,6 +1824,7 @@ function showOptimizeResult(results) {
     const hasTrades = r.tradeEvents && r.tradeEvents.length > 0;
     const hasEquity = r.equityCurve && r.equityCurve.length > 1;
     html += `<div style="background:var(--bg3);border-radius:var(--radius-sm);padding:10px 12px;border:1px solid var(--border);margin-bottom:8px">
+      ${r.earlyTermination ? `<div style="font-size:10px;color:var(--red);margin-bottom:4px">⛔ Досрочное завершение (баланс исчерпан)</div>` : ''}
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
         <span style="font-family:var(--font-head);font-size:13px;color:${pos?'var(--green)':'var(--red)'};min-width:28px">#${i+1}</span>
         <span style="font-family:var(--font-head);font-size:15px;font-weight:700;color:${pos?'var(--green)':'var(--red)'}">${pos?'+':''}${profitAfter.toFixed(2)} USD</span>
