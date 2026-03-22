@@ -28,6 +28,9 @@
   .server-dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse 2s infinite}
   .server-dot.offline{background:var(--red);box-shadow:0 0 8px var(--red);animation:none}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+  .exchange-badge{font-family:var(--font-head);font-size:9px;letter-spacing:0.5px;color:var(--accent);background:rgba(0,229,255,0.08);border:1px solid rgba(0,229,255,0.2);border-radius:4px;padding:2px 6px;white-space:nowrap;cursor:pointer;transition:border-color 0.2s}
+  .exchange-badge:hover{border-color:var(--accent)}
+  .commission-display{background:var(--bg3);border:1px solid rgba(255,234,0,0.2);border-radius:6px;padding:7px 10px;font-family:var(--font-head);font-size:12px;color:#ffea00;letter-spacing:0.3px}
   .tabs{flex-shrink:0;display:flex;padding:0 8px;gap:4px;background:var(--bg);border-bottom:1px solid var(--border);overflow-x:auto;scrollbar-width:none}
   .tabs::-webkit-scrollbar{display:none}
   .tab{flex-shrink:0;padding:8px 14px;font-family:var(--font-head);font-size:10px;font-weight:600;letter-spacing:0.5px;color:var(--muted);border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;transition:all 0.2s;display:flex;align-items:center;gap:5px}
@@ -237,7 +240,10 @@
     <span class="logo-icon">🚀</span>
     <span class="logo">CRYPTO COMBAINER</span>
     <div class="header-right">
-      <div class="server-dot offline" id="serverDot"></div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">
+        <div class="server-dot offline" id="serverDot"></div>
+        <div class="exchange-badge" id="exchangeBadge" onclick="showPage('profile')" title="Текущая биржа">BINANCE</div>
+      </div>
     </div>
   </div>
   <div class="tabs">
@@ -370,6 +376,10 @@
           <div class="input-wrap">
             <label class="input-label">КОЭ. ПРОДАЖИ - (%)</label>
             <input type="number" id="tradeSellLoss" value="8.0" min="0.1" step="0.1" oninput="saveField('tradeSellLoss')">
+          </div>
+          <div class="input-wrap form-full">
+            <label class="input-label">КОМИССИЯ БИРЖИ</label>
+            <div class="commission-display" id="tradeCommissionDisplay">0.1% / сделку (Binance)</div>
           </div>
         </div>
         <div class="research-hint" style="margin-top:10px;">
@@ -697,6 +707,21 @@
         </div>
       </div>
 
+      <div class="card" id="prof-exchange-card" style="display:none">
+        <div class="card-title">🏦 БИРЖА</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.5">
+          Выберите биржу для получения данных о монетах, ценах, графиках и комиссиях.
+        </div>
+        <select id="prof-exchange-select" onchange="onExchangeChanged(this.value)" style="width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:var(--radius-sm);font-size:13px;font-family:var(--font-head);outline:none;cursor:pointer">
+          <option value="binance">Binance</option>
+        </select>
+        <div id="prof-exchange-commission" style="margin-top:10px;padding:8px 10px;background:rgba(255,234,0,0.06);border:1px solid rgba(255,234,0,0.15);border-radius:var(--radius-sm)">
+          <div style="font-size:9px;color:var(--muted);font-family:var(--font-head);margin-bottom:4px">КОМИССИЯ</div>
+          <div id="prof-exchange-comm-val" style="font-family:var(--font-head);font-size:12px;color:#ffea00">0.1% maker / 0.1% taker</div>
+          <div id="prof-exchange-comm-desc" style="font-size:10px;color:var(--muted);margin-top:2px">Binance: 0.1% maker/taker (стандарт)</div>
+        </div>
+      </div>
+
       <div class="card" id="prof-keys-card" style="display:none">
         <div class="card-title">🔑 BINANCE API КЛЮЧИ</div>
         <div style="display:flex;gap:6px;margin-bottom:14px">
@@ -822,6 +847,84 @@ function restoreFields() {
     } catch(e) {}
   });
 }
+
+// ============================================================
+// EXCHANGE MANAGEMENT
+// ============================================================
+let _currentExchange = 'binance';
+let _currentExchangeName = 'Binance';
+let _currentCommission = { makerPercent: 0.1, takerPercent: 0.1, description: 'Binance: 0.1% maker/taker' };
+
+function updateExchangeBadge() {
+  const badge = document.getElementById('exchangeBadge');
+  if (badge) badge.textContent = _currentExchangeName.toUpperCase();
+}
+
+function updateTradeCommissionDisplay() {
+  const el = document.getElementById('tradeCommissionDisplay');
+  if (el) el.textContent = _currentCommission.takerPercent + '% / сделку (' + _currentExchangeName + ')';
+}
+
+async function loadExchangeCommission(exchangeId) {
+  try {
+    const r = await fetch(`${API_BASE}/api/exchange/commission?exchange=${exchangeId || _currentExchange}`);
+    const data = await r.json();
+    if (!data.error) {
+      _currentCommission = data;
+      updateTradeCommissionDisplay();
+      // Update backtest and optimize commission displays
+      const btEl = document.getElementById('btCommissionDisplay');
+      if (btEl) btEl.textContent = data.takerPercent + '% / сделку';
+      const optEl = document.getElementById('optCommissionDisplay');
+      if (optEl) optEl.textContent = data.takerPercent + '% / сделку';
+      // Update EXCHANGE_COMMISSIONS map
+      EXCHANGE_COMMISSIONS[_currentExchangeName] = data.takerPercent;
+      // Update profile card
+      const commVal = document.getElementById('prof-exchange-comm-val');
+      if (commVal) commVal.textContent = data.makerPercent + '% maker / ' + data.takerPercent + '% taker';
+      const commDesc = document.getElementById('prof-exchange-comm-desc');
+      if (commDesc) commDesc.textContent = data.description || '';
+    }
+  } catch(e) { console.warn('Failed to load commission:', e); }
+}
+
+async function onExchangeChanged(exchangeId) {
+  _currentExchange = exchangeId;
+  // Determine display name
+  const select = document.getElementById('prof-exchange-select');
+  if (select) _currentExchangeName = select.options[select.selectedIndex]?.text || exchangeId;
+  updateExchangeBadge();
+  // Save to profile
+  if (_profToken) {
+    try {
+      await fetch(`${API_BASE}/api/profile`, {
+        method: 'POST', headers: authHeaders(),
+        body: JSON.stringify({ selectedExchange: exchangeId })
+      });
+    } catch(e) {}
+  }
+  try { localStorage.setItem('cc_exchange', exchangeId); } catch(e) {}
+  await loadExchangeCommission(exchangeId);
+  showToast('Биржа: ' + _currentExchangeName);
+}
+
+function restoreExchange(profile) {
+  const exId = (profile && profile.selectedExchange) || 'binance';
+  _currentExchange = exId;
+  const select = document.getElementById('prof-exchange-select');
+  if (select) {
+    select.value = exId;
+    _currentExchangeName = select.options[select.selectedIndex]?.text || exId;
+  }
+  updateExchangeBadge();
+  updateTradeCommissionDisplay();
+}
+
+// Try restore from localStorage on startup
+try {
+  const saved = localStorage.getItem('cc_exchange');
+  if (saved) { _currentExchange = saved; _currentExchangeName = saved === 'binance' ? 'Binance' : saved; updateExchangeBadge(); }
+} catch(e) {}
 
 // ============================================================
 // HEALTH CHECK
@@ -3106,6 +3209,7 @@ async function initProfilePage() {
 function renderProfAuthed(profile) {
   document.getElementById('prof-not-authed').style.display = 'none';
   document.getElementById('prof-authed').style.display = 'block';
+  document.getElementById('prof-exchange-card').style.display = 'block';
   document.getElementById('prof-keys-card').style.display = 'block';
   document.getElementById('prof-wallet-card').style.display = 'block';
   document.getElementById('prof-report-card').style.display = 'block';
@@ -3115,6 +3219,9 @@ function renderProfAuthed(profile) {
   if (profile.telegramPhotoUrl && avatarWrap) {
     avatarWrap.innerHTML = `<img src="${escHtml(profile.telegramPhotoUrl)}" style="width:100%;height:100%;object-fit:cover" onerror="this.parentNode.innerHTML='👤'">`;
   }
+  // Restore exchange selection from profile
+  restoreExchange(profile);
+  loadExchangeCommission(profile.selectedExchange || 'binance');
 }
 
 function renderProfNotAuthed() {
@@ -3123,6 +3230,7 @@ function renderProfNotAuthed() {
   const authed    = document.getElementById('prof-authed');
   if (notAuthed) notAuthed.style.display = 'block';
   if (authed)    authed.style.display    = 'none';
+  document.getElementById('prof-exchange-card')?.style && (document.getElementById('prof-exchange-card').style.display = 'none');
   document.getElementById('prof-keys-card')?.style && (document.getElementById('prof-keys-card').style.display = 'none');
   document.getElementById('prof-wallet-card')?.style && (document.getElementById('prof-wallet-card').style.display = 'none');
   document.getElementById('prof-report-card')?.style && (document.getElementById('prof-report-card').style.display = 'none');
@@ -3425,10 +3533,15 @@ function profReadPem(suffix, input) {
 (async function init() {
   restoreFields();
   updateTradeForm();
+  updateExchangeBadge();
+  updateTradeCommissionDisplay();
   const ok = await checkHealth();
   if (!ok) {
     document.getElementById('tickerGrid').innerHTML='<div style="grid-column:1/-1;" class="alert alert-error">❌ Сервер недоступен</div>';
-  } else { loadDashPrices(); }
+  } else {
+    loadDashPrices();
+    loadExchangeCommission(_currentExchange);
+  }
   setInterval(checkHealth,15000);
 })();
 </script>

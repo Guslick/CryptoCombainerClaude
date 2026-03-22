@@ -80,7 +80,20 @@ public class CoinsList{
 //        }
 //    }
 
-    static Coin getCoin (String coinId){
+    public static Coin getCoinById(String id) {
+        if (id == null) return null;
+        for (Coin c : coins) {
+            if (c.getId() != null && c.getId().equalsIgnoreCase(id)) {
+                return c;
+            }
+        }
+        return null;
+    }
+
+    public static Coin getCoin (String coinId){
+            // Try by CoinGecko id first, then name, then symbol
+            Coin byId = getCoinById(coinId);
+            if (byId != null) return byId;
 
             if (getCoinByName(coinId)!=null) return getCoinByName(coinId);
 

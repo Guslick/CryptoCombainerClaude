@@ -7,6 +7,8 @@ import com.sun.net.httpserver.HttpServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ton.dariushkmetsyak.Config.AppConfig;
+import ton.dariushkmetsyak.Exchange.ExchangeProvider;
+import ton.dariushkmetsyak.Exchange.ExchangeRegistry;
 import ton.dariushkmetsyak.GeckoApiService.GeckoRequests;
 import ton.dariushkmetsyak.GeckoApiService.geckoEntities.Coin;
 import ton.dariushkmetsyak.GeckoApiService.geckoEntities.CoinsList;
@@ -73,17 +75,18 @@ public class MiniAppServer {
             String coinId = getPathParam(exchange.getRequestURI().getPath(), "/api/price/");
             handleJson(exchange, () -> {
                 try {
-                    Coin coin = CoinsList.getCoinByName(coinId);
+                    Coin coin = CoinsList.getCoin(coinId);
+                    if (coin == null) return errorMap("Монета не найдена: " + coinId);
                     double price = Account.getCurrentPrice(coin);
                     Map<String, Object> r = new LinkedHashMap<>();
-                    r.put("coinId", coinId);
+                    r.put("coinId", coin.getId());
                     r.put("coinName", coin.getName());
                     r.put("symbol", coin.getSymbol());
                     r.put("price", price);
                     r.put("timestamp", System.currentTimeMillis());
                     return r;
                 } catch (Exception e) {
-                    return errorMap("Монета не найдена: " + coinId);
+                    return errorMap("Ошибка получения цены: " + e.getMessage());
                 }
             });
         });
@@ -97,6 +100,79 @@ public class MiniAppServer {
             if (interval == null) interval = "1d";
             final String finalInterval = interval;
             handleJson(exchange, () -> getChartData(coinId, finalInterval));
+        });
+
+        // ── Exchange provider endpoints ─────────────────────────────────────────
+
+        server.createContext("/api/exchanges", exchange -> {
+            if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            handleJson(exchange, () -> ExchangeRegistry.listExchanges());
+        });
+
+        server.createContext("/api/exchange/coins", exchange -> {
+            if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            String exId = getQueryParam(exchange.getRequestURI().getQuery(), "exchange");
+            String query = getQueryParam(exchange.getRequestURI().getQuery(), "q");
+            handleJson(exchange, () -> {
+                ExchangeProvider provider = ExchangeRegistry.get(exId);
+                return provider.searchCoins(query, 30).stream()
+                        .map(ExchangeProvider.CoinInfo::toMap)
+                        .collect(Collectors.toList());
+            });
+        });
+
+        server.createContext("/api/exchange/price", exchange -> {
+            if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            String symbol = getPathParam(exchange.getRequestURI().getPath(), "/api/exchange/price/");
+            String exId = getQueryParam(exchange.getRequestURI().getQuery(), "exchange");
+            handleJson(exchange, () -> {
+                try {
+                    ExchangeProvider provider = ExchangeRegistry.get(exId);
+                    double price = provider.getCurrentPrice(symbol);
+                    Map<String, Object> r = new LinkedHashMap<>();
+                    r.put("symbol", symbol.toUpperCase());
+                    r.put("price", price);
+                    r.put("exchange", provider.getId());
+                    r.put("timestamp", System.currentTimeMillis());
+                    return r;
+                } catch (Exception e) {
+                    return errorMap("Ошибка получения цены: " + e.getMessage());
+                }
+            });
+        });
+
+        server.createContext("/api/exchange/klines", exchange -> {
+            if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            String queryStr = exchange.getRequestURI().getQuery();
+            String symbol = getQueryParam(queryStr, "symbol");
+            String interval = getQueryParam(queryStr, "interval");
+            String exId = getQueryParam(queryStr, "exchange");
+            int limit = toInt(getQueryParam(queryStr, "limit"), 500);
+            if (interval == null) interval = "1h";
+            final String fInterval = interval;
+            handleJson(exchange, () -> {
+                try {
+                    ExchangeProvider provider = ExchangeRegistry.get(exId);
+                    List<double[]> data = provider.getKlineData(symbol, fInterval, limit);
+                    Map<String, Object> r = new LinkedHashMap<>();
+                    r.put("symbol", symbol);
+                    r.put("interval", fInterval);
+                    r.put("exchange", provider.getId());
+                    r.put("data", data);
+                    return r;
+                } catch (Exception e) {
+                    return errorMap("Ошибка получения данных: " + e.getMessage());
+                }
+            });
+        });
+
+        server.createContext("/api/exchange/commission", exchange -> {
+            if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
+            String exId = getQueryParam(exchange.getRequestURI().getQuery(), "exchange");
+            handleJson(exchange, () -> {
+                ExchangeProvider provider = ExchangeRegistry.get(exId);
+                return provider.getCommissionInfo(false).toMap();
+            });
         });
 
         // ── Trading: ALL endpoints require valid auth token ──────────────────────
@@ -265,6 +341,7 @@ public class MiniAppServer {
                 Map<String, Object> body = parseBody(exchange);
                 if (p == null) return errorMap("Профиль не найден");
                 if (body.containsKey("telegramFirstName")) p.telegramFirstName = (String) body.get("telegramFirstName");
+                if (body.containsKey("selectedExchange")) p.selectedExchange = (String) body.get("selectedExchange");
                 UserProfileManager.getInstance().saveProfile(p);
                 return p.toPublicMap();
             }
@@ -409,7 +486,8 @@ public class MiniAppServer {
 
     private Map<String, Object> getChartData(String coinId, String interval) {
         try {
-            Coin coin = CoinsList.getCoinByName(coinId);
+            Coin coin = CoinsList.getCoin(coinId);
+            if (coin == null) return errorMap("Монета не найдена: " + coinId);
             int days;
             switch (interval) {
                 case "7d":  days = 7;   break;
