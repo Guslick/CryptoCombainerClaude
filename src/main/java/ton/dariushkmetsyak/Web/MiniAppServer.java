@@ -268,6 +268,38 @@ public class MiniAppServer {
             }
         });
 
+        server.createContext("/api/backtest/optimize", exchange -> {
+            if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
+            Long userId = requireUser(exchange); if (userId == null) return;
+            handleJson(exchange, () -> {
+                Map<String, Object> body = parseBody(exchange);
+                String coinName = (String) body.getOrDefault("coin", "bitcoin");
+                double tradingSum = toDouble(body.get("tradingSum"), 100.0);
+                String chartType = (String) body.getOrDefault("chartType", "yearly");
+                String exchangeName = (String) body.getOrDefault("exchangeName", "Binance");
+                double commissionRate = toDouble(body.get("commissionRate"), 0.1);
+                int topN = (int) toLong(body.get("topN"), 10);
+                double buyMin = toDouble(body.get("buyMin"), 1.0);
+                double buyMax = toDouble(body.get("buyMax"), 10.0);
+                double buyStep = toDouble(body.get("buyStep"), 1.0);
+                double profitMin = toDouble(body.get("profitMin"), 1.0);
+                double profitMax = toDouble(body.get("profitMax"), 5.0);
+                double profitStep = toDouble(body.get("profitStep"), 0.5);
+                double lossMin = toDouble(body.get("lossMin"), 3.0);
+                double lossMax = toDouble(body.get("lossMax"), 15.0);
+                double lossStep = toDouble(body.get("lossStep"), 1.0);
+                String strategy = (String) body.getOrDefault("strategy", "reversal");
+                boolean recapitalize = "reversal_recap".equals(strategy);
+                TradingSessionManager.SessionInfo info = TradingSessionManager.forUser(userId)
+                        .startTopStrategies(coinName, tradingSum, chartType, exchangeName,
+                                commissionRate, topN,
+                                buyMin, buyMax, buyStep,
+                                profitMin, profitMax, profitStep,
+                                lossMin, lossMax, lossStep, recapitalize);
+                return info.toMap();
+            });
+        });
+
         server.createContext("/api/top10/start", exchange -> {
             if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
             Long userId = requireUser(exchange); if (userId == null) return;
