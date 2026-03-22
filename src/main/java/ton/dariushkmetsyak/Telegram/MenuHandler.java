@@ -16,6 +16,7 @@ import ton.dariushkmetsyak.ErrorHandling.RetryPolicy;
 import ton.dariushkmetsyak.GeckoApiService.geckoEntities.Coin;
 import ton.dariushkmetsyak.GeckoApiService.geckoEntities.CoinsList;
 import ton.dariushkmetsyak.Graphics.DrawTradingChart.TradingChart;
+import ton.dariushkmetsyak.Commission.CommissionCalculator;
 import ton.dariushkmetsyak.Strategies.ReversalPointsStrategy.ResearchingStrategy.ReversalPointStrategyBackTester;
 import ton.dariushkmetsyak.Strategies.ReversalPointsStrategy.ResearchingStrategy.ReversalPointsStrategyTrader;
 import ton.dariushkmetsyak.TradingApi.ApiService.Account;
@@ -684,6 +685,7 @@ private  void conducting_back_testing_research (long chatId, String stringCoin){
     processThread = new Thread() {
         @Override
         public void run() {
+            CommissionCalculator commCalc = new CommissionCalculator(CommissionCalculator.Exchange.BINANCE);
             TreeSet<ReversalPointStrategyBackTester.BackTestResult> backTestResults = new TreeSet<>();
             double step = 0.1;
             double startBuyGap = 0.1;
@@ -697,15 +699,15 @@ private  void conducting_back_testing_research (long chatId, String stringCoin){
 
             Thread progressThread = new Thread() {
                 public void run() {
-
                     while (!(Thread.currentThread().isInterrupted()||processThread.isInterrupted())) {
                         try {
-                            ImageAndMessageSender.sendTelegramMessage("Progress: " + Math.round(100- (double)counter.get() / iterations * 100) + "%", chatId);
+                            int pct = Math.round(100- (float)counter.get() / iterations * 100);
+                            String bar = buildProgressBar(pct);
+                            ImageAndMessageSender.sendTelegramMessage(bar + " " + pct + "%", chatId);
                             TimeUnit.SECONDS.sleep(15);
                         } catch (InterruptedException e) {
                             System.out.println("Progress thread in conducting_back_testing_research was interrupted");
                             interrupt();
-//                            processThread.interrupt();
                         }
                     }
                 }
@@ -719,24 +721,25 @@ private  void conducting_back_testing_research (long chatId, String stringCoin){
                 for (double sellWithProfitGapGap = startSellWithProfitGap; sellWithProfitGapGap <= maxSellWithProfitGap; sellWithProfitGapGap += step) {
                     for (double sellWithLossGap = startSellWithLossGap; sellWithLossGap <= maxSellWithLossGap; sellWithLossGap += step) {
                         try {
-                            backTestResults.add(new ReversalPointStrategyBackTester(Coin.createCoin(coin.getName()), chart, 80, buyGap, sellWithProfitGapGap, sellWithLossGap).startBackTest());
-                            if (backTestResults.size() > 5) backTestResults.remove(backTestResults.last());
+                            backTestResults.add(new ReversalPointStrategyBackTester(Coin.createCoin(coin.getName()), chart, 80, buyGap, sellWithProfitGapGap, sellWithLossGap, commCalc).startBackTest());
+                            if (backTestResults.size() > 10) backTestResults.remove(backTestResults.last());
                             counter.getAndDecrement();
                         } catch (NullPointerException e) {
                         } catch (Exception e) {
                             throw new RuntimeException(e);
                         }
-                        ; //подавляем Exception, когда результат = 0
-//                        System.out.println(counter-- + " iterations left");
-
                     }
                 }
             }
             progressThread.interrupt();
             ImageAndMessageSender.sendTelegramMessage("Progress: 100%", chatId);
-            ImageAndMessageSender.sendTelegramMessage(backTestResults.size() + " лучших результатов:",chatId);
+            ImageAndMessageSender.sendTelegramMessage(
+                "🏆 ТОП-" + backTestResults.size() + " лучших стратегий (с учётом комиссии " +
+                commCalc.getExchange().getDisplayName() + " " + commCalc.getFeePercent() + "%):",
+                chatId);
+            int rank = 1;
             for (ReversalPointStrategyBackTester.BackTestResult result : backTestResults) {
-                ImageAndMessageSender.sendTelegramMessage(result.toString(),chatId);
+                ImageAndMessageSender.sendTelegramMessage("#" + rank++ + "\n" + result.toString(), chatId);
                 try {
                     TimeUnit.SECONDS.sleep(3);
                 } catch (InterruptedException e) {
@@ -1328,6 +1331,16 @@ private void conducting_real_time_research (Update update, long chatId, String m
         } finally {
             savedState = null;
         }
+    }
+
+    private static String buildProgressBar(int percent) {
+        int filled = percent / 5;  // 20 chars total
+        int empty = 20 - filled;
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < filled; i++) sb.append("█");
+        for (int i = 0; i < empty; i++) sb.append("░");
+        sb.append("]");
+        return sb.toString();
     }
 
     /**

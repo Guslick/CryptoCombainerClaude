@@ -46,6 +46,8 @@ public class UserProfileManager {
         // Only flags — never the actual key values
         public boolean hasBinanceMainnet = false;
         public boolean hasBinanceTestnet = false;
+        // Selected exchange for data provider (coins, charts, prices)
+        public String selectedExchange = "binance";
         public long createdAt;
         public long updatedAt;
 
@@ -65,6 +67,7 @@ public class UserProfileManager {
             m.put("telegramPhotoUrl",  telegramPhotoUrl);
             m.put("hasBinanceKeys",     hasBinanceMainnet);
             m.put("hasBinanceTestKeys", hasBinanceTestnet);
+            m.put("selectedExchange",   selectedExchange);
             m.put("createdAt", createdAt);
             m.put("updatedAt", updatedAt);
             return m;

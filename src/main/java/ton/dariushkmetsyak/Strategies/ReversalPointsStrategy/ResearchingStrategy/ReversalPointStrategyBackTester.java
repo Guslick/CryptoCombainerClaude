@@ -1,5 +1,6 @@
 package ton.dariushkmetsyak.Strategies.ReversalPointsStrategy.ResearchingStrategy;
 import ton.dariushkmetsyak.Charts.Chart;
+import ton.dariushkmetsyak.Commission.CommissionCalculator;
 import ton.dariushkmetsyak.GeckoApiService.geckoEntities.Coin;
 import ton.dariushkmetsyak.Graphics.DrawTradingChart.TradingChart;
 import ton.dariushkmetsyak.Telegram.ImageAndMessageSender;
@@ -41,16 +42,12 @@ public class ReversalPointStrategyBackTester {
     BackTestResult backTestResult;
 
     // Commission tracking
-    double commissionRate = 0.1; // Binance default 0.1% per trade
-    String exchangeName = "Binance";
-
-    // Trade statistics
-    int profitTradeCount = 0;
-    int lossTradeCount = 0;
-    double totalProfit = 0.0;
-    double totalLoss = 0.0;
-    double totalCommission = 0.0;
-    double buyPriceForCurrentTrade = 0.0;
+    private CommissionCalculator commissionCalc = new CommissionCalculator(CommissionCalculator.Exchange.BINANCE);
+    private double totalCommission = 0;
+    private int winCount = 0;
+    private int lossCount = 0;
+    private double totalProfitAmount = 0;
+    private double totalLossAmount = 0;
 
     // Progress tracking
     private final AtomicInteger progressCurrent = new AtomicInteger(0);
@@ -65,6 +62,10 @@ public class ReversalPointStrategyBackTester {
     // Hold curve: [timestamp, holdEquity] — shows profit if user just held long from start
     private final List<double[]> holdCurve = new ArrayList<>();
 
+    // For chart generation
+    private final List<double[]> buyPoints = new ArrayList<>();
+    private final List<double[]> sellProfitPoints = new ArrayList<>();
+    private final List<double[]> sellLossPoints = new ArrayList<>();
     static {
         try {
             USDT=Coin.createCoin("Tether");
@@ -85,11 +86,14 @@ public class ReversalPointStrategyBackTester {
     public List<double[]> getHoldCurve() { return holdCurve; }
 
     public ReversalPointStrategyBackTester(Coin coin, Chart chart, double tradingSum, double buyGap, double sellWithProfitGap, double sellWithLossGap) {
-        this(coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, "Binance", 0.1);
+        this(coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, new CommissionCalculator(CommissionCalculator.Exchange.BINANCE));
     }
 
     public ReversalPointStrategyBackTester(Coin coin, Chart chart, double tradingSum, double buyGap, double sellWithProfitGap, double sellWithLossGap, String exchangeName, double commissionRate) {
+        this(coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, new CommissionCalculator(CommissionCalculator.Exchange.BINANCE));
+    }
 
+    public ReversalPointStrategyBackTester(Coin coin, Chart chart, double tradingSum, double buyGap, double sellWithProfitGap, double sellWithLossGap, CommissionCalculator commissionCalc) {
         try {
             this.coin=Coin.createCoin(chart.getCoinName());
             Map<Coin, Double> testAssets = new HashMap<>();
@@ -101,86 +105,83 @@ public class ReversalPointStrategyBackTester {
             this.chart=chart;
             this.sellWithProfitGap = sellWithProfitGap;
             this.sellWithLossGap = sellWithLossGap;
-            this.exchangeName = exchangeName;
-            this.commissionRate = commissionRate;
+            this.commissionCalc = commissionCalc;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-
     }
     public class BackTestResult implements Comparable<BackTestResult>{
         double buyGap;
         double sellWithProfitGap;
         double sellWithLossGap;
+        double profitInUsd;
+        double percentageProfit;
+        double totalCommission;
+        double profitAfterCommission;
+        int winCount;
+        int lossCount;
+        double totalProfitAmount;
+        double totalLossAmount;
+        String exchangeName;
+        double commissionRate;
 
-        public double getProfitInUsd() {
-            return profitInUsd;
-        }
-
+        public double getProfitInUsd() { return profitInUsd; }
         public double getBuyGap() { return buyGap; }
         public double getSellWithProfit() { return sellWithProfitGap; }
         public double getSellWithLossGap() { return sellWithLossGap; }
         public double getPercentageProfit() { return percentageProfit; }
-        public int getProfitTradeCount() { return profitTradeCount; }
-        public int getLossTradeCount() { return lossTradeCount; }
-        public int getTotalTradeCount() { return profitTradeCount + lossTradeCount; }
-        public double getTotalProfit() { return totalProfit; }
-        public double getTotalLoss() { return totalLoss; }
         public double getTotalCommission() { return totalCommission; }
-        public double getProfitInUsdAfterCommission() { return profitInUsd - totalCommission; }
-        public double getPercentageProfitAfterCommission() { return (profitInUsd - totalCommission) / tradingSum * 100; }
+        public double getProfitAfterCommission() { return profitAfterCommission; }
+        public double getProfitInUsdAfterCommission() { return profitAfterCommission; }
+        public double getPercentageProfitAfterCommission() { return percentageProfit != 0 && profitInUsd != 0 ? profitAfterCommission / profitInUsd * percentageProfit : 0; }
+        public int getWinCount() { return winCount; }
+        public int getLossCount() { return lossCount; }
+        public int getTotalTrades() { return winCount + lossCount; }
+        public int getProfitTradeCount() { return winCount; }
+        public int getLossTradeCount() { return lossCount; }
+        public int getTotalTradeCount() { return winCount + lossCount; }
+        public double getTotalProfitAmount() { return totalProfitAmount; }
+        public double getTotalLossAmount() { return totalLossAmount; }
+        public double getTotalProfit() { return totalProfitAmount; }
+        public double getTotalLoss() { return totalLossAmount; }
         public String getExchangeName() { return exchangeName; }
         public double getCommissionRate() { return commissionRate; }
 
-        double profitInUsd;
-        double percentageProfit;
-        int profitTradeCount;
-        int lossTradeCount;
-        double totalProfit;
-        double totalLoss;
-        double totalCommission;
-        double tradingSum;
-        String exchangeName;
-        double commissionRate;
-
         @Override
         public String toString() {
-            return coin.getName() +  "\n" +
-                    "Assets: " + account.wallet().getAllAssets()+ "\n" +
-                    "Profit in USD: " + profitInUsd +"\n" +
-                    "Profit in %: " + percentageProfit + "\n" +
-                    "Profit after commission: " + getProfitInUsdAfterCommission() + "\n" +
-                    "Total trades: " + getTotalTradeCount() + " (+" + profitTradeCount + "/-" + lossTradeCount + ")\n" +
-                    "Total commission: " + String.format("%.4f", totalCommission) + " USD\n" +
-                    "Buy gap: " + buyGap + "\n" +
-                    "Sell with profit gap: " + sellWithProfitGap + "\n" +
-                    "Sell with loss gap: " + sellWithLossGap + "\n";
+            return coin.getName() + "\n" +
+                    "Сделок: " + getTotalTrades() + " (✅" + winCount + " / ❌" + lossCount + ")\n" +
+                    "Прибыль: $" + String.format("%.2f", profitInUsd) + "\n" +
+                    "Прибыль в %: " + String.format("%.2f", percentageProfit) + "%\n" +
+                    "Комиссия (" + commissionCalc.getExchange().getDisplayName() + "): $" + String.format("%.4f", totalCommission) + "\n" +
+                    "Прибыль с комиссией: $" + String.format("%.2f", profitAfterCommission) + "\n" +
+                    "Коэфф. покупки: " + String.format("%.1f", buyGap) + "%\n" +
+                    "Коэфф. продажи в прибыль: " + String.format("%.1f", sellWithProfitGap) + "%\n" +
+                    "Коэфф. продажи в убыток: " + String.format("%.1f", sellWithLossGap) + "%\n";
         }
 
         public BackTestResult(double buyGap, double sellWithProfit, double sellWithLossGap,
-                              double profitInUsd, double percentageProfit,
-                              int profitTradeCount, int lossTradeCount,
-                              double totalProfit, double totalLoss, double totalCommission,
-                              double tradingSum, String exchangeName, double commissionRate) {
+                             double profitInUsd, double percentageProfit,
+                             double totalCommission, int winCount, int lossCount,
+                             double totalProfitAmount, double totalLossAmount) {
             this.buyGap = buyGap;
             this.sellWithProfitGap = sellWithProfit;
             this.sellWithLossGap = sellWithLossGap;
             this.profitInUsd = profitInUsd;
             this.percentageProfit = percentageProfit;
-            this.profitTradeCount = profitTradeCount;
-            this.lossTradeCount = lossTradeCount;
-            this.totalProfit = totalProfit;
-            this.totalLoss = totalLoss;
             this.totalCommission = totalCommission;
-            this.tradingSum = tradingSum;
-            this.exchangeName = exchangeName;
-            this.commissionRate = commissionRate;
+            this.profitAfterCommission = profitInUsd - totalCommission;
+            this.winCount = winCount;
+            this.lossCount = lossCount;
+            this.totalProfitAmount = totalProfitAmount;
+            this.totalLossAmount = totalLossAmount;
+            this.exchangeName = commissionCalc.getExchange().getDisplayName();
+            this.commissionRate = commissionCalc.getFeePercent();
         }
-
 
         @Override
         public int compareTo(BackTestResult backTestResult) {
-            return Double.compare(backTestResult.profitInUsd, this.profitInUsd);
+            return Double.compare(backTestResult.profitAfterCommission, this.profitAfterCommission);
         }
     }
     private class Reversal {
@@ -250,12 +251,12 @@ public class ReversalPointStrategyBackTester {
         reversalArrayList.clear();
         reversalArrayList.trimToSize();
 
-        double rawProfit = account.wallet().getAllAssets().get(USDT) - tradingSum;
+        double finalUsdt = account.wallet().getAllAssets().get(USDT);
+        double profitInUsd = finalUsdt - tradingSum;
+        double percentageProfit = profitInUsd / tradingSum * 100;
         backTestResult = new BackTestResult(buyGap, sellWithProfitGap, sellWithLossGap,
-                rawProfit, rawProfit / tradingSum * 100,
-                profitTradeCount, lossTradeCount,
-                totalProfit, totalLoss, totalCommission,
-                tradingSum, exchangeName, commissionRate);
+                profitInUsd, percentageProfit, totalCommission,
+                winCount, lossCount, totalProfitAmount, totalLossAmount);
         return backTestResult;
     }
 
@@ -271,20 +272,18 @@ public class ReversalPointStrategyBackTester {
             if (((pointPrice - buyPrice) / buyPrice * 100) > sellWithProfitGap) {
                     Double coinQuantityInWallet = account.wallet().getAllAssets().get(coin);
                     Double UsdtQuantityInWallet = account.wallet().getAllAssets().get(USDT);
-                    double sellAmount = coinQuantityInWallet * pointPrice;
-                    UsdtQuantityInWallet += sellAmount;
-                    coinQuantityInWallet = 0d;
+                    double sellValue = coinQuantityInWallet * pointPrice;
+                    double commBuy = commissionCalc.calcCommission(buyPrice * coinQuantityInWallet);
+                    double commSell = commissionCalc.calcCommission(sellValue);
+                    totalCommission += commBuy + commSell;
+                    double pnl = (pointPrice - buyPrice) * coinQuantityInWallet;
+                    winCount++;
+                    totalProfitAmount += pnl;
+                    UsdtQuantityInWallet += sellValue;
+                    coinQuantityInWallet=0d;
                     account.wallet().getAllAssets().replace(coin, coinQuantityInWallet);
                     account.wallet().getAllAssets().replace(USDT,UsdtQuantityInWallet);
-
-                // Commission for sell
-                double commissionForSell = sellAmount * commissionRate / 100.0;
-                totalCommission += commissionForSell;
-
-                // Trade P&L
-                double tradePnl = (pointPrice - buyPriceForCurrentTrade) * (tradingSum / buyPriceForCurrentTrade);
-                totalProfit += tradePnl;
-                profitTradeCount++;
+                    sellProfitPoints.add(new double[]{pointTimestamp, pointPrice});
 
                 // Record trade event for chart
                 tradeEvents.add(new double[]{pointTimestamp, pointPrice, 1}); // 1=sell_profit
@@ -297,23 +296,20 @@ public class ReversalPointStrategyBackTester {
                 return true;
             }
             if (((buyPrice - pointPrice) / buyPrice * 100) > sellWithLossGap) {
-
                     Double coinQuantityInWallet = account.wallet().getAllAssets().get(coin);
                     Double UsdtQuantityInWallet = account.wallet().getAllAssets().get(USDT);
-                    double sellAmount = coinQuantityInWallet * pointPrice;
-                    UsdtQuantityInWallet += sellAmount;
-                    coinQuantityInWallet = 0d;
+                    double sellValue = coinQuantityInWallet * pointPrice;
+                    double commBuy = commissionCalc.calcCommission(buyPrice * coinQuantityInWallet);
+                    double commSell = commissionCalc.calcCommission(sellValue);
+                    totalCommission += commBuy + commSell;
+                    double pnl = (pointPrice - buyPrice) * coinQuantityInWallet;
+                    lossCount++;
+                    totalLossAmount += Math.abs(pnl);
+                    UsdtQuantityInWallet += sellValue;
+                    coinQuantityInWallet=0d;
                     account.wallet().getAllAssets().replace(coin, coinQuantityInWallet);
                     account.wallet().getAllAssets().replace(USDT,UsdtQuantityInWallet);
-
-                // Commission for sell
-                double commissionForSell = sellAmount * commissionRate / 100.0;
-                totalCommission += commissionForSell;
-
-                // Trade P&L
-                double tradePnl = (pointPrice - buyPriceForCurrentTrade) * (tradingSum / buyPriceForCurrentTrade);
-                totalLoss += tradePnl; // negative value
-                lossTradeCount++;
+                    sellLossPoints.add(new double[]{pointTimestamp, pointPrice});
 
                 // Record trade event for chart
                 tradeEvents.add(new double[]{pointTimestamp, pointPrice, 2}); // 2=sell_loss
@@ -361,10 +357,7 @@ public class ReversalPointStrategyBackTester {
                                 }
                                 account.wallet().getAllAssets().replace(coin, coinQuantityInWallet);
                                 account.wallet().getAllAssets().replace(USDT,UsdtQuantityInWallet);
-                                // Commission for buy
-                                double commissionForBuy = tradingSum * commissionRate / 100.0;
-                                totalCommission += commissionForBuy;
-                                buyPriceForCurrentTrade = pointPrice;
+                                buyPoints.add(new double[]{pointTimestamp, pointPrice});
                                 buyPrice = pointPrice;
                                 trading = true;
                                 // Record trade event for chart
@@ -382,6 +375,36 @@ public class ReversalPointStrategyBackTester {
     }
 
 
+
+    /** Generate chart image with buy/sell markers and return file path */
+    public String generateChartImage() {
+        TradingChart.clearChart();
+        // Draw price line
+        for (double[] p : chart.getPrices()) {
+            TradingChart.addSimplePoint(p[0], p[1]);
+        }
+        // Draw buy points (blue)
+        for (double[] p : buyPoints) {
+            TradingChart.addBuyIntervalMarker(p[0], p[1]);
+        }
+        // Draw sell profit points (green)
+        for (double[] p : sellProfitPoints) {
+            TradingChart.addSellProfitMarker(p[0], p[1]);
+        }
+        // Draw sell loss points (red)
+        for (double[] p : sellLossPoints) {
+            TradingChart.addSellLossMarker(p[0], p[1]);
+        }
+        String path = "backtest_chart_" + System.currentTimeMillis();
+        TradingChart.makeScreenShot(path);
+        TradingChart.clearChart();
+        return path;
+    }
+
+    public List<double[]> getBuyPoints() { return buyPoints; }
+    public List<double[]> getSellProfitPoints() { return sellProfitPoints; }
+    public List<double[]> getSellLossPoints() { return sellLossPoints; }
+    public Chart getChart() { return chart; }
 
     private static void clearChart (){
         TradingChart.clearChart();
