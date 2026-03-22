@@ -381,14 +381,18 @@ public class ReversalPointStrategyBackTester {
                         if (!trading){
                                 Double coinQuantityInWallet = account.wallet().getAllAssets().get(coin);
                                 Double UsdtQuantityInWallet = account.wallet().getAllAssets().get(USDT);
-                                double buyQty = (account.wallet().getAmountOfCoin(USDT) * 1) / pointPrice;
+                                // Use tradingSum (not full wallet balance) to determine buy amount
+                                // When recapitalize=false, tradingSum stays fixed at initial value
+                                // When recapitalize=true, tradingSum is updated after each sell
+                                double spendAmount = Math.min(tradingSum, UsdtQuantityInWallet);
+                                double buyQty = spendAmount / pointPrice;
                                 coinQuantityInWallet += buyQty;
-                                UsdtQuantityInWallet = 0d;
+                                UsdtQuantityInWallet -= spendAmount;
                                 if (UsdtQuantityInWallet < 0){
                                     return false;
                                 }
                                 account.wallet().getAllAssets().replace(coin, coinQuantityInWallet);
-                                account.wallet().getAllAssets().replace(USDT,UsdtQuantityInWallet);
+                                account.wallet().getAllAssets().replace(USDT, UsdtQuantityInWallet);
                                 buyPoints.add(new double[]{pointTimestamp, pointPrice});
                                 buyPrice = pointPrice;
                                 trading = true;
