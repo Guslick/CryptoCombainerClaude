@@ -1720,8 +1720,10 @@ function downloadTradeReport() {
   const a = document.createElement('a');
   a.href = url;
   a.download = `trade_report_${(_reportData?.coinName || 'backtest')}_${Date.now()}.txt`;
+  a.style.display = 'none';
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 500);
 }
 
 function shareTradeReport() {
