@@ -2901,11 +2901,12 @@ async function restoreBacktestSession(sessionId) {
     // Determine strategy from result
     const isRecap = result.recapitalize === true;
     const strategy = isRecap ? 'reversal_recap' : 'reversal';
+    const isTop = !!result.topStrategies;
     // Close drawer if open
     if (currentDrawerSession) closeDrawer();
-    // Switch to strategy and backtest tab
+    // Navigate to strategies page, select the correct strategy
+    showPage('strategies');
     selectStrategy(strategy);
-    showStrategyTab('backtest');
     // Fill backtest form
     if (result.coinName) document.getElementById('btCoinInput').value = result.coinName;
     if (result.tradingSum) document.getElementById('btTradingSum').value = result.tradingSum;
@@ -2913,16 +2914,14 @@ async function restoreBacktestSession(sessionId) {
     if (result.sellWithProfitGap) document.getElementById('btSellProfit').value = result.sellWithProfitGap;
     if (result.sellWithLossGap) document.getElementById('btSellLoss').value = result.sellWithLossGap;
     if (result.chartType) document.getElementById('btChartType').value = result.chartType;
-    // Navigate to the strategy page first
-    showPage('strategies');
-    // Check if this is an optimize result (topStrategies)
-    if (result.topStrategies) {
+    // Show the correct tab (optimize for TOP, backtest for regular) and display results
+    if (isTop) {
       showStrategyTab('optimize');
       showOptimizeResult(result.topStrategies);
       showToast('Результаты ТОП стратегий восстановлены');
       setTimeout(() => document.getElementById('optResultCard')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     } else {
-      // Regular backtest result — display it
+      showStrategyTab('backtest');
       _btLastResult = result;
       showBacktestResult(result);
       showToast('Результаты бэктеста восстановлены');
