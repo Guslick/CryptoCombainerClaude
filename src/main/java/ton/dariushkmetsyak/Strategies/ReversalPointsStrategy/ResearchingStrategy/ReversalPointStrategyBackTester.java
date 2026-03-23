@@ -68,6 +68,11 @@ public class ReversalPointStrategyBackTester {
     private final List<double[]> buyPoints = new ArrayList<>();
     private final List<double[]> sellProfitPoints = new ArrayList<>();
     private final List<double[]> sellLossPoints = new ArrayList<>();
+
+    // Detailed trade report records
+    private final List<Map<String, Object>> tradeReport = new ArrayList<>();
+    // Track last max price seen (for buy report: drop from max)
+    private double lastMaxPriceForReport = 0;
     static {
         try {
             USDT=Coin.createCoin("Tether");
@@ -86,6 +91,7 @@ public class ReversalPointStrategyBackTester {
     public List<double[]> getTradeEvents() { return tradeEvents; }
     public List<double[]> getEquityCurve() { return equityCurve; }
     public List<double[]> getHoldCurve() { return holdCurve; }
+    public List<Map<String, Object>> getTradeReport() { return tradeReport; }
 
     public ReversalPointStrategyBackTester(Coin coin, Chart chart, double tradingSum, double buyGap, double sellWithProfitGap, double sellWithLossGap) {
         this(coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, new CommissionCalculator(CommissionCalculator.Exchange.BINANCE));
@@ -309,6 +315,26 @@ public class ReversalPointStrategyBackTester {
                 tradeEvents.add(new double[]{pointTimestamp, pointPrice, 1}); // 1=sell_profit
                 recordEquity(pointTimestamp, pointPrice);
 
+                // Detailed trade report: SELL PROFIT
+                double changeProfitUsdt = pnl;
+                double changeProfitPct = buyPrice > 0 ? ((pointPrice - buyPrice) / buyPrice * 100) : 0;
+                double sellProfitCommPct = sellValue > 0 ? ((commBuy + commSell) / sellValue * 100) : 0;
+                Map<String, Object> sellProfitRecord = new LinkedHashMap<>();
+                sellProfitRecord.put("type", "SELL_PROFIT");
+                sellProfitRecord.put("timestamp", (long) pointTimestamp);
+                sellProfitRecord.put("quantity", account.wallet().getAllAssets().get(coin) == 0 ? sellValue / pointPrice : 0);
+                // Store original quantity before zeroing
+                sellProfitRecord.put("quantity", sellValue / pointPrice);
+                sellProfitRecord.put("price", pointPrice);
+                sellProfitRecord.put("totalUsdt", sellValue);
+                sellProfitRecord.put("changeUsdt", changeProfitUsdt);
+                sellProfitRecord.put("changePct", changeProfitPct);
+                sellProfitRecord.put("commission", commBuy + commSell);
+                sellProfitRecord.put("commissionPct", sellProfitCommPct);
+                sellProfitRecord.put("walletUsdt", UsdtQuantityInWallet);
+                sellProfitRecord.put("walletCoin", 0.0);
+                tradeReport.add(sellProfitRecord);
+
                 // Recapitalize: next cycle uses current USDT balance
                 if (recapitalize) {
                     tradingSum = account.wallet().getAllAssets().get(USDT);
@@ -339,6 +365,24 @@ public class ReversalPointStrategyBackTester {
                 // Record trade event for chart
                 tradeEvents.add(new double[]{pointTimestamp, pointPrice, 2}); // 2=sell_loss
                 recordEquity(pointTimestamp, pointPrice);
+
+                // Detailed trade report: SELL LOSS
+                double changeLossUsdt = pnl;
+                double changeLossPct = buyPrice > 0 ? ((pointPrice - buyPrice) / buyPrice * 100) : 0;
+                double sellLossCommPct = sellValue > 0 ? ((commBuy + commSell) / sellValue * 100) : 0;
+                Map<String, Object> sellLossRecord = new LinkedHashMap<>();
+                sellLossRecord.put("type", "SELL_LOSS");
+                sellLossRecord.put("timestamp", (long) pointTimestamp);
+                sellLossRecord.put("quantity", sellValue / pointPrice);
+                sellLossRecord.put("price", pointPrice);
+                sellLossRecord.put("totalUsdt", sellValue);
+                sellLossRecord.put("changeUsdt", changeLossUsdt);
+                sellLossRecord.put("changePct", changeLossPct);
+                sellLossRecord.put("commission", commBuy + commSell);
+                sellLossRecord.put("commissionPct", sellLossCommPct);
+                sellLossRecord.put("walletUsdt", UsdtQuantityInWallet);
+                sellLossRecord.put("walletCoin", 0.0);
+                tradeReport.add(sellLossRecord);
 
                 // Recapitalize: next cycle uses current USDT balance
                 if (recapitalize) {
@@ -399,6 +443,26 @@ public class ReversalPointStrategyBackTester {
                                 // Record trade event for chart
                                 tradeEvents.add(new double[]{pointTimestamp, pointPrice, 0}); // 0=buy
                                 recordEquity(pointTimestamp, pointPrice);
+                                // Detailed trade report: BUY
+                                double dropFromMaxUsdt = currentMaxPrice[0] - pointPrice;
+                                double dropFromMaxPct = currentMaxPrice[0] > 0 ? (dropFromMaxUsdt / currentMaxPrice[0] * 100) : 0;
+                                double buyCommission = commissionCalc.calcCommission(spendAmount);
+                                double buyCommPct = spendAmount > 0 ? (buyCommission / spendAmount * 100) : 0;
+                                Map<String, Object> buyRecord = new LinkedHashMap<>();
+                                buyRecord.put("type", "BUY");
+                                buyRecord.put("timestamp", (long) pointTimestamp);
+                                buyRecord.put("quantity", buyQty);
+                                buyRecord.put("price", pointPrice);
+                                buyRecord.put("totalUsdt", spendAmount);
+                                buyRecord.put("maxPrice", currentMaxPrice[0]);
+                                buyRecord.put("dropFromMaxUsdt", dropFromMaxUsdt);
+                                buyRecord.put("dropFromMaxPct", dropFromMaxPct);
+                                buyRecord.put("commission", buyCommission);
+                                buyRecord.put("commissionPct", buyCommPct);
+                                buyRecord.put("walletUsdt", UsdtQuantityInWallet);
+                                buyRecord.put("walletCoin", coinQuantityInWallet);
+                                tradeReport.add(buyRecord);
+                                lastMaxPriceForReport = currentMaxPrice[0];
                         }
                     }
                     currentMaxPrice[0] = pointPrice;

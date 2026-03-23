@@ -540,6 +540,7 @@
           <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn btn-secondary" id="btShowChartBtn" onclick="showBacktestChart()" style="display:none">📈 ПОКАЗАТЬ ГРАФИК</button>
             <button class="btn btn-secondary" id="btShowYieldBtn" onclick="showBacktestYieldCurve()" style="display:none">📊 КРИВАЯ ДОХОДНОСТИ</button>
+            <button class="btn btn-secondary" id="btShowReportBtn" onclick="showBacktestTradeReport()" style="display:none">📋 ОТЧЁТ О СДЕЛКАХ</button>
             <button class="btn btn-primary btn-sm" id="btStartTradingBtn" onclick="startTradingFromBacktest()" style="display:none">▶ ТОРГОВАТЬ</button>
           </div>
         </div>
@@ -566,6 +567,18 @@
           <span style="color:#ff1744">●</span> Продажа в убыток
         </div>
         <div id="btChartContainer" style="width:100%;height:280px;background:var(--bg3);border-radius:var(--radius-sm)"></div>
+      </div>
+      <!-- Trade report -->
+      <div id="btReportCard" style="display:none" class="card">
+        <div class="card-title">📋 ОТЧЁТ О СДЕЛКАХ
+          <div style="display:flex;gap:4px;margin-left:auto;">
+            <button class="btn btn-secondary btn-sm" onclick="downloadTradeReport()">💾 Скачать</button>
+            <button class="btn btn-secondary btn-sm" onclick="shareTradeReport()">📤 Поделиться</button>
+            <button class="btn btn-secondary btn-sm" onclick="document.getElementById('btReportCard').style.display='none'">✕</button>
+          </div>
+        </div>
+        <div id="btReportHeader" style="font-size:11px;color:var(--muted);margin-bottom:8px;padding:8px;background:var(--bg2);border-radius:var(--radius-sm);border:1px solid var(--border)"></div>
+        <div id="btReportContent" style="max-height:400px;overflow-y:auto;"></div>
       </div>
     </div>
 
@@ -1415,6 +1428,7 @@ async function startBacktest() {
   document.getElementById('btResultCard').style.display='none';
   document.getElementById('btChartCard').style.display='none';
   document.getElementById('btYieldCard').style.display='none';
+  document.getElementById('btReportCard').style.display='none';
   document.getElementById('btAlert').style.display='none';
   document.getElementById('btProgressWrap').style.display='block';
   document.getElementById('btProgressBar').style.width='0%';
@@ -1461,7 +1475,8 @@ async function startBacktest() {
           document.getElementById('btProgressBar').style.width = '100%';
           document.getElementById('btProgressPct').textContent = '100%';
           setTimeout(() => { document.getElementById('btProgressWrap').style.display='none'; }, 300);
-          const rr = await fetch(`${API_BASE}/api/backtest/result`, {headers:authHeaders()});
+          const strat = _selectedStrategy || 'reversal';
+          const rr = await fetch(`${API_BASE}/api/backtest/result?strategy=${strat}`, {headers:authHeaders()});
           const result = await rr.json();
           _btLastResult = result;
           showBacktestResult(result);
@@ -1536,6 +1551,8 @@ function showBacktestResult(result) {
   if (btShowChartBtn) btShowChartBtn.style.display = hasTrades ? '' : 'none';
   const btShowYieldBtn = document.getElementById('btShowYieldBtn');
   if (btShowYieldBtn) btShowYieldBtn.style.display = (result.equityCurve && result.equityCurve.length > 1) ? '' : 'none';
+  const btShowReportBtn = document.getElementById('btShowReportBtn');
+  if (btShowReportBtn) btShowReportBtn.style.display = (result.tradeReport && result.tradeReport.length > 0) ? '' : 'none';
   const btStartTradingBtn = document.getElementById('btStartTradingBtn');
   if (btStartTradingBtn) btStartTradingBtn.style.display = '';
 }
@@ -1554,6 +1571,19 @@ function startTradingFromOptResult(idx) {
   prefillTradingForm(coin, r.tradingSum, r.buyGap, r.sellWithProfitGap, r.sellWithLossGap);
 }
 
+function showOptTradeReport(idx) {
+  const r = _optResults[idx];
+  if (!r || !r.tradeReport || !r.tradeReport.length) return;
+  // Temporarily use _btLastResult to reuse the report renderer
+  const prevResult = _btLastResult;
+  _btLastResult = r;
+  _btLastResult.coinName = _btLastResult.coinName || document.getElementById('optCoinInput')?.value || '';
+  _btLastResult.tradingSum = _btLastResult.tradingSum || +document.getElementById('optTradingSum')?.value || 100;
+  _btLastResult.chartType = _btLastResult.chartType || document.getElementById('optChartType')?.value || '';
+  showBacktestTradeReport();
+  _btLastResult = prevResult;
+}
+
 function prefillTradingForm(coin, tradingSum, buyGap, sellProfit, sellLoss) {
   goToStrategyTab('trade');
   if (coin) document.getElementById('tradeCoinInput').value = coin;
@@ -1562,6 +1592,128 @@ function prefillTradingForm(coin, tradingSum, buyGap, sellProfit, sellLoss) {
   if (sellProfit) document.getElementById('tradeSellProfit').value = sellProfit;
   if (sellLoss) document.getElementById('tradeSellLoss').value = sellLoss;
   showToast('Параметры загружены в форму торговли');
+}
+
+// ── Trade Report ──────────────────────────────────────────────
+function showBacktestTradeReport() {
+  const r = _btLastResult;
+  if (!r || !r.tradeReport || !r.tradeReport.length) return;
+  const card = document.getElementById('btReportCard');
+  card.style.display = 'block';
+
+  // Header with summary info
+  const periodLabel = {'5yr':'5 лет','3yr':'3 года','yearly':'1 год','monthly':'1 месяц','1d':'1 день','custom':'Произвольный'}[r.chartType] || r.chartType;
+  const profitAfterComm = r.profitUsdAfterCommission != null ? r.profitUsdAfterCommission : r.profitUsd;
+  const pctAfterComm = r.profitPercentAfterCommission != null ? r.profitPercentAfterCommission : r.profitPercent;
+  document.getElementById('btReportHeader').innerHTML = `
+    <div style="font-family:var(--font-head);font-size:13px;color:var(--text);margin-bottom:6px;">ОТЧЁТ: ${escHtml(r.coinName || '')} — ${periodLabel}</div>
+    <div>Сумма: <b>${r.tradingSum} USDT</b> | Биржа: <b>${r.exchangeName || r.exchange || '—'}</b> | Комиссия: <b>${(r.feePercent || r.commissionRate || 0)}%</b></div>
+    <div>Сделок: <b>${r.totalTradeCount || 0}</b> (<span style="color:var(--green)">+${r.profitTradeCount || 0}</span> / <span style="color:var(--red)">-${r.lossTradeCount || 0}</span>)</div>
+    <div>Прибыль: <b style="color:${(r.profitUsd||0)>=0?'var(--green)':'var(--red)'}">${(r.profitUsd||0)>=0?'+':''}${(r.profitUsd||0).toFixed(2)} USD</b> | С комиссией: <b style="color:${profitAfterComm>=0?'var(--green)':'var(--red)'}">${profitAfterComm>=0?'+':''}${profitAfterComm.toFixed(2)} USD (${pctAfterComm>=0?'+':''}${pctAfterComm.toFixed(2)}%)</b></div>
+    <div>Коэф: покупка <b>${r.buyGap}%</b> | продажа+ <b>${r.sellWithProfitGap}%</b> | продажа- <b>${r.sellWithLossGap}%</b>${r.recapitalize ? ' | <b style="color:var(--accent)">Рекапитализация</b>' : ''}</div>
+  `;
+
+  // Render trade records
+  let html = '<div style="display:flex;flex-direction:column;gap:4px;">';
+  r.tradeReport.forEach((t, i) => {
+    const dt = new Date(t.timestamp);
+    const dateStr = dt.toLocaleDateString('ru-RU') + ' ' + dt.toLocaleTimeString('ru-RU', {hour:'2-digit',minute:'2-digit'});
+    const isBuy = t.type === 'BUY';
+    const isProfit = t.type === 'SELL_PROFIT';
+    const isLoss = t.type === 'SELL_LOSS';
+    const borderColor = isBuy ? 'rgba(21,101,192,0.5)' : isProfit ? 'rgba(0,230,118,0.4)' : 'rgba(255,23,68,0.4)';
+    const bgColor = isBuy ? 'rgba(21,101,192,0.08)' : isProfit ? 'rgba(0,230,118,0.06)' : 'rgba(255,23,68,0.06)';
+    const typeLabel = isBuy ? '<span style="color:#1565C0;font-weight:700">ПОКУПКА</span>'
+      : isProfit ? '<span style="color:var(--green);font-weight:700">ПРОДАЖА В ПРИБЫЛЬ</span>'
+      : '<span style="color:var(--red);font-weight:700">ПРОДАЖА В УБЫТОК</span>';
+
+    let details = '';
+    if (isBuy) {
+      details = `
+        <div>Токенов: <b>${fmtNum(t.quantity)}</b> | Цена: <b>$${formatPrice(t.price)}</b> | На сумму: <b>${fmtNum(t.totalUsdt)} USDT</b></div>
+        <div>Макс. цена: <b>$${formatPrice(t.maxPrice)}</b> | Снижение: <b style="color:var(--red)">-${fmtNum(t.dropFromMaxUsdt)} USDT (-${fmtNum(t.dropFromMaxPct)}%)</b></div>
+        <div>Комиссия: <b style="color:var(--yellow)">${fmtNum(t.commission)} USDT (${fmtNum(t.commissionPct)}%)</b></div>
+        <div>Баланс: <b>${fmtNum(t.walletUsdt)} USDT</b> + <b>${fmtNum(t.walletCoin)} токенов</b></div>
+      `;
+    } else {
+      const changeColor = (t.changeUsdt || 0) >= 0 ? 'var(--green)' : 'var(--red)';
+      const changeSign = (t.changeUsdt || 0) >= 0 ? '+' : '';
+      details = `
+        <div>Токенов: <b>${fmtNum(t.quantity)}</b> | Цена: <b>$${formatPrice(t.price)}</b> | На сумму: <b>${fmtNum(t.totalUsdt)} USDT</b></div>
+        <div>Изменение стоимости: <b style="color:${changeColor}">${changeSign}${fmtNum(t.changeUsdt)} USDT (${changeSign}${fmtNum(t.changePct)}%)</b></div>
+        <div>Комиссия: <b style="color:var(--yellow)">${fmtNum(t.commission)} USDT (${fmtNum(t.commissionPct)}%)</b></div>
+        <div>Баланс: <b>${fmtNum(t.walletUsdt)} USDT</b></div>
+      `;
+    }
+
+    html += `<div style="padding:8px;border:1px solid ${borderColor};border-radius:6px;background:${bgColor};font-size:11px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+        <span>${typeLabel}</span>
+        <span style="color:var(--muted);font-size:10px;">#${i+1} | ${dateStr}</span>
+      </div>
+      ${details}
+    </div>`;
+  });
+  html += '</div>';
+  document.getElementById('btReportContent').innerHTML = html;
+  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function _buildTradeReportText() {
+  const r = _btLastResult;
+  if (!r || !r.tradeReport || !r.tradeReport.length) return '';
+  const periodLabel = {'5yr':'5 лет','3yr':'3 года','yearly':'1 год','monthly':'1 месяц','1d':'1 день','custom':'Произвольный'}[r.chartType] || r.chartType;
+  const profitAfterComm = r.profitUsdAfterCommission != null ? r.profitUsdAfterCommission : r.profitUsd;
+  let text = `ОТЧЁТ О СДЕЛКАХ: ${r.coinName || ''} — ${periodLabel}\n`;
+  text += `Сумма: ${r.tradingSum} USDT | Биржа: ${r.exchangeName || r.exchange || '—'} | Комиссия: ${r.feePercent || r.commissionRate || 0}%\n`;
+  text += `Сделок: ${r.totalTradeCount || 0} (+${r.profitTradeCount || 0} / -${r.lossTradeCount || 0})\n`;
+  text += `Прибыль: ${(r.profitUsd||0).toFixed(2)} USD | С комиссией: ${profitAfterComm.toFixed(2)} USD\n`;
+  text += `Коэф: покупка ${r.buyGap}% | продажа+ ${r.sellWithProfitGap}% | продажа- ${r.sellWithLossGap}%${r.recapitalize ? ' | Рекапитализация' : ''}\n`;
+  text += '═'.repeat(60) + '\n\n';
+
+  r.tradeReport.forEach((t, i) => {
+    const dt = new Date(t.timestamp);
+    const dateStr = dt.toLocaleDateString('ru-RU') + ' ' + dt.toLocaleTimeString('ru-RU', {hour:'2-digit',minute:'2-digit'});
+    const isBuy = t.type === 'BUY';
+    const typeLabel = isBuy ? 'ПОКУПКА' : t.type === 'SELL_PROFIT' ? 'ПРОДАЖА В ПРИБЫЛЬ' : 'ПРОДАЖА В УБЫТОК';
+    text += `#${i+1} | ${dateStr} | ${typeLabel}\n`;
+    if (isBuy) {
+      text += `  Токенов: ${fmtNum(t.quantity)} | Цена: $${formatPrice(t.price)} | На сумму: ${fmtNum(t.totalUsdt)} USDT\n`;
+      text += `  Макс. цена: $${formatPrice(t.maxPrice)} | Снижение: -${fmtNum(t.dropFromMaxUsdt)} USDT (-${fmtNum(t.dropFromMaxPct)}%)\n`;
+      text += `  Комиссия: ${fmtNum(t.commission)} USDT (${fmtNum(t.commissionPct)}%)\n`;
+      text += `  Баланс: ${fmtNum(t.walletUsdt)} USDT + ${fmtNum(t.walletCoin)} токенов\n`;
+    } else {
+      const sign = (t.changeUsdt || 0) >= 0 ? '+' : '';
+      text += `  Токенов: ${fmtNum(t.quantity)} | Цена: $${formatPrice(t.price)} | На сумму: ${fmtNum(t.totalUsdt)} USDT\n`;
+      text += `  Изменение: ${sign}${fmtNum(t.changeUsdt)} USDT (${sign}${fmtNum(t.changePct)}%)\n`;
+      text += `  Комиссия: ${fmtNum(t.commission)} USDT (${fmtNum(t.commissionPct)}%)\n`;
+      text += `  Баланс: ${fmtNum(t.walletUsdt)} USDT\n`;
+    }
+    text += '\n';
+  });
+  return text;
+}
+
+function downloadTradeReport() {
+  const text = _buildTradeReportText();
+  if (!text) return;
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `trade_report_${(_btLastResult?.coinName || 'backtest')}_${Date.now()}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function shareTradeReport() {
+  const text = _buildTradeReportText();
+  if (!text) return;
+  if (navigator.share) {
+    navigator.share({ title: 'Trade Report', text }).catch(() => {});
+  } else if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(() => showToast('Отчёт скопирован в буфер обмена'));
+  }
 }
 
 let _btChartInstance = null;
@@ -1774,7 +1926,8 @@ async function startOptimize() {
           document.getElementById('optProgressPct').textContent = '100%';
           setTimeout(() => { document.getElementById('optProgressWrap').style.display = 'none'; }, 300);
           // Fetch optimize result (stored in lastBacktestResult as {topStrategies:[...]})
-          const rr = await fetch(`${API_BASE}/api/backtest/result`, { headers: authHeaders() });
+          const strat = _selectedStrategy || 'reversal';
+          const rr = await fetch(`${API_BASE}/api/backtest/result?strategy=${strat}`, { headers: authHeaders() });
           const optResult = await rr.json();
           showOptimizeResult(optResult.topStrategies || []);
           btn.disabled = false; btn.innerHTML = '🔍 НАЙТИ ЛУЧШИЕ СТРАТЕГИИ';
@@ -1841,6 +1994,7 @@ function showOptimizeResult(results) {
       <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
         ${hasTrades ? `<button class="btn btn-secondary btn-sm" onclick="toggleOptChart(${i})" id="optChartBtn-${i}">📈 График</button>` : ''}
         ${hasEquity ? `<button class="btn btn-secondary btn-sm" onclick="toggleOptYield(${i})">📊 Доходность</button>` : ''}
+        ${(r.tradeReport && r.tradeReport.length) ? `<button class="btn btn-secondary btn-sm" onclick="showOptTradeReport(${i})">📋 Отчёт</button>` : ''}
         <button class="btn btn-primary btn-sm" onclick="startTradingFromOptResult(${i})">▶ Торговать</button>
       </div>
       ${hasTrades ? `<div id="optChartWrap-${i}" style="display:none;margin-top:8px">
@@ -2240,6 +2394,7 @@ function buildActionsHtml(s) {
   return `
     ${isRunning ? `<button class="btn btn-danger btn-sm" onclick="event.stopPropagation();stopSession('${s.id}')">■ Стоп</button>` : ''}
     ${isStopped && s.type !== 'BACKTEST' ? `<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();resumeSession('${s.id}')">▶ Возобновить</button>` : ''}
+    ${isStopped && s.type === 'BACKTEST' && s.status === 'DONE' ? `<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();restoreBacktestSession('${s.id}')">🔄 Восстановить</button>` : ''}
     ${isStopped ? `<button class="btn btn-sm" style="background:rgba(255,23,68,0.15);color:var(--red);border:1px solid rgba(255,23,68,0.3);" onclick="event.stopPropagation();deleteSession('${s.id}')">🗑</button>` : ''}`;
 }
 
@@ -2716,6 +2871,46 @@ async function resumeSession(id) {
   loadSessions();
 }
 
+async function restoreBacktestSession(sessionId) {
+  try {
+    showToast('Загрузка результатов...');
+    const r = await fetch(`${API_BASE}/api/backtest/session-result?sessionId=${sessionId}`, { headers: authHeaders() });
+    const result = await r.json();
+    if (result.error || result.ready === false) {
+      showToast(result.message || result.error || 'Результат недоступен');
+      return;
+    }
+    // Determine strategy from result
+    const isRecap = result.recapitalize === true;
+    const strategy = isRecap ? 'reversal_recap' : 'reversal';
+    // Close drawer if open
+    if (currentDrawerSession) closeDrawer();
+    // Switch to strategy and backtest tab
+    selectStrategy(strategy);
+    showStrategyTab('backtest');
+    // Fill backtest form
+    if (result.coinName) document.getElementById('btCoinInput').value = result.coinName;
+    if (result.tradingSum) document.getElementById('btTradingSum').value = result.tradingSum;
+    if (result.buyGap) document.getElementById('btBuyGap').value = result.buyGap;
+    if (result.sellWithProfitGap) document.getElementById('btSellProfit').value = result.sellWithProfitGap;
+    if (result.sellWithLossGap) document.getElementById('btSellLoss').value = result.sellWithLossGap;
+    if (result.chartType) document.getElementById('btChartType').value = result.chartType;
+    // Check if this is an optimize result (topStrategies)
+    if (result.topStrategies) {
+      showStrategyTab('optimize');
+      showOptimizeResult(result.topStrategies);
+      showToast('Результаты ТОП стратегий восстановлены');
+    } else {
+      // Regular backtest result — display it
+      _btLastResult = result;
+      showBacktestResult(result);
+      showToast('Результаты бэктеста восстановлены');
+    }
+  } catch(e) {
+    showToast('Ошибка загрузки: ' + e.message);
+  }
+}
+
 async function deleteSession(id) {
   if (!confirm('Удалить сессию и все её данные?')) return;
   // Remove from UI immediately
@@ -2953,6 +3148,7 @@ function renderDrawer(sess, isFirstRender = false, scrollOpts = {}) {
     <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
       ${isRunning ? `<button class="btn btn-danger btn-sm" onclick="stopSession('${sess.id}')">■ СТОП</button>` : ''}
       ${!isRunning && sess.type !== 'BACKTEST' ? `<button class="btn btn-secondary btn-sm" onclick="resumeSession('${sess.id}')">▶ ВОЗОБНОВИТЬ</button>` : ''}
+      ${!isRunning && sess.type === 'BACKTEST' && sess.status === 'DONE' ? `<button class="btn btn-secondary btn-sm" onclick="restoreBacktestSession('${sess.id}')">🔄 ВОССТАНОВИТЬ</button>` : ''}
       ${!isRunning ? `<button class="btn btn-sm" style="background:rgba(255,23,68,0.15);color:var(--red);border:1px solid rgba(255,23,68,0.3);" onclick="deleteSession('${sess.id}')">🗑 УДАЛИТЬ</button>` : ''}
     </div>`;
 

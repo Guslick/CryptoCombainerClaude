@@ -205,6 +205,8 @@ public class TradingSessionManager {
         // Backtest progress
         public volatile int backtestProgressCurrent = 0;
         public volatile int backtestProgressTotal = 0;
+        // Stored backtest result for later restoration (only for BACKTEST sessions)
+        public transient Map<String, Object> backtestResultData = null;
         // Master fields (aliases / additional)
         public volatile int winCount = 0;
         public volatile int lossCount = 0;
@@ -271,9 +273,10 @@ public class TradingSessionManager {
     private final long userId;
     private final String sessionStoreFile;
     private final ConcurrentHashMap<String, SessionInfo> sessions = new ConcurrentHashMap<>();
-    private final AtomicReference<Map<String, Object>> lastBacktestResult = new AtomicReference<>(null);
-    private final AtomicReference<String> lastBacktestChartPath = new AtomicReference<>(null);
-    private final AtomicReference<Map<String, Object>> lastTop10Result = new AtomicReference<>(null);
+    // Per-strategy backtest/top10 results: keyed by strategy name ("reversal" or "reversal_recap")
+    private final ConcurrentHashMap<String, Map<String, Object>> lastBacktestResults = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, String> lastBacktestChartPaths = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Map<String, Object>> lastTop10Results = new ConcurrentHashMap<>();
 
     private TradingSessionManager(long userId) {
         this.userId = userId;
@@ -832,8 +835,9 @@ public class TradingSessionManager {
         if (customTo > 0) params.put("customTo", customTo);
         if (recapitalize) params.put("recapitalize", true);
         SessionInfo info = new SessionInfo(id, SessionType.BACKTEST, coinName, params, userId);
-        lastBacktestResult.set(null);
-        lastBacktestChartPath.set(null);
+        String strategyKey = recapitalize ? "reversal_recap" : "reversal";
+        lastBacktestResults.remove(strategyKey);
+        lastBacktestChartPaths.remove(strategyKey);
         String stratLabel = recapitalize ? " [РЕКАП]" : "";
         info.addEvent("START", "Бэктест запущен" + stratLabel + ": " + coinName);
         Thread t = new Thread(() -> {
@@ -895,7 +899,7 @@ public class TradingSessionManager {
 
                 // Generate chart image
                 String chartPath = tester.generateChartImage();
-                lastBacktestChartPath.set(chartPath);
+                lastBacktestChartPaths.put(strategyKey, chartPath);
 
                 if (result == null) {
                     info.status = "ERROR"; info.endedAt = System.currentTimeMillis();
@@ -959,7 +963,10 @@ public class TradingSessionManager {
                     holdList.add(hm);
                 }
                 rm.put("holdCurve", holdList);
-                lastBacktestResult.set(rm);
+                // Detailed trade report
+                rm.put("tradeReport", tester.getTradeReport());
+                lastBacktestResults.put(strategyKey, rm);
+                info.backtestResultData = rm;
                 info.status = "DONE"; info.endedAt = System.currentTimeMillis();
                 info.backtestProgressCurrent = info.backtestProgressTotal;
                 info.addEvent("DONE", String.format(
@@ -997,7 +1004,8 @@ public class TradingSessionManager {
         params.put("exchange", exchange);
         if (recapitalize) params.put("recapitalize", true);
         SessionInfo info = new SessionInfo(id, SessionType.BACKTEST, coinName, params, userId);
-        lastTop10Result.set(null);
+        String strategyKey = recapitalize ? "reversal_recap" : "reversal";
+        lastTop10Results.remove(strategyKey);
         String stratLabel = recapitalize ? " [РЕКАП]" : "";
         info.addEvent("START", "Поиск ТОП-10 стратегий" + stratLabel + ": " + coinName);
         Thread t = new Thread(() -> {
@@ -1076,7 +1084,8 @@ public class TradingSessionManager {
                 resultMap.put("feePercent", commCalc.getFeePercent());
                 resultMap.put("totalIterations", totalIterations);
                 resultMap.put("strategies", top10);
-                lastTop10Result.set(resultMap);
+                lastTop10Results.put(strategyKey, resultMap);
+                info.backtestResultData = resultMap;
 
                 info.status = "DONE"; info.endedAt = System.currentTimeMillis();
                 String best = top10.isEmpty() ? "нет результатов"
@@ -1224,6 +1233,7 @@ public class TradingSessionManager {
                     holdList.add(hm);
                 }
                 m.put("holdCurve", holdList);
+                m.put("tradeReport", tester.getTradeReport());
                 m.put("recapitalize", tester.isRecapitalize());
                 if (r.isEarlyTermination()) m.put("earlyTermination", true);
                 top.add(m);
@@ -1259,6 +1269,7 @@ public class TradingSessionManager {
         params.put("topN", topN);
         if (recapitalize) params.put("recapitalize", true);
         SessionInfo info = new SessionInfo(id, SessionType.BACKTEST, coinName, params, userId);
+        String strategyKey = recapitalize ? "reversal_recap" : "reversal";
         String stratLabel = recapitalize ? " [РЕКАП]" : "";
         info.addEvent("START", "Поиск лучших стратегий" + stratLabel + ": " + coinName);
         Thread t = new Thread(() -> {
@@ -1272,7 +1283,8 @@ public class TradingSessionManager {
                 rm.put("coinName", coinName); rm.put("chartType", chartType);
                 rm.put("exchangeName", exchangeName); rm.put("commissionRate", commissionRate);
                 rm.put("topStrategies", top);
-                lastBacktestResult.set(rm);
+                lastBacktestResults.put(strategyKey, rm);
+                info.backtestResultData = rm;
                 info.status = "DONE"; info.endedAt = System.currentTimeMillis();
                 info.backtestProgressCurrent = info.backtestProgressTotal;
                 info.addEvent("DONE", "Найдено топ-" + top.size() + " стратегий");
@@ -1287,7 +1299,19 @@ public class TradingSessionManager {
         return info;
     }
 
-    public Map<String, Object> getLastBacktestResult() { return lastBacktestResult.get(); }
-    public String getLastBacktestChartPath() { return lastBacktestChartPath.get(); }
-    public Map<String, Object> getLastTop10Result() { return lastTop10Result.get(); }
+    public Map<String, Object> getSessionBacktestResult(String sessionId) {
+        SessionInfo info = sessions.get(sessionId);
+        if (info == null || info.backtestResultData == null) return null;
+        return info.backtestResultData;
+    }
+
+    public Map<String, Object> getLastBacktestResult(String strategy) {
+        return lastBacktestResults.get(strategy != null ? strategy : "reversal");
+    }
+    public String getLastBacktestChartPath(String strategy) {
+        return lastBacktestChartPaths.get(strategy != null ? strategy : "reversal");
+    }
+    public Map<String, Object> getLastTop10Result(String strategy) {
+        return lastTop10Results.get(strategy != null ? strategy : "reversal");
+    }
 }

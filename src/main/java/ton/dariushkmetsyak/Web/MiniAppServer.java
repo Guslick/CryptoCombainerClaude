@@ -234,6 +234,18 @@ public class MiniAppServer {
             });
         });
 
+        // Restore saved backtest result from session
+        server.createContext("/api/backtest/session-result", exchange -> {
+            if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
+            Long userId = requireUser(exchange); if (userId == null) return;
+            handleJson(exchange, () -> {
+                String sessionId = getQueryParam(exchange.getRequestURI().getQuery(), "sessionId");
+                if (sessionId == null) return errorMap("sessionId обязателен");
+                Map<String, Object> result = TradingSessionManager.forUser(userId).getSessionBacktestResult(sessionId);
+                return result != null ? result : Map.of("ready", false, "message", "Результат не найден (данные доступны только в текущей сессии сервера)");
+            });
+        });
+
         server.createContext("/api/backtest/start", exchange -> {
             if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
             Long userId = requireUser(exchange); if (userId == null) return;
@@ -244,7 +256,8 @@ public class MiniAppServer {
             if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
             Long userId = requireUser(exchange); if (userId == null) return;
             handleJson(exchange, () -> {
-                Map<String, Object> result = TradingSessionManager.forUser(userId).getLastBacktestResult();
+                String strategy = getQueryParam(exchange.getRequestURI().getQuery(), "strategy");
+                Map<String, Object> result = TradingSessionManager.forUser(userId).getLastBacktestResult(strategy);
                 return result != null ? result : Map.of("ready", false, "message", "Результатов нет");
             });
         });
@@ -252,7 +265,8 @@ public class MiniAppServer {
         server.createContext("/api/backtest/chart", exchange -> {
             if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
             Long userId = requireUser(exchange); if (userId == null) return;
-            String chartPath = TradingSessionManager.forUser(userId).getLastBacktestChartPath();
+            String strategy = getQueryParam(exchange.getRequestURI().getQuery(), "strategy");
+            String chartPath = TradingSessionManager.forUser(userId).getLastBacktestChartPath(strategy);
             if (chartPath == null || !new File(chartPath).exists()) {
                 handleJson(exchange, () -> errorMap("График не найден"));
                 return;
@@ -321,7 +335,8 @@ public class MiniAppServer {
             if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
             Long userId = requireUser(exchange); if (userId == null) return;
             handleJson(exchange, () -> {
-                Map<String, Object> result = TradingSessionManager.forUser(userId).getLastTop10Result();
+                String strategy = getQueryParam(exchange.getRequestURI().getQuery(), "strategy");
+                Map<String, Object> result = TradingSessionManager.forUser(userId).getLastTop10Result(strategy);
                 return result != null ? result : Map.of("ready", false, "message", "Результатов нет");
             });
         });
