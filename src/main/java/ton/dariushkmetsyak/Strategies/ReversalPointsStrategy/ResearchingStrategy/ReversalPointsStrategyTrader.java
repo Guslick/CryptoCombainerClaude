@@ -210,11 +210,13 @@ public class ReversalPointsStrategyTrader {
             }
         }
 
-        // Initialize trade statistics start balance
-        try {
-            double initUsdtBal = account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin());
-            tradeStats.setStartBalance(initUsdtBal);
-        } catch (Exception ignored) {}
+        // Initialize trade statistics start balance (only if not restored from saved state)
+        if (tradeStats.getStartBalance() <= 0) {
+            try {
+                double initUsdtBal = account.wallet().getAmountOfCoin(Account.USD_TOKENS.USDT.getCoin());
+                tradeStats.setStartBalance(initUsdtBal);
+            } catch (Exception ignored) {}
+        }
 
         // Start periodic autosave (shutdown hook registered once globally — see static block)
         stateManager.startAutosave();
@@ -258,6 +260,16 @@ public class ReversalPointsStrategyTrader {
                 reversalArrayList.add(new Reversal(
                         new double[]{(double) System.currentTimeMillis(),
                                      currentMaxPrice[0] > 0 ? currentMaxPrice[0] : 0}, "initPoint"));
+            }
+
+            // Restore trade statistics
+            if (state.getWinCount() > 0 || state.getLossCount() > 0) {
+                tradeStats.setWinCount(state.getWinCount());
+                tradeStats.setLossCount(state.getLossCount());
+                tradeStats.setTotalProfit(state.getTotalProfit());
+                tradeStats.setTotalLoss(state.getTotalLoss());
+                tradeStats.setTotalCommission(state.getTotalCommission());
+                if (state.getStartBalance() > 0) tradeStats.setStartBalance(state.getStartBalance());
             }
 
             return true;
@@ -318,6 +330,14 @@ public class ReversalPointsStrategyTrader {
             rps.add(new TradingState.ReversalPoint(r.data[0], r.data[1], r.tag));
         }
         state.setReversals(rps);
+
+        // Persist trade statistics
+        state.setWinCount(tradeStats.getWinCount());
+        state.setLossCount(tradeStats.getLossCount());
+        state.setTotalProfit(tradeStats.getTotalProfit());
+        state.setTotalLoss(tradeStats.getTotalLoss());
+        state.setTotalCommission(tradeStats.getTotalCommission());
+        state.setStartBalance(tradeStats.getStartBalance());
 
         stateManager.setCurrentState(state);
         stateManager.saveState(state);

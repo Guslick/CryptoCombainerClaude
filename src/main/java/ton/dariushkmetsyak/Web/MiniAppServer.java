@@ -535,6 +535,11 @@ public class MiniAppServer {
 
     private Map<String, Object> getChartData(String coinId, String interval) {
         try {
+            // Try Binance first (returns OHLCV with volume data)
+            Map<String, Object> binanceResult = getChartDataFromBinance(coinId, interval);
+            if (binanceResult != null) return binanceResult;
+
+            // Fallback to CoinGecko
             Coin coin = CoinsList.getCoin(coinId);
             if (coin == null) return errorMap("Монета не найдена: " + coinId);
             int days;
@@ -555,6 +560,60 @@ public class MiniAppServer {
         } catch (Exception e) {
             log.error("Chart data error for {}: {}", coinId, e.getMessage());
             return errorMap("Ошибка получения данных: " + e.getMessage());
+        }
+    }
+
+    /** Fetch chart data from Binance with volume. Returns null if symbol not found. */
+    private Map<String, Object> getChartDataFromBinance(String coinId, String interval) {
+        try {
+            ExchangeProvider binance = ExchangeRegistry.get("binance");
+            if (binance == null) return null;
+
+            // Resolve symbol: coinId might be "bitcoin" or "BTC"
+            String symbol = coinId.toUpperCase();
+            // Try to resolve from CoinsList if it looks like a name
+            Coin coin = CoinsList.getCoin(coinId);
+            if (coin != null && coin.getSymbol() != null) {
+                symbol = coin.getSymbol().toUpperCase();
+            }
+
+            // Map UI interval to Binance kline interval + limit
+            String klineInterval;
+            int limit;
+            switch (interval) {
+                case "1d":  klineInterval = "5m";  limit = 288;  break; // 5min * 288 = 24h
+                case "7d":  klineInterval = "30m"; limit = 336;  break; // 30min * 336 = 7d
+                case "30d": klineInterval = "2h";  limit = 360;  break; // 2h * 360 = 30d
+                case "90d": klineInterval = "4h";  limit = 540;  break; // 4h * 540 = 90d
+                case "1y":  klineInterval = "1d";  limit = 365;  break; // 1d * 365 = 1y
+                default:    klineInterval = "5m";  limit = 288;  break;
+            }
+
+            List<double[]> klines = binance.getKlineData(symbol, klineInterval, limit);
+            if (klines == null || klines.isEmpty()) return null;
+
+            // Build response: data = [timestamp, close], volumes = [timestamp, volume]
+            List<double[]> priceData = new ArrayList<>();
+            List<double[]> volumeData = new ArrayList<>();
+            for (double[] k : klines) {
+                // k = [time, open, high, low, close, volume]
+                priceData.add(new double[]{k[0], k[4]});  // timestamp, close
+                if (k.length > 5) {
+                    volumeData.add(new double[]{k[0], k[5]});  // timestamp, volume
+                }
+            }
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("coinId", coinId);
+            result.put("coinName", coin != null ? coin.getName() : coinId);
+            result.put("interval", interval);
+            result.put("data", priceData);
+            result.put("volumes", volumeData);
+            result.put("source", "binance");
+            return result;
+        } catch (Exception e) {
+            log.debug("Binance chart fallback for {}: {}", coinId, e.getMessage());
+            return null;
         }
     }
 

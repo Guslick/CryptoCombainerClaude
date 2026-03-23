@@ -187,7 +187,8 @@ public class BinanceProvider implements ExchangeProvider {
             double high = Double.parseDouble(candle.get(2).toString());
             double low = Double.parseDouble(candle.get(3).toString());
             double close = Double.parseDouble(candle.get(4).toString());
-            result.add(new double[]{time, open, high, low, close});
+            double volume = Double.parseDouble(candle.get(5).toString());
+            result.add(new double[]{time, open, high, low, close, volume});
         }
         return result;
     }

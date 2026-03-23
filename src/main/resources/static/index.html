@@ -89,10 +89,14 @@
   .btn-row{display:flex;gap:8px}
   .btn-row .btn{flex:1}
 
-  #chartContainer{width:100%;height:260px;background:var(--bg3);border-radius:var(--radius-sm);overflow:hidden;position:relative}
+  #chartContainer{width:100%;height:320px;background:var(--bg3);border-radius:var(--radius-sm);overflow:hidden;position:relative}
   .chart-toolbar{display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap}
   .interval-btn{padding:4px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--muted);font-family:var(--font-head);font-size:10px;cursor:pointer;transition:all 0.2s}
   .interval-btn.active{background:rgba(0,229,255,0.15);border-color:var(--accent);color:var(--accent)}
+  .indicator-btn{padding:4px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--muted);font-family:var(--font-head);font-size:10px;cursor:pointer;transition:all 0.2s;margin-left:2px}
+  .indicator-btn.active{border-color:var(--accent);color:var(--accent)}
+  .indicator-btn.ema-active{background:rgba(255,167,38,0.15);border-color:#FFA726;color:#FFA726}
+  .indicator-btn.vol-active{background:rgba(38,198,218,0.15);border-color:#26C6DA;color:#26C6DA}
   .chart-coin-label{font-family:var(--font-head);font-size:12px;font-weight:700;color:var(--muted);margin-left:auto}
   .chart-price-display{font-family:var(--font-head);font-size:16px;font-weight:900;color:var(--accent);letter-spacing:0.5px}
 
@@ -300,12 +304,15 @@
                    value="Bitcoin" oninput="handleChartSearch(this.value)" onfocus="handleChartSearch(this.value)" onblur="scheduleHide('chartSuggestions')">
             <div class="coin-suggestions" id="chartSuggestions"></div>
           </div>
-          <div style="display:flex;gap:4px;flex-wrap:wrap;">
+          <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;">
             <button class="interval-btn active" onclick="setChartInterval('1d')" data-int="1d">1Д</button>
             <button class="interval-btn" onclick="setChartInterval('7d')" data-int="7d">7Д</button>
             <button class="interval-btn" onclick="setChartInterval('30d')" data-int="30d">30Д</button>
             <button class="interval-btn" onclick="setChartInterval('90d')" data-int="90d">3М</button>
             <button class="interval-btn" onclick="setChartInterval('1y')" data-int="1y">1Г</button>
+            <span style="width:1px;height:16px;background:var(--border);margin:0 2px;"></span>
+            <button class="indicator-btn" id="btnEma" onclick="toggleEma()">EMA</button>
+            <button class="indicator-btn" id="btnVol" onclick="toggleVolume()">VOL</button>
           </div>
         </div>
         <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px;gap:10px;">
@@ -1271,11 +1278,16 @@ function goToTradeForCoin() { document.getElementById('tradeCoinInput').value = 
 // ============================================================
 // MAIN CHART
 // ============================================================
+let emaSeries = null, volumeSeries = null;
+let _emaVisible = false, _volVisible = false;
+let _lastChartVolumes = null; // cached volume data from last API call
+let _lastChartPrices = null;  // cached price data for EMA recalc
+
 function initChart() {
   if (chart) return;
   const container = document.getElementById('chartContainer');
   chart = LightweightCharts.createChart(container, {
-    width: container.clientWidth, height: 260,
+    width: container.clientWidth, height: 320,
     layout: { background:{type:'solid',color:'#151c38'}, textColor:'#6878a8' },
     grid: { vertLines:{color:'rgba(42,53,96,0.5)'}, horzLines:{color:'rgba(42,53,96,0.5)'} },
     crosshair: { mode:LightweightCharts.CrosshairMode.Normal, vertLine:{color:'#00e5ff',labelBackgroundColor:'#1a2240'}, horzLine:{color:'#00e5ff',labelBackgroundColor:'#1a2240'} },
@@ -1294,6 +1306,84 @@ function initChart() {
   loadChartData(currentCoin.id, currentInterval);
 }
 
+function calcEma(data, period) {
+  if (!data || data.length < period) return [];
+  const k = 2 / (period + 1);
+  const result = [];
+  // SMA for first 'period' points
+  let sum = 0;
+  for (let i = 0; i < period; i++) sum += data[i].value;
+  let ema = sum / period;
+  result.push({ time: data[period - 1].time, value: ema });
+  for (let i = period; i < data.length; i++) {
+    ema = data[i].value * k + ema * (1 - k);
+    result.push({ time: data[i].time, value: ema });
+  }
+  return result;
+}
+
+function toggleEma() {
+  _emaVisible = !_emaVisible;
+  const btn = document.getElementById('btnEma');
+  btn.classList.toggle('ema-active', _emaVisible);
+  if (_emaVisible && _lastChartPrices) {
+    if (!emaSeries) {
+      emaSeries = chart.addLineSeries({
+        color: '#FFA726', lineWidth: 1, crosshairMarkerVisible: false,
+        lastValueVisible: false, priceLineVisible: false,
+        priceFormat: { type: 'price', precision: 4, minMove: 0.0001 },
+      });
+    }
+    emaSeries.setData(calcEma(_lastChartPrices, 50));
+  } else if (emaSeries) {
+    emaSeries.setData([]);
+  }
+}
+
+function toggleVolume() {
+  _volVisible = !_volVisible;
+  const btn = document.getElementById('btnVol');
+  btn.classList.toggle('vol-active', _volVisible);
+  if (_volVisible && _lastChartVolumes) {
+    if (!volumeSeries) {
+      volumeSeries = chart.addHistogramSeries({
+        priceFormat: { type: 'volume' },
+        priceScaleId: 'vol',
+        lastValueVisible: false,
+        priceLineVisible: false,
+      });
+      chart.priceScale('vol').applyOptions({
+        scaleMargins: { top: 0.82, bottom: 0 },
+        drawTicks: false,
+        borderVisible: false,
+      });
+    }
+    volumeSeries.setData(_lastChartVolumes);
+  } else if (volumeSeries) {
+    volumeSeries.setData([]);
+  }
+}
+
+function dedupeVolumeData(rawVolumes, priceData) {
+  if (!rawVolumes || !rawVolumes.length) return [];
+  const seen = new Set();
+  const sorted = rawVolumes.map(v => ({ time: Math.floor(v[0] / 1000), value: v[1] }))
+    .filter(v => v.value >= 0).sort((a, b) => a.time - b.time)
+    .filter(v => { if (seen.has(v.time)) return false; seen.add(v.time); return true; });
+  // Color bars: green if price went up, red if down
+  if (priceData && priceData.length > 1) {
+    const priceMap = new Map(priceData.map(p => [p.time, p.value]));
+    let prevPrice = priceData[0].value;
+    return sorted.map(v => {
+      const curPrice = priceMap.get(v.time) || prevPrice;
+      const color = curPrice >= prevPrice ? 'rgba(0,230,118,0.4)' : 'rgba(255,23,68,0.4)';
+      prevPrice = curPrice;
+      return { time: v.time, value: v.value, color };
+    });
+  }
+  return sorted.map(v => ({ ...v, color: 'rgba(0,229,255,0.3)' }));
+}
+
 async function loadChartData(coinId, interval) {
   if (!chart) return;
   document.getElementById('chartCoinLabel').textContent = currentCoin.name || coinId;
@@ -1303,7 +1393,25 @@ async function loadChartData(coinId, interval) {
     const json = await r.json();
     if (json.error) throw new Error(json.error);
     const unique = dedupeChartData(json.data||[]);
+    _lastChartPrices = unique;
+
     lineSeries.setData(unique);
+
+    // Handle volume data (from Binance)
+    _lastChartVolumes = dedupeVolumeData(json.volumes, unique);
+    if (_volVisible && volumeSeries && _lastChartVolumes.length) {
+      volumeSeries.setData(_lastChartVolumes);
+    } else if (volumeSeries) {
+      volumeSeries.setData([]);
+    }
+
+    // Handle EMA
+    if (_emaVisible && emaSeries) {
+      emaSeries.setData(calcEma(unique, 50));
+    } else if (emaSeries) {
+      emaSeries.setData([]);
+    }
+
     chart.timeScale().fitContent();
     if (unique.length > 1) {
       showChartStats(unique);
@@ -2680,43 +2788,56 @@ function applyChartPriceLines(lineSeries, linesArr, live) {
   }
 }
 
-/** Ensure all price lines and markers are visible by adding invisible anchor series */
+/** Ensure all price lines and markers are visible on the small chart.
+ *  Uses anchor series to extend visible range AND adjusts scale margins
+ *  so that data lines are not bunched in the center when targets are far. */
 function ensurePriceLinesVisible(chart, entry, data, live) {
   if (!data || !data.length || !live) return;
-  // Collect target prices to include
   const targets = [];
   if (live.maxPrice) targets.push(live.maxPrice);
   if (live.buyTargetPrice) targets.push(live.buyTargetPrice);
   if (live.sellProfitPrice) targets.push(live.sellProfitPrice);
   if (live.sellLossPrice) targets.push(live.sellLossPrice);
-  if (!targets.length) return;
+  if (live.boughtAtPrice) targets.push(live.boughtAtPrice);
 
   // Find data range
-  let minVal = Infinity, maxVal = -Infinity;
+  let dataMin = Infinity, dataMax = -Infinity;
   for (const d of data) {
-    if (d.value < minVal) minVal = d.value;
-    if (d.value > maxVal) maxVal = d.value;
+    if (d.value < dataMin) dataMin = d.value;
+    if (d.value > dataMax) dataMax = d.value;
   }
-  // Check if any targets are outside data range
-  const needsAnchor = targets.some(t => t < minVal || t > maxVal);
-  if (!needsAnchor) return;
 
-  // Create invisible anchor series with points at target prices
+  // Combined range: data + targets
+  const allVals = [...targets, dataMin, dataMax].filter(v => v > 0 && isFinite(v));
+  if (!allVals.length) return;
+  const totalMin = Math.min(...allVals);
+  const totalMax = Math.max(...allVals);
+  const totalRange = totalMax - totalMin;
+  if (totalRange <= 0) return;
+
+  // Add 5% padding above and below the combined range
+  const padded = totalRange * 0.05;
+  const viewMin = totalMin - padded;
+  const viewMax = totalMax + padded;
+
+  // Always create anchor series to force the chart to show full range
   if (entry._anchorSeries) { try { chart.removeSeries(entry._anchorSeries); } catch(e){} }
   entry._anchorSeries = chart.addLineSeries({
     color: 'transparent', lineWidth: 0, lineVisible: false,
     lastValueVisible: false, priceLineVisible: false,
     crosshairMarkerVisible: false,
   });
+  const firstTime = data[0].time;
   const lastTime = data[data.length - 1].time;
-  const anchorData = targets.map(t => ({ time: lastTime, value: t }));
-  // Deduplicate by picking min/max only
-  const allTargetsMin = Math.min(...targets);
-  const allTargetsMax = Math.max(...targets);
   entry._anchorSeries.setData([
-    { time: lastTime, value: allTargetsMin },
-    ...(allTargetsMin !== allTargetsMax ? [{ time: lastTime + 1, value: allTargetsMax }] : []),
+    { time: firstTime, value: viewMin },
+    { time: lastTime,  value: viewMax },
   ]);
+
+  // Adjust scale margins to keep lines evenly distributed (not bunched)
+  chart.applyOptions({
+    rightPriceScale: { scaleMargins: { top: 0.05, bottom: 0.05 } }
+  });
 }
 
 /** Apply BUY/SELL markers.

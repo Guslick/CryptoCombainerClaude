@@ -79,6 +79,25 @@ public class TradingState {
     @JsonProperty("walletAssets")
     private TreeMap<String, Double> walletAssets;
 
+    // Trade statistics — persisted for restore after restart
+    @JsonProperty("winCount")
+    private int winCount;
+
+    @JsonProperty("lossCount")
+    private int lossCount;
+
+    @JsonProperty("totalProfit")
+    private double totalProfit;
+
+    @JsonProperty("totalLoss")
+    private double totalLoss;
+
+    @JsonProperty("totalCommission")
+    private double totalCommission;
+
+    @JsonProperty("startBalance")
+    private double startBalance;
+
     public TradingState() {
         this.timestamp = System.currentTimeMillis();
         this.priceHistory = new TreeMap<>();
@@ -166,6 +185,19 @@ public class TradingState {
     public void setAccountType(String v) { this.accountType = v; }
     public TreeMap<String, Double> getWalletAssets() { return walletAssets; }
     public void setWalletAssets(TreeMap<String, Double> v) { this.walletAssets = v; }
+
+    public int getWinCount() { return winCount; }
+    public void setWinCount(int v) { this.winCount = v; }
+    public int getLossCount() { return lossCount; }
+    public void setLossCount(int v) { this.lossCount = v; }
+    public double getTotalProfit() { return totalProfit; }
+    public void setTotalProfit(double v) { this.totalProfit = v; }
+    public double getTotalLoss() { return totalLoss; }
+    public void setTotalLoss(double v) { this.totalLoss = v; }
+    public double getTotalCommission() { return totalCommission; }
+    public void setTotalCommission(double v) { this.totalCommission = v; }
+    public double getStartBalance() { return startBalance; }
+    public void setStartBalance(double v) { this.startBalance = v; }
 
     @Override
     public String toString() {
