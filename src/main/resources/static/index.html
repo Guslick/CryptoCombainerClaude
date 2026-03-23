@@ -1989,18 +1989,23 @@ function showOptimizeResult(results) {
     const pct = r.profitPercent || 0;
     const pctAfter = r.profitPercentAfterCommission != null ? r.profitPercentAfterCommission : pct;
     const commission = r.totalCommission || 0;
-    const pos = profitAfter >= 0;
+    const pos = profit >= 0;
+    const posAfter = profitAfter >= 0;
     const profTrades = r.profitTradeCount || 0;
     const lossTrades = r.lossTradeCount || 0;
     const hasTrades = r.tradeEvents && r.tradeEvents.length > 0;
     const hasEquity = r.equityCurve && r.equityCurve.length > 1;
     html += `<div style="background:var(--bg3);border-radius:var(--radius-sm);padding:10px 12px;border:1px solid var(--border);margin-bottom:8px">
       ${r.earlyTermination ? `<div style="font-size:10px;color:var(--red);margin-bottom:4px">⛔ Досрочное завершение (баланс исчерпан)</div>` : ''}
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">
         <span style="font-family:var(--font-head);font-size:13px;color:${pos?'var(--green)':'var(--red)'};min-width:28px">#${i+1}</span>
-        <span style="font-family:var(--font-head);font-size:15px;font-weight:700;color:${pos?'var(--green)':'var(--red)'}">${pos?'+':''}${profitAfter.toFixed(2)} USD</span>
-        <span style="font-size:11px;color:var(--muted);margin-left:auto">${pos?'+':''}${pctAfter.toFixed(2)}%</span>
+        <span style="font-family:var(--font-head);font-size:15px;font-weight:700;color:${pos?'var(--green)':'var(--red)'}">${pos?'+':''}${profit.toFixed(2)} USD</span>
+        <span style="font-size:11px;color:var(--muted);margin-left:auto">${pos?'+':''}${pct.toFixed(2)}%</span>
       </div>
+      ${commission > 0 ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;padding-left:36px">
+        <span style="font-size:12px;color:${posAfter?'var(--green)':'var(--red)'}">С комиссией: ${posAfter?'+':''}${profitAfter.toFixed(2)} USD</span>
+        <span style="font-size:11px;color:var(--muted);margin-left:auto">${posAfter?'+':''}${pctAfter.toFixed(2)}%</span>
+      </div>` : ''}
       <div style="font-size:11px;color:var(--muted);line-height:1.7">
         📥 Покупка: <b style="color:var(--text)">${r.buyGap}%</b> &nbsp;
         📈 Продажа+: <b style="color:var(--green)">${r.sellWithProfitGap}%</b> &nbsp;
