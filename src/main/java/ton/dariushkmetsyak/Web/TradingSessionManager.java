@@ -287,13 +287,28 @@ public class TradingSessionManager {
 
     // ── Session guards ────────────────────────────────────────────────────────
 
-    /** Only this user's sessions count toward the limit */
+    /** Check if any session is currently running (any type). */
     public boolean hasActiveSession() {
         return sessions.values().stream().anyMatch(s -> "RUNNING".equals(s.status));
     }
 
-    private Map<String, Object> tooManySessionsError() {
-        return Map.of("error", "Уже есть активная сессия. Остановите её перед запуском новой.");
+    /** Check if a session of the given type is already running.
+     *  Allows one running session per type simultaneously. */
+    public boolean hasActiveSessionOfType(SessionType type) {
+        return sessions.values().stream()
+                .anyMatch(s -> s.type == type && "RUNNING".equals(s.status));
+    }
+
+    private Map<String, Object> tooManySessionsError(SessionType type) {
+        String typeName;
+        switch (type) {
+            case TESTER:       typeName = "Тестовая торговля"; break;
+            case BINANCE_TEST: typeName = "Binance Testnet"; break;
+            case BINANCE_REAL: typeName = "Binance Real"; break;
+            case BACKTEST:     typeName = "Бэктест/Исследование"; break;
+            default:           typeName = type.name(); break;
+        }
+        return Map.of("error", "Уже есть активная сессия типа «" + typeName + "». Остановите её перед запуском новой.");
     }
 
     // ── Persistence ───────────────────────────────────────────────────────────
@@ -396,9 +411,9 @@ public class TradingSessionManager {
             .filter(s -> !"RUNNING".equals(s.status))  // never resume already-running
             .filter(s -> s.thread == null || !s.thread.isAlive())  // never resume if thread alive
             .forEach(s -> {
-                // Extra guard: don't resume if another session is already active
-                if (hasActiveSession()) {
-                    log.info("Skipping auto-resume of session {} — another session already active", s.id);
+                // Extra guard: don't resume if another session of same type is already active
+                if (hasActiveSessionOfType(s.type)) {
+                    log.info("Skipping auto-resume of session {} — another {} session already active", s.id, s.type);
                     return;
                 }
 
@@ -532,7 +547,7 @@ public class TradingSessionManager {
 
     public Object startTesterTrading(String coinName, double startAssets, double tradingSum,
             double buyGap, double spg, double slg, int timeout, int chartRefresh, long chatId, boolean recapitalize) {
-        if (hasActiveSession()) return tooManySessionsError();
+        if (hasActiveSessionOfType(SessionType.TESTER)) return tooManySessionsError(SessionType.TESTER);
         String id = "tester_" + System.currentTimeMillis();
         Map<String, Object> params = buildParams(tradingSum, buyGap, spg, slg, timeout, chartRefresh);
         params.put("startAssets", startAssets);
@@ -540,6 +555,25 @@ public class TradingSessionManager {
         SessionInfo info = new SessionInfo(id, SessionType.TESTER, coinName, params, userId);
         String stratLabel = recapitalize ? " [РЕКАП]" : "";
         info.addEvent("START", "Сессия запущена" + stratLabel + ": " + coinName);
+        info.startUsdtBalance = startAssets;
+        sessions.put(id, info);
+        launchTesterThread(info, startAssets, tradingSum, buyGap, spg, slg, timeout, null, chatId, recapitalize);
+        saveSessions();
+        return info;
+    }
+
+    // ── Start Research (same logic as Tester, separate type for concurrent sessions) ──
+
+    public Object startResearchTrading(String coinName, double startAssets, double tradingSum,
+            double buyGap, double spg, double slg, int timeout, int chartRefresh, long chatId, boolean recapitalize) {
+        if (hasActiveSessionOfType(SessionType.RESEARCH)) return tooManySessionsError(SessionType.RESEARCH);
+        String id = "research_" + System.currentTimeMillis();
+        Map<String, Object> params = buildParams(tradingSum, buyGap, spg, slg, timeout, chartRefresh);
+        params.put("startAssets", startAssets);
+        if (recapitalize) params.put("recapitalize", true);
+        SessionInfo info = new SessionInfo(id, SessionType.RESEARCH, coinName, params, userId);
+        String stratLabel = recapitalize ? " [РЕКАП]" : "";
+        info.addEvent("START", "Исследование запущено" + stratLabel + ": " + coinName);
         info.startUsdtBalance = startAssets;
         sessions.put(id, info);
         launchTesterThread(info, startAssets, tradingSum, buyGap, spg, slg, timeout, null, chatId, recapitalize);
@@ -607,7 +641,7 @@ public class TradingSessionManager {
     public Object startBinanceTrading(String coinName, double tradingSum, double buyGap,
             double spg, double slg, int timeout, int chartRefresh,
             long chatId, UserProfileManager.UserProfile profile, boolean recapitalize) {
-        if (hasActiveSession()) return tooManySessionsError();
+        if (hasActiveSessionOfType(SessionType.BINANCE_REAL)) return tooManySessionsError(SessionType.BINANCE_REAL);
         String id = "binance_" + System.currentTimeMillis();
         Map<String, Object> params = buildParams(tradingSum, buyGap, spg, slg, timeout, chartRefresh);
         if (recapitalize) params.put("recapitalize", true);
@@ -629,7 +663,7 @@ public class TradingSessionManager {
     public Object startBinanceTestTrading(String coinName, double tradingSum, double buyGap,
             double spg, double slg, int timeout, int chartRefresh,
             long chatId, UserProfileManager.UserProfile profile, boolean recapitalize) {
-        if (hasActiveSession()) return tooManySessionsError();
+        if (hasActiveSessionOfType(SessionType.BINANCE_TEST)) return tooManySessionsError(SessionType.BINANCE_TEST);
         String id = "binance_test_" + System.currentTimeMillis();
         Map<String, Object> params = buildParams(tradingSum, buyGap, spg, slg, timeout, chartRefresh);
         if (recapitalize) params.put("recapitalize", true);
@@ -691,7 +725,7 @@ public class TradingSessionManager {
         SessionInfo info = sessions.get(sessionId);
         if (info == null) return Map.of("error", "Сессия не найдена");
         if ("RUNNING".equals(info.status)) return Map.of("error", "Сессия уже запущена");
-        if (hasActiveSession()) return Map.of("error", "Уже есть активная сессия");
+        if (hasActiveSessionOfType(info.type)) return Map.of("error", "Уже есть активная сессия этого типа");
         if (info.type == SessionType.BACKTEST) return Map.of("error", "Бэктест нельзя возобновить");
 
         // Kill old thread if still alive (e.g. stop+resume in quick succession)
@@ -723,6 +757,7 @@ public class TradingSessionManager {
 
         switch (info.type) {
             case TESTER:
+            case RESEARCH:
                 launchTesterThread(info, toDouble(p.getOrDefault("startAssets", 150.0)),
                         tradingSum, buyGap, spg, slg, timeout, savedState, chatId, recapitalize);
                 break;

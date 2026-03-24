@@ -658,6 +658,10 @@ public class MiniAppServer {
                 result = mgr.startBinanceTestTrading(coinName, tradingSum, buyGap, spg, slg,
                         timeout, chartRefresh, chatId, profile, recapitalize);
                 break;
+            case "research":
+                result = mgr.startResearchTrading(coinName, startAssets, tradingSum, buyGap, spg, slg,
+                        timeout, chartRefresh, chatId, recapitalize);
+                break;
             default:
                 result = mgr.startTesterTrading(coinName, startAssets, tradingSum, buyGap, spg, slg,
                         timeout, chartRefresh, chatId, recapitalize);

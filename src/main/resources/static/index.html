@@ -617,12 +617,12 @@
           </div>
           <div class="input-wrap">
             <label class="input-label">КОЛИЧЕСТВО ТОП</label>
-            <input type="number" id="optTopN" value="10" min="1" max="20">
+            <input type="number" id="optTopN" value="10" min="1" max="20" oninput="saveField('optTopN')">
           </div>
           <div class="input-wrap form-full">
             <label class="input-label">БИРЖА / КОМИССИЯ</label>
             <div style="display:flex;gap:8px;align-items:center">
-              <select id="optExchange" oninput="updateOptCommission()" style="flex:1">
+              <select id="optExchange" oninput="updateOptCommission();saveField('optExchange')" style="flex:1">
                 <option value="Binance">Binance</option>
               </select>
               <span style="font-size:11px;color:var(--muted);white-space:nowrap">Комиссия:</span>
@@ -632,25 +632,25 @@
           <div class="form-full" style="margin-top:4px;padding-top:8px;border-top:1px solid var(--border)">
             <div style="font-family:var(--font-head);font-size:10px;color:var(--accent);margin-bottom:8px">📥 ДИАПАЗОН ПОКУПКИ (%)</div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
-              <div class="input-wrap"><label class="input-label">МИН</label><input type="number" id="optBuyMin" value="1" min="0.1" step="0.1" oninput="updateCombinationsCount()"></div>
-              <div class="input-wrap"><label class="input-label">МАКС</label><input type="number" id="optBuyMax" value="10" min="0.1" step="0.1" oninput="updateCombinationsCount()"></div>
-              <div class="input-wrap"><label class="input-label">ШАГ</label><input type="number" id="optBuyStep" value="1" min="0.1" step="0.1" oninput="updateCombinationsCount()"></div>
+              <div class="input-wrap"><label class="input-label">МИН</label><input type="number" id="optBuyMin" value="1" min="0.1" step="0.1" oninput="updateCombinationsCount();saveField('optBuyMin')"></div>
+              <div class="input-wrap"><label class="input-label">МАКС</label><input type="number" id="optBuyMax" value="10" min="0.1" step="0.1" oninput="updateCombinationsCount();saveField('optBuyMax')"></div>
+              <div class="input-wrap"><label class="input-label">ШАГ</label><input type="number" id="optBuyStep" value="1" min="0.1" step="0.1" oninput="updateCombinationsCount();saveField('optBuyStep')"></div>
             </div>
           </div>
           <div class="form-full" style="margin-top:4px">
             <div style="font-family:var(--font-head);font-size:10px;color:var(--green);margin-bottom:8px">📈 ДИАПАЗОН ПРОДАЖИ + (%)</div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
-              <div class="input-wrap"><label class="input-label">МИН</label><input type="number" id="optProfitMin" value="1" min="0.1" step="0.1" oninput="updateCombinationsCount()"></div>
-              <div class="input-wrap"><label class="input-label">МАКС</label><input type="number" id="optProfitMax" value="5" min="0.1" step="0.1" oninput="updateCombinationsCount()"></div>
-              <div class="input-wrap"><label class="input-label">ШАГ</label><input type="number" id="optProfitStep" value="0.5" min="0.1" step="0.1" oninput="updateCombinationsCount()"></div>
+              <div class="input-wrap"><label class="input-label">МИН</label><input type="number" id="optProfitMin" value="1" min="0.1" step="0.1" oninput="updateCombinationsCount();saveField('optProfitMin')"></div>
+              <div class="input-wrap"><label class="input-label">МАКС</label><input type="number" id="optProfitMax" value="5" min="0.1" step="0.1" oninput="updateCombinationsCount();saveField('optProfitMax')"></div>
+              <div class="input-wrap"><label class="input-label">ШАГ</label><input type="number" id="optProfitStep" value="0.5" min="0.1" step="0.1" oninput="updateCombinationsCount();saveField('optProfitStep')"></div>
             </div>
           </div>
           <div class="form-full" style="margin-top:4px">
             <div style="font-family:var(--font-head);font-size:10px;color:var(--red);margin-bottom:8px">📉 ДИАПАЗОН ПРОДАЖИ - (%)</div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
-              <div class="input-wrap"><label class="input-label">МИН</label><input type="number" id="optLossMin" value="3" min="0.1" step="0.1" oninput="updateCombinationsCount()"></div>
-              <div class="input-wrap"><label class="input-label">МАКС</label><input type="number" id="optLossMax" value="15" min="0.1" step="0.1" oninput="updateCombinationsCount()"></div>
-              <div class="input-wrap"><label class="input-label">ШАГ</label><input type="number" id="optLossStep" value="1" min="0.1" step="0.1" oninput="updateCombinationsCount()"></div>
+              <div class="input-wrap"><label class="input-label">МИН</label><input type="number" id="optLossMin" value="3" min="0.1" step="0.1" oninput="updateCombinationsCount();saveField('optLossMin')"></div>
+              <div class="input-wrap"><label class="input-label">МАКС</label><input type="number" id="optLossMax" value="15" min="0.1" step="0.1" oninput="updateCombinationsCount();saveField('optLossMax')"></div>
+              <div class="input-wrap"><label class="input-label">ШАГ</label><input type="number" id="optLossStep" value="1" min="0.1" step="0.1" oninput="updateCombinationsCount();saveField('optLossStep')"></div>
             </div>
           </div>
           <div class="form-full" style="margin-top:6px">
@@ -824,7 +824,11 @@
 <div id="chartFullscreen">
   <div id="chartFullscreen-header">
     <span id="chartFullscreen-title">ГРАФИК</span>
-    <button class="drawer-close" onclick="closeFullscreenChart()">✕ СВЕРНУТЬ</button>
+    <div style="display:flex;gap:4px;align-items:center;">
+      <button class="indicator-btn" id="fsBtnEma" onclick="toggleFsEma()">EMA</button>
+      <button class="indicator-btn" id="fsBtnVol" onclick="toggleFsVolume()">VOL</button>
+      <button class="drawer-close" onclick="closeFullscreenChart()">✕ СВЕРНУТЬ</button>
+    </div>
   </div>
   <div id="chartFullscreen-container"></div>
 </div>
@@ -866,7 +870,10 @@ const PERSIST_FIELDS = [
   'tradeSellProfit','tradeSellLoss','tradeTimeout','tradeChartRefresh',
   'resCoinInput','resStartAssets','resTradingSum','resBuyGap','resSellProfit',
   'resSellLoss','resTimeout','resChartRefresh',
-  'btCoinInput','btChartType','btTradingSum','btBuyGap','btSellProfit','btSellLoss'
+  'btCoinInput','btChartType','btTradingSum','btBuyGap','btSellProfit','btSellLoss','btExchange',
+  'optCoinInput','optChartType','optTradingSum','optTopN','optExchange',
+  'optBuyMin','optBuyMax','optBuyStep','optProfitMin','optProfitMax','optProfitStep',
+  'optLossMin','optLossMax','optLossStep',
 ];
 
 function saveField(id) {
@@ -1074,6 +1081,7 @@ function goToStrategyTab(tabId) {
 
 function selectStrategy(strategyId) {
   _selectedStrategy = strategyId;
+  try { localStorage.setItem('cc_strategy', strategyId); } catch(e) {}
   document.getElementById('strategySelector').style.display = 'none';
   document.getElementById('strategyWorkspace').style.display = 'block';
   const titles = { reversal: '📐 Разворотные точки', reversal_recap: '📐💹 Разворотные точки + Рекап' };
@@ -1500,7 +1508,7 @@ async function startResearch() {
   const coin = document.getElementById('resCoinInput').value.trim();
   if (!coin) { showAlert('resAlert','error','⚠️ Введите название монеты!'); return; }
   const body = {
-    type:'tester', coin,
+    type:'research', coin,
     strategy: _selectedStrategy || 'reversal',
     startAssets: +document.getElementById('resStartAssets').value||150,
     tradingSum: +document.getElementById('resTradingSum').value||100,
@@ -2918,6 +2926,45 @@ function applyChartMarkers(lineSeries, data, events, inlineMode = false) {
 // FULLSCREEN INLINE CHART
 // ============================================================
 let _fsChart = null, _fsLine = null, _fsSessionId = null;
+let _fsEmaSeries = null, _fsVolSeries = null;
+let _fsEmaVisible = false, _fsVolVisible = false;
+let _fsPriceData = null, _fsVolumeData = null;
+
+function toggleFsEma() {
+  _fsEmaVisible = !_fsEmaVisible;
+  document.getElementById('fsBtnEma').classList.toggle('ema-active', _fsEmaVisible);
+  if (_fsEmaVisible && _fsPriceData && _fsChart) {
+    if (!_fsEmaSeries) {
+      _fsEmaSeries = _fsChart.addLineSeries({
+        color: '#FFA726', lineWidth: 1, crosshairMarkerVisible: false,
+        lastValueVisible: false, priceLineVisible: false,
+        priceFormat: { type: 'price', precision: 4, minMove: 0.0001 },
+      });
+    }
+    _fsEmaSeries.setData(calcEma(_fsPriceData, 50));
+  } else if (_fsEmaSeries) {
+    _fsEmaSeries.setData([]);
+  }
+}
+
+function toggleFsVolume() {
+  _fsVolVisible = !_fsVolVisible;
+  document.getElementById('fsBtnVol').classList.toggle('vol-active', _fsVolVisible);
+  if (_fsVolVisible && _fsVolumeData && _fsChart) {
+    if (!_fsVolSeries) {
+      _fsVolSeries = _fsChart.addHistogramSeries({
+        priceFormat: { type: 'volume' }, priceScaleId: 'fsvol',
+        lastValueVisible: false, priceLineVisible: false,
+      });
+      _fsChart.priceScale('fsvol').applyOptions({
+        scaleMargins: { top: 0.82, bottom: 0 }, drawTicks: false, borderVisible: false,
+      });
+    }
+    _fsVolSeries.setData(_fsVolumeData);
+  } else if (_fsVolSeries) {
+    _fsVolSeries.setData([]);
+  }
+}
 
 function openFullscreenChart(sessionId, coinName) {
   _fsSessionId = sessionId;
@@ -2928,6 +2975,11 @@ function openFullscreenChart(sessionId, coinName) {
 
   // Destroy old
   if (_fsChart) { try { _fsChart.remove(); } catch(e) {} _fsChart = null; _fsLine = null; }
+  _fsEmaSeries = null; _fsVolSeries = null; _fsPriceData = null; _fsVolumeData = null;
+
+  // Reset button state
+  document.getElementById('fsBtnEma').classList.toggle('ema-active', _fsEmaVisible);
+  document.getElementById('fsBtnVol').classList.toggle('vol-active', _fsVolVisible);
 
   requestAnimationFrame(() => {
     _fsChart = LightweightCharts.createChart(container, {
@@ -2962,6 +3014,10 @@ async function loadInlineChartDataInto(sess, lineSeries, chart) {
     if (json.error || !json.data) return;
     const data = dedupeChartData(json.data);
 
+    // Cache for EMA/Volume toggles
+    _fsPriceData = data;
+    _fsVolumeData = dedupeVolumeData(json.volumes, data);
+
     // Clean up old dim series before rebuilding
     if (_fsBefore) { try { chart.removeSeries(_fsBefore); } catch(e){} _fsBefore = null; }
     if (_fsAfter)  { try { chart.removeSeries(_fsAfter);  } catch(e){} _fsAfter  = null; }
@@ -2985,6 +3041,33 @@ async function loadInlineChartDataInto(sess, lineSeries, chart) {
     applyChartPriceLines(lineSeries, lines, live);
     applyChartMarkers(lineSeries, data, (live || sess).events || []);
     ensurePriceLinesVisible(chart, fsEntry, data, live);
+
+    // Apply EMA if toggled on
+    if (_fsEmaVisible && data.length) {
+      if (!_fsEmaSeries) {
+        _fsEmaSeries = chart.addLineSeries({
+          color: '#FFA726', lineWidth: 1, crosshairMarkerVisible: false,
+          lastValueVisible: false, priceLineVisible: false,
+          priceFormat: { type: 'price', precision: 4, minMove: 0.0001 },
+        });
+      }
+      _fsEmaSeries.setData(calcEma(data, 50));
+    }
+
+    // Apply Volume if toggled on
+    if (_fsVolVisible && _fsVolumeData.length) {
+      if (!_fsVolSeries) {
+        _fsVolSeries = chart.addHistogramSeries({
+          priceFormat: { type: 'volume' }, priceScaleId: 'fsvol',
+          lastValueVisible: false, priceLineVisible: false,
+        });
+        chart.priceScale('fsvol').applyOptions({
+          scaleMargins: { top: 0.82, bottom: 0 }, drawTicks: false, borderVisible: false,
+        });
+      }
+      _fsVolSeries.setData(_fsVolumeData);
+    }
+
     chart.timeScale().fitContent();
   } catch(e) { console.error('FS chart error', e); }
 }
@@ -2993,6 +3076,7 @@ function closeFullscreenChart() {
   document.getElementById('chartFullscreen').classList.remove('open');
   if (_fsChart) { try { _fsChart.remove(); } catch(e) {} _fsChart = null; _fsLine = null; }
   _fsBefore = null; _fsAfter = null;
+  _fsEmaSeries = null; _fsVolSeries = null; _fsPriceData = null; _fsVolumeData = null;
   _fsSessionId = null;
 }
 
@@ -3994,6 +4078,11 @@ function profReadPem(suffix, input) {
 // ============================================================
 (async function init() {
   restoreFields();
+  // Restore saved strategy selection
+  try {
+    const savedStrategy = localStorage.getItem('cc_strategy');
+    if (savedStrategy) _selectedStrategy = savedStrategy;
+  } catch(e) {}
   updateTradeForm();
   updateExchangeBadge();
   updateTradeCommissionDisplay();
