@@ -1467,6 +1467,7 @@ function updateTradeForm() {
   const type = document.getElementById('tradeType').value;
   document.querySelectorAll('.tester-only').forEach(f => f.style.display = type==='tester'?'':'none');
   document.getElementById('tradeTypeWarn').style.display = type==='binance'?'':'none';
+  checkActiveSessionBanner();
 }
 
 async function startTrading() {
@@ -3534,13 +3535,19 @@ async function checkActiveSessionBanner() {
   try {
     const r = await fetch(`${API_BASE}/api/trading/sessions`, { headers: authHeaders() });
     const sessions = await r.json();
-    const hasActive = sessions.some(s => s.status === 'RUNNING');
+    const runningTypes = new Set(sessions.filter(s => s.status === 'RUNNING').map(s => s.type));
+    // Trade tab: check selected trade type
+    const tradeType = document.getElementById('tradeType')?.value || 'tester';
+    const tradeTypeMap = { 'tester': 'TESTER', 'binance': 'BINANCE_REAL', 'binance_real': 'BINANCE_REAL', 'binance_test': 'BINANCE_TEST' };
+    const hasActiveForTrade = runningTypes.has(tradeTypeMap[tradeType] || 'TESTER');
     const b1 = document.getElementById('activeSessionBanner');
-    const b2 = document.getElementById('activeSessionBannerRes');
-    if (b1) b1.style.display = hasActive ? 'flex' : 'none';
-    if (b2) b2.style.display = hasActive ? 'flex' : 'none';
+    if (b1) b1.style.display = hasActiveForTrade ? 'flex' : 'none';
     const startBtn = document.getElementById('startTradeBtn');
-    if (startBtn) startBtn.disabled = hasActive;
+    if (startBtn) startBtn.disabled = hasActiveForTrade;
+    // Research tab: check RESEARCH type only
+    const hasActiveRes = runningTypes.has('RESEARCH');
+    const b2 = document.getElementById('activeSessionBannerRes');
+    if (b2) b2.style.display = hasActiveRes ? 'flex' : 'none';
   } catch {}
 }
 
