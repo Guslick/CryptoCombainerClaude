@@ -419,7 +419,7 @@
       </div>
       <div id="tradeAlert" style="display:none"></div>
       <div id="activeSessionBanner" class="alert alert-warn" style="display:none;">
-        ⚠️ Уже есть активная сессия. <a href="#" onclick="showPage('sessions');return false;" style="color:inherit;font-weight:bold;">Перейти к сессиям →</a>
+        ⚠️ Уже есть активная сессия этого типа. Выберите другой тип в выпадающем списке выше, или <a href="#" onclick="showPage('sessions');return false;" style="color:inherit;font-weight:bold;">перейдите к сессиям →</a>
       </div>
       <div class="btn-row">
         <button class="btn btn-success" onclick="startTrading()" id="startTradeBtn">▶ ЗАПУСТИТЬ</button>
@@ -1524,8 +1524,8 @@ async function startResearch() {
     buyGap: +document.getElementById('resBuyGap').value||3.5,
     sellWithProfitGap: +document.getElementById('resSellProfit').value||2.0,
     sellWithLossGap: +document.getElementById('resSellLoss').value||8.0,
-    updateTimeout: +document.getElementById('resTimeout').value||30,
-    chartRefreshInterval: +document.getElementById('resChartRefresh').value||60,
+    updateTimeout: +(document.getElementById('resTimeout')?.value)||30,
+    chartRefreshInterval: +(document.getElementById('resChartRefresh')?.value)||60,
   };
   try {
     const r = await fetch(`${API_BASE}/api/trading/start`,{method:'POST',headers:authHeaders(),body:JSON.stringify(body)});

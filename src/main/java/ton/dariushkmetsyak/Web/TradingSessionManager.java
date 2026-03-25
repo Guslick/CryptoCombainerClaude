@@ -822,8 +822,15 @@ public class TradingSessionManager {
 
     public List<Map<String, Object>> getAllSessions() {
         List<Map<String, Object>> result = new ArrayList<>();
-        sessions.values().forEach(s -> result.add(s.toMap(false)));
-        result.sort((a, b) -> Long.compare((Long) b.get("startedAt"), (Long) a.get("startedAt")));
+        for (SessionInfo s : sessions.values()) {
+            try { result.add(s.toMap(false)); }
+            catch (Exception e) { log.warn("Failed to serialize session {}: {}", s.id, e.getMessage()); }
+        }
+        result.sort((a, b) -> {
+            long t1 = a.get("startedAt") instanceof Number ? ((Number) a.get("startedAt")).longValue() : 0;
+            long t2 = b.get("startedAt") instanceof Number ? ((Number) b.get("startedAt")).longValue() : 0;
+            return Long.compare(t2, t1);
+        });
         return result;
     }
 
