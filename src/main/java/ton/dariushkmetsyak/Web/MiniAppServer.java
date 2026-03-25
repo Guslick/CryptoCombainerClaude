@@ -249,7 +249,13 @@ public class MiniAppServer {
         server.createContext("/api/backtest/start", exchange -> {
             if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
             Long userId = requireUser(exchange); if (userId == null) return;
-            handleJson(exchange, () -> startBacktestFromRequest(exchange, userId));
+            handleJson(exchange, () -> {
+                TradingSessionManager mgr = TradingSessionManager.forUser(userId);
+                if (mgr.hasActiveSessionOfType(TradingSessionManager.SessionType.BACKTEST)) {
+                    return Map.of("error", "Уже есть активная сессия типа «Бэктест/ТОП». Дождитесь завершения или остановите её.");
+                }
+                return startBacktestFromRequest(exchange, userId);
+            });
         });
 
         server.createContext("/api/backtest/result", exchange -> {
@@ -286,6 +292,10 @@ public class MiniAppServer {
             if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
             Long userId = requireUser(exchange); if (userId == null) return;
             handleJson(exchange, () -> {
+                TradingSessionManager mgr = TradingSessionManager.forUser(userId);
+                if (mgr.hasActiveSessionOfType(TradingSessionManager.SessionType.BACKTEST)) {
+                    return Map.of("error", "Уже есть активная сессия типа «Бэктест/ТОП». Дождитесь завершения или остановите её.");
+                }
                 Map<String, Object> body = parseBody(exchange);
                 String coinName = (String) body.getOrDefault("coin", "bitcoin");
                 double tradingSum = toDouble(body.get("tradingSum"), 100.0);
@@ -318,6 +328,10 @@ public class MiniAppServer {
             if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
             Long userId = requireUser(exchange); if (userId == null) return;
             handleJson(exchange, () -> {
+                TradingSessionManager mgr = TradingSessionManager.forUser(userId);
+                if (mgr.hasActiveSessionOfType(TradingSessionManager.SessionType.BACKTEST)) {
+                    return Map.of("error", "Уже есть активная сессия типа «Бэктест/ТОП». Дождитесь завершения или остановите её.");
+                }
                 Map<String, Object> body = parseBody(exchange);
                 String coinName = (String) body.getOrDefault("coin", "bitcoin");
                 double tradingSum = toDouble(body.get("tradingSum"), 100.0);
@@ -326,7 +340,6 @@ public class MiniAppServer {
                 String strategy = (String) body.getOrDefault("strategy", "reversal");
                 boolean recapitalize = "reversal_recap".equals(strategy) || "atr_ema_recap".equals(strategy);
                 boolean isAtrEma = strategy != null && strategy.startsWith("atr_ema");
-                TradingSessionManager mgr = TradingSessionManager.forUser(userId);
                 TradingSessionManager.SessionInfo info;
                 if (isAtrEma) {
                     info = mgr.startTop10SearchAtrEma(coinName, tradingSum, chartType, exch, recapitalize);
@@ -346,17 +359,7 @@ public class MiniAppServer {
                 return result != null ? result : Map.of("ready", false, "message", "Результатов нет");
             });
         });
-
-
         // ── Profile / Auth ────────────────────────────────────────────────────
-
-        server.createContext("/api/auth/config", exchange -> handleJson(exchange, () -> {
-            Map<String, Object> cfg = new LinkedHashMap<>();
-            String botUsername = AppConfig.getInstance().get("telegram.bot.username", "");
-            if (botUsername.isBlank()) botUsername = "NEW_MAMA_CXHEMA";
-            cfg.put("botUsername", botUsername);
-            return cfg;
-        }));
 
         server.createContext("/api/auth/telegram", exchange -> handleJson(exchange, () -> {
             if (!"POST".equals(exchange.getRequestMethod())) return errorMap("POST required");

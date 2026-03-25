@@ -1495,11 +1495,15 @@ async function startTrading() {
     chartRefreshInterval: +document.getElementById('tradeChartRefresh').value||60,
   };
   try {
-    const r = await fetch(`${API_BASE}/api/trading/start`, {method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
+    const r = await fetchWithTimeout(`${API_BASE}/api/trading/start`, {
+      method:'POST',headers:authHeaders(),body:JSON.stringify(body)
+    }, 30000);
     const data = await r.json();
+    if (!r.ok) throw new Error(data?.error || `HTTP ${r.status}`);
     if (data.error) throw new Error(data.error);
     showAlert('tradeAlert','success',`✅ Сессия запущена! ID: ${data.id}`);
     showToast('✅ Торговля запущена!');
+    checkActiveSessionBanner();
   } catch(e) { showAlert('tradeAlert','error','❌ '+e.message); }
   finally { btn.disabled=false; btn.innerHTML='▶ ЗАПУСТИТЬ'; }
 }
@@ -1516,6 +1520,8 @@ async function stopAllTrading() {
 async function startResearch() {
   const coin = document.getElementById('resCoinInput').value.trim();
   if (!coin) { showAlert('resAlert','error','⚠️ Введите название монеты!'); return; }
+  const btn = document.getElementById('startResearchBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<div class="spinner"></div> Запускается...'; }
   const body = {
     type:'research', coin,
     strategy: _selectedStrategy || 'reversal',
@@ -1528,12 +1534,19 @@ async function startResearch() {
     chartRefreshInterval: +(document.getElementById('resChartRefresh')?.value)||60,
   };
   try {
-    const r = await fetch(`${API_BASE}/api/trading/start`,{method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
+    const r = await fetchWithTimeout(`${API_BASE}/api/trading/start`,{
+      method:'POST',headers:authHeaders(),body:JSON.stringify(body)
+    }, 30000);
     const data = await r.json();
+    if (!r.ok) throw new Error(data?.error || `HTTP ${r.status}`);
     if (data.error) throw new Error(data.error);
     showAlert('resAlert','success',`✅ Исследование запущено!`);
     showToast('🔬 Исследование запущено!');
+    checkActiveSessionBanner();
   } catch(e) { showAlert('resAlert','error','❌ '+e.message); }
+  finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '🔬 ЗАПУСТИТЬ ИССЛЕДОВАНИЕ'; }
+  }
 }
 
 // ============================================================
@@ -3542,6 +3555,21 @@ function showAlert(id,type,msg) {
 function showToast(msg) {
   const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'),2500);
+}
+
+async function fetchWithTimeout(url, options, timeoutMs = 30000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...(options || {}), signal: controller.signal });
+  } catch (e) {
+    if (e && e.name === 'AbortError') {
+      throw new Error('Превышено время ожидания ответа сервера');
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ============================================================
