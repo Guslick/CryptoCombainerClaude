@@ -1601,8 +1601,11 @@ async function startBacktest() {
     if (toVal) body.customTo = new Date(toVal + 'T23:59:59').getTime();
   }
   try {
-    const r = await fetch(`${API_BASE}/api/backtest/start`,{method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
+    const r = await fetchWithTimeout(`${API_BASE}/api/backtest/start`,{
+      method:'POST',headers:authHeaders(),body:JSON.stringify(body)
+    }, 30000);
     const sessionData = await r.json();
+    if (!r.ok) throw new Error(sessionData?.error || `HTTP ${r.status}`);
     if (sessionData.error) throw new Error(sessionData.error);
     _btSessionId = sessionData.id;
     showAlert('btAlert','info','⏳ Бэктест запущен...');
@@ -2057,10 +2060,11 @@ async function startOptimize() {
   if (_optPollTimer) { clearInterval(_optPollTimer); _optPollTimer = null; }
 
   try {
-    const r = await fetch(`${API_BASE}/api/backtest/optimize`, {
+    const r = await fetchWithTimeout(`${API_BASE}/api/backtest/optimize`, {
       method: 'POST', headers: authHeaders(), body: JSON.stringify(body)
-    });
+    }, 30000);
     const sessionData = await r.json();
+    if (!r.ok) throw new Error(sessionData?.error || `HTTP ${r.status}`);
     if (sessionData.error) throw new Error(sessionData.error);
     const sessionId = sessionData.id;
     showAlert('optAlert','info','⏳ Перебор стратегий запущен...');
