@@ -341,6 +341,14 @@
             <div style="font-family:var(--font-head);font-size:13px;font-weight:700">📐💹 Разворотные точки + Рекапитализация</div>
             <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:4px">Та же логика, но после каждого цикла покупка-продажа сумма сделки обновляется с учётом результата. Прибыль наращивает капитал, убыток уменьшает.</div>
           </button>
+          <button class="btn btn-primary" style="text-align:left;padding:12px 16px;border:1px solid #FFA726" onclick="selectStrategy('atr_ema')">
+            <div style="font-family:var(--font-head);font-size:13px;font-weight:700">📐📊 ATR+EMA Адаптивная</div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:4px">Разворотные точки с адаптивными порогами (ATR — волатильность, EMA-50 — тренд). Покупает только в восходящем тренде, пороги автоматически подстраиваются.</div>
+          </button>
+          <button class="btn btn-primary" style="text-align:left;padding:12px 16px;border:1px solid #FFA726;border-style:dashed" onclick="selectStrategy('atr_ema_recap')">
+            <div style="font-family:var(--font-head);font-size:13px;font-weight:700">📐📊💹 ATR+EMA + Рекапитализация</div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:4px">ATR+EMA с рекапитализацией: прибыль увеличивает объём следующей сделки.</div>
+          </button>
         </div>
       </div>
       <div id="strategyWorkspace" style="display:none">
@@ -1084,7 +1092,7 @@ function selectStrategy(strategyId) {
   try { localStorage.setItem('cc_strategy', strategyId); } catch(e) {}
   document.getElementById('strategySelector').style.display = 'none';
   document.getElementById('strategyWorkspace').style.display = 'block';
-  const titles = { reversal: '📐 Разворотные точки', reversal_recap: '📐💹 Разворотные точки + Рекап' };
+  const titles = { reversal: '📐 Разворотные точки', reversal_recap: '📐💹 Разворотные точки + Рекап', atr_ema: '📐📊 ATR+EMA Адаптивная', atr_ema_recap: '📐📊💹 ATR+EMA + Рекап' };
   document.getElementById('strategyTitle').textContent = titles[strategyId] || strategyId;
   // Clear previous strategy results to prevent leaking between strategies
   _btLastResult = null;

@@ -324,9 +324,15 @@ public class MiniAppServer {
                 String chartType = (String) body.getOrDefault("chartType", "1d");
                 String exch = (String) body.getOrDefault("exchange", "binance");
                 String strategy = (String) body.getOrDefault("strategy", "reversal");
-                boolean recapitalize = "reversal_recap".equals(strategy);
-                TradingSessionManager.SessionInfo info = TradingSessionManager.forUser(userId)
-                        .startTop10Search(coinName, tradingSum, chartType, exch, recapitalize);
+                boolean recapitalize = "reversal_recap".equals(strategy) || "atr_ema_recap".equals(strategy);
+                boolean isAtrEma = strategy != null && strategy.startsWith("atr_ema");
+                TradingSessionManager mgr = TradingSessionManager.forUser(userId);
+                TradingSessionManager.SessionInfo info;
+                if (isAtrEma) {
+                    info = mgr.startTop10SearchAtrEma(coinName, tradingSum, chartType, exch, recapitalize);
+                } else {
+                    info = mgr.startTop10Search(coinName, tradingSum, chartType, exch, recapitalize);
+                }
                 return info.toMap();
             });
         });
@@ -642,7 +648,8 @@ public class MiniAppServer {
         int chartRefresh = toInt(body.get("chartRefreshInterval"), 60);
         long chatId = toLong(body.get("chatId"), AppConfig.getInstance().getDefaultChatId());
         String strategy = (String) body.getOrDefault("strategy", "reversal");
-        boolean recapitalize = "reversal_recap".equals(strategy);
+        boolean recapitalize = "reversal_recap".equals(strategy) || "atr_ema_recap".equals(strategy);
+        boolean isAtrEma = strategy.startsWith("atr_ema");
 
         UserProfileManager.UserProfile profile = userId > 0
             ? UserProfileManager.getInstance().loadProfile(userId) : null;
@@ -651,20 +658,40 @@ public class MiniAppServer {
         Object result;
         switch (type.toLowerCase()) {
             case "binance": case "binance_real":
-                result = mgr.startBinanceTrading(coinName, tradingSum, buyGap, spg, slg,
-                        timeout, chartRefresh, chatId, profile, recapitalize);
+                if (isAtrEma) {
+                    result = mgr.startBinanceTradingAtrEma(coinName, tradingSum, buyGap, spg, slg,
+                            timeout, chartRefresh, chatId, profile, recapitalize);
+                } else {
+                    result = mgr.startBinanceTrading(coinName, tradingSum, buyGap, spg, slg,
+                            timeout, chartRefresh, chatId, profile, recapitalize);
+                }
                 break;
             case "binance_test":
-                result = mgr.startBinanceTestTrading(coinName, tradingSum, buyGap, spg, slg,
-                        timeout, chartRefresh, chatId, profile, recapitalize);
+                if (isAtrEma) {
+                    result = mgr.startBinanceTestTradingAtrEma(coinName, tradingSum, buyGap, spg, slg,
+                            timeout, chartRefresh, chatId, profile, recapitalize);
+                } else {
+                    result = mgr.startBinanceTestTrading(coinName, tradingSum, buyGap, spg, slg,
+                            timeout, chartRefresh, chatId, profile, recapitalize);
+                }
                 break;
             case "research":
-                result = mgr.startResearchTrading(coinName, startAssets, tradingSum, buyGap, spg, slg,
-                        timeout, chartRefresh, chatId, recapitalize);
+                if (isAtrEma) {
+                    result = mgr.startResearchTradingAtrEma(coinName, startAssets, tradingSum, buyGap, spg, slg,
+                            timeout, chartRefresh, chatId, recapitalize);
+                } else {
+                    result = mgr.startResearchTrading(coinName, startAssets, tradingSum, buyGap, spg, slg,
+                            timeout, chartRefresh, chatId, recapitalize);
+                }
                 break;
             default:
-                result = mgr.startTesterTrading(coinName, startAssets, tradingSum, buyGap, spg, slg,
-                        timeout, chartRefresh, chatId, recapitalize);
+                if (isAtrEma) {
+                    result = mgr.startTesterTradingAtrEma(coinName, startAssets, tradingSum, buyGap, spg, slg,
+                            timeout, chartRefresh, chatId, recapitalize);
+                } else {
+                    result = mgr.startTesterTrading(coinName, startAssets, tradingSum, buyGap, spg, slg,
+                            timeout, chartRefresh, chatId, recapitalize);
+                }
         }
         if (result instanceof TradingSessionManager.SessionInfo)
             return ((TradingSessionManager.SessionInfo) result).toMap();
@@ -681,11 +708,17 @@ public class MiniAppServer {
         String chartType = (String) body.getOrDefault("chartType", "1d");
         String exch = (String) body.getOrDefault("exchange", "binance");
         String strategy = (String) body.getOrDefault("strategy", "reversal");
-        boolean recapitalize = "reversal_recap".equals(strategy);
+        boolean recapitalize = "reversal_recap".equals(strategy) || "atr_ema_recap".equals(strategy);
+        boolean isAtrEma = strategy.startsWith("atr_ema");
         long customFrom = toLong(body.get("customFrom"), 0);
         long customTo = toLong(body.get("customTo"), 0);
-        TradingSessionManager.SessionInfo info = TradingSessionManager.forUser(userId)
-                .startBacktest(coinName, tradingSum, buyGap, spg, slg, chartType, exch, 0.1, customFrom, customTo, recapitalize);
+        TradingSessionManager mgr = TradingSessionManager.forUser(userId);
+        TradingSessionManager.SessionInfo info;
+        if (isAtrEma) {
+            info = mgr.startBacktestAtrEma(coinName, tradingSum, buyGap, spg, slg, chartType, exch, 0.1, customFrom, customTo, recapitalize);
+        } else {
+            info = mgr.startBacktest(coinName, tradingSum, buyGap, spg, slg, chartType, exch, 0.1, customFrom, customTo, recapitalize);
+        }
         return info.toMap();
     }
 
