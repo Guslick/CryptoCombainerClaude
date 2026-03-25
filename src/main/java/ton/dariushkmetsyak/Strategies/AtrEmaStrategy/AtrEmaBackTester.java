@@ -462,7 +462,7 @@ public class AtrEmaBackTester {
         for (double[] p : sellLossPoints) TradingChart.addSellLossMarker(p[0], p[1]);
         try {
             String path = "backtest_atrema_" + coin.getName() + "_" + System.currentTimeMillis() + ".png";
-            TradingChart.saveChart(path);
+            TradingChart.makeScreenShot(path);
             return path;
         } catch (Exception e) {
             return null;
