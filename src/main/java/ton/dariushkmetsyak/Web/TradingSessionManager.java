@@ -870,6 +870,9 @@ public class TradingSessionManager {
                                      double spg, double slg, String chartType,
                                      String exchangeName, double commissionRate,
                                      long customFrom, long customTo, boolean recapitalize) {
+        if (hasActiveSessionOfType(SessionType.BACKTEST)) {
+            throw new IllegalStateException("Уже есть активная сессия типа «Бэктест/ТОП». Дождитесь завершения или остановите её.");
+        }
         String id = "backtest_" + System.currentTimeMillis();
         Map<String, Object> params = buildParams(tradingSum, buyGap, spg, slg, 30, 60);
         params.put("chartType", chartType);
@@ -1041,6 +1044,9 @@ public class TradingSessionManager {
     }
 
     public SessionInfo startTop10Search(String coinName, double tradingSum, String chartType, String exchange, boolean recapitalize) {
+        if (hasActiveSessionOfType(SessionType.BACKTEST)) {
+            throw new IllegalStateException("Уже есть активная сессия типа «Бэктест/ТОП». Дождитесь завершения или остановите её.");
+        }
         String id = "top10_" + System.currentTimeMillis();
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("tradingSum", tradingSum);
@@ -1306,6 +1312,9 @@ public class TradingSessionManager {
                                            double profitMin, double profitMax, double profitStep,
                                            double lossMin, double lossMax, double lossStep,
                                            boolean recapitalize) {
+        if (hasActiveSessionOfType(SessionType.BACKTEST)) {
+            throw new IllegalStateException("Уже есть активная сессия типа «Бэктест/ТОП». Дождитесь завершения или остановите её.");
+        }
         String id = "optimize_" + System.currentTimeMillis();
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("tradingSum", tradingSum); params.put("chartType", chartType);
@@ -1510,6 +1519,9 @@ public class TradingSessionManager {
                                            double spg, double slg, String chartType,
                                            String exchangeName, double commissionRate,
                                            long customFrom, long customTo, boolean recapitalize) {
+        if (hasActiveSessionOfType(SessionType.BACKTEST)) {
+            throw new IllegalStateException("Уже есть активная сессия типа «Бэктест/ТОП». Дождитесь завершения или остановите её.");
+        }
         String id = "backtest_atrema_" + System.currentTimeMillis();
         Map<String, Object> params = buildParams(tradingSum, buyGap, spg, slg, 30, 60);
         params.put("chartType", chartType);
@@ -1579,6 +1591,9 @@ public class TradingSessionManager {
     // ── ATR+EMA Top-10 search ────────────────────────────────────────────────
 
     public SessionInfo startTop10SearchAtrEma(String coinName, double tradingSum, String chartType, String exchange, boolean recapitalize) {
+        if (hasActiveSessionOfType(SessionType.BACKTEST)) {
+            throw new IllegalStateException("Уже есть активная сессия типа «Бэктест/ТОП». Дождитесь завершения или остановите её.");
+        }
         String id = "top10_atrema_" + System.currentTimeMillis();
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("tradingSum", tradingSum);
