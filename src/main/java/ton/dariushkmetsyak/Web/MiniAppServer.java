@@ -192,12 +192,16 @@ public class MiniAppServer {
         });
 
         server.createContext("/api/trading/start", exchange -> {
+            addCorsHeaders(exchange);
+            if ("OPTIONS".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(204,-1); return; }
             if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
             Long userId = requireUser(exchange); if (userId == null) return;
             handleJson(exchange, () -> startTradingFromRequest(exchange, userId));
         });
 
         server.createContext("/api/trading/stop", exchange -> {
+            addCorsHeaders(exchange);
+            if ("OPTIONS".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(204,-1); return; }
             if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
             Long userId = requireUser(exchange); if (userId == null) return;
             handleJson(exchange, () -> {
@@ -210,6 +214,8 @@ public class MiniAppServer {
         });
 
         server.createContext("/api/trading/resume", exchange -> {
+            addCorsHeaders(exchange);
+            if ("OPTIONS".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(204,-1); return; }
             if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
             Long userId = requireUser(exchange); if (userId == null) return;
             handleJson(exchange, () -> {
@@ -223,6 +229,8 @@ public class MiniAppServer {
         });
 
         server.createContext("/api/trading/delete", exchange -> {
+            addCorsHeaders(exchange);
+            if ("OPTIONS".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(204,-1); return; }
             if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
             Long userId = requireUser(exchange); if (userId == null) return;
             handleJson(exchange, () -> {
@@ -247,6 +255,8 @@ public class MiniAppServer {
         });
 
         server.createContext("/api/backtest/start", exchange -> {
+            addCorsHeaders(exchange);
+            if ("OPTIONS".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(204,-1); return; }
             if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
             Long userId = requireUser(exchange); if (userId == null) return;
             handleJson(exchange, () -> startBacktestFromRequest(exchange, userId));
@@ -283,6 +293,8 @@ public class MiniAppServer {
         });
 
         server.createContext("/api/backtest/optimize", exchange -> {
+            addCorsHeaders(exchange);
+            if ("OPTIONS".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(204,-1); return; }
             if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
             Long userId = requireUser(exchange); if (userId == null) return;
             handleJson(exchange, () -> {
@@ -315,6 +327,8 @@ public class MiniAppServer {
         });
 
         server.createContext("/api/top10/start", exchange -> {
+            addCorsHeaders(exchange);
+            if ("OPTIONS".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(204,-1); return; }
             if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405,-1); return; }
             Long userId = requireUser(exchange); if (userId == null) return;
             handleJson(exchange, () -> {
@@ -463,12 +477,17 @@ public class MiniAppServer {
             exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
             exchange.sendResponseHeaders(200, bytes.length);
             try (OutputStream os = exchange.getResponseBody()) { os.write(bytes); }
-        } catch (Exception e) {
-            log.error("API error", e);
-            byte[] err = mapper.writeValueAsBytes(errorMap(e.getMessage()));
-            exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
-            exchange.sendResponseHeaders(500, err.length);
-            try (OutputStream os = exchange.getResponseBody()) { os.write(err); }
+        } catch (Throwable e) {
+            log.error("API error: {}", e.getMessage(), e);
+            try {
+                byte[] err = mapper.writeValueAsBytes(errorMap(e.getMessage()));
+                exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
+                exchange.sendResponseHeaders(500, err.length);
+                try (OutputStream os = exchange.getResponseBody()) { os.write(err); }
+            } catch (Throwable writeErr) {
+                log.error("Failed to write error response", writeErr);
+                try { exchange.sendResponseHeaders(500, -1); } catch (Throwable ignored) {}
+            }
         }
     }
 
@@ -636,8 +655,10 @@ public class MiniAppServer {
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> startTradingFromRequest(HttpExchange exchange, long userId) throws Exception {
+        log.info("[START] startTradingFromRequest for user {}", userId);
         Map<String, Object> body = parseBody(exchange);
         String type = (String) body.getOrDefault("type", "tester");
+        log.info("[START] type={}, coin={}, strategy={}", type, body.get("coin"), body.get("strategy"));
         String coinName = (String) body.getOrDefault("coin", "bitcoin");
         double tradingSum  = toDouble(body.get("tradingSum"), 100.0);
         double startAssets = toDouble(body.get("startAssets"), 150.0);

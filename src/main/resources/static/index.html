@@ -1478,6 +1478,13 @@ function updateTradeForm() {
   checkActiveSessionBanner();
 }
 
+/** Fetch with timeout (default 30s). Throws on timeout. */
+function fetchWithTimeout(url, opts, timeoutMs = 30000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(timer));
+}
+
 async function startTrading() {
   const coin = document.getElementById('tradeCoinInput').value.trim();
   if (!coin) { showAlert('tradeAlert','error','⚠️ Введите название монеты!'); return; }
@@ -1495,12 +1502,15 @@ async function startTrading() {
     chartRefreshInterval: +document.getElementById('tradeChartRefresh').value||60,
   };
   try {
-    const r = await fetch(`${API_BASE}/api/trading/start`, {method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
+    const r = await fetchWithTimeout(`${API_BASE}/api/trading/start`, {method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
     const data = await r.json();
     if (data.error) throw new Error(data.error);
     showAlert('tradeAlert','success',`✅ Сессия запущена! ID: ${data.id}`);
     showToast('✅ Торговля запущена!');
-  } catch(e) { showAlert('tradeAlert','error','❌ '+e.message); }
+  } catch(e) {
+    const msg = e.name === 'AbortError' ? 'Таймаут запроса. Проверьте сервер и попробуйте снова.' : e.message;
+    showAlert('tradeAlert','error','❌ '+msg);
+  }
   finally { btn.disabled=false; btn.innerHTML='▶ ЗАПУСТИТЬ'; }
 }
 
@@ -1516,6 +1526,8 @@ async function stopAllTrading() {
 async function startResearch() {
   const coin = document.getElementById('resCoinInput').value.trim();
   if (!coin) { showAlert('resAlert','error','⚠️ Введите название монеты!'); return; }
+  const btn = document.getElementById('startResearchBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<div class="spinner"></div> Запуск...'; }
   const body = {
     type:'research', coin,
     strategy: _selectedStrategy || 'reversal',
@@ -1528,12 +1540,17 @@ async function startResearch() {
     chartRefreshInterval: +(document.getElementById('resChartRefresh')?.value)||60,
   };
   try {
-    const r = await fetch(`${API_BASE}/api/trading/start`,{method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
+    const r = await fetchWithTimeout(`${API_BASE}/api/trading/start`,{method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
     const data = await r.json();
     if (data.error) throw new Error(data.error);
     showAlert('resAlert','success',`✅ Исследование запущено!`);
     showToast('🔬 Исследование запущено!');
-  } catch(e) { showAlert('resAlert','error','❌ '+e.message); }
+  } catch(e) {
+    const msg = e.name === 'AbortError' ? 'Таймаут запроса. Проверьте сервер и попробуйте снова.' : e.message;
+    showAlert('resAlert','error','❌ '+msg);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '🔬 ЗАПУСТИТЬ ИССЛЕДОВАНИЕ'; }
+  }
 }
 
 // ============================================================
