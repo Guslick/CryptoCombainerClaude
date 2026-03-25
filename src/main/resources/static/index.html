@@ -467,7 +467,7 @@
       <div id="activeSessionBannerRes" class="alert alert-warn" style="display:none;">
         ⚠️ Уже есть активная сессия. <a href="#" onclick="showPage('sessions');return false;" style="color:inherit;font-weight:bold;">Перейти к сессиям →</a>
       </div>
-      <button class="btn btn-primary" onclick="startResearch()">🔬 ЗАПУСТИТЬ ИССЛЕДОВАНИЕ</button>
+      <button class="btn btn-primary" onclick="startResearch()" id="startResearchBtn">🔬 ЗАПУСТИТЬ ИССЛЕДОВАНИЕ</button>
     </div>
 
     <!-- BACKTEST -->
@@ -2294,8 +2294,17 @@ async function loadSessions() {
     const r = await fetch(`${API_BASE}/api/trading/sessions`, {
       headers: authHeaders()
     });
-    const sessions = await r.json();
-    if (!Array.isArray(sessions) || !sessions.length) {
+    const data = await r.json();
+    // Handle non-array responses (e.g. {error: "..."} from server errors)
+    if (!Array.isArray(data)) {
+      const errMsg = data?.error || 'Неожиданный ответ сервера';
+      console.warn('Sessions API returned non-array:', errMsg);
+      list.innerHTML = '<div class="empty-state"><span class="icon">🎮</span>Нет сессий</div>';
+      _sessionsData = {};
+      return;
+    }
+    const sessions = data;
+    if (!sessions.length) {
       list.innerHTML = '<div class="empty-state"><span class="icon">🎮</span>Нет сессий</div>';
       _sessionsData = {};
       return;
@@ -3542,21 +3551,48 @@ async function checkActiveSessionBanner() {
   if (!isAuthed()) return;
   try {
     const r = await fetch(`${API_BASE}/api/trading/sessions`, { headers: authHeaders() });
-    const sessions = await r.json();
+    const data = await r.json();
+    // Fail-open: if response is not an array (e.g. {error:...}), treat as no running sessions
+    const sessions = Array.isArray(data) ? data : [];
     const runningTypes = new Set(sessions.filter(s => s.status === 'RUNNING').map(s => s.type));
     // Trade tab: check selected trade type
     const tradeType = document.getElementById('tradeType')?.value || 'tester';
     const tradeTypeMap = { 'tester': 'TESTER', 'binance': 'BINANCE_REAL', 'binance_real': 'BINANCE_REAL', 'binance_test': 'BINANCE_TEST' };
     const hasActiveForTrade = runningTypes.has(tradeTypeMap[tradeType] || 'TESTER');
     const b1 = document.getElementById('activeSessionBanner');
-    if (b1) b1.style.display = hasActiveForTrade ? 'flex' : 'none';
+    if (b1) {
+      b1.style.display = hasActiveForTrade ? 'flex' : 'none';
+      // Show which types are available
+      if (hasActiveForTrade && runningTypes.size > 0) {
+        const availTypes = [];
+        if (!runningTypes.has('TESTER')) availTypes.push('Тестовая');
+        if (!runningTypes.has('BINANCE_TEST')) availTypes.push('Binance Testnet');
+        if (!runningTypes.has('BINANCE_REAL')) availTypes.push('Binance Real');
+        const hint = availTypes.length ? ' Доступно: ' + availTypes.join(', ') + '.' : '';
+        b1.innerHTML = '⚠️ Уже есть активная сессия типа «' + (tradeTypeMap[tradeType]||'TESTER') + '». Выберите другой тип выше.' + hint +
+          ' <a href="#" onclick="showPage(\'sessions\');return false;" style="color:inherit;font-weight:bold;">Сессии →</a>';
+      }
+    }
     const startBtn = document.getElementById('startTradeBtn');
     if (startBtn) startBtn.disabled = hasActiveForTrade;
     // Research tab: check RESEARCH type only
     const hasActiveRes = runningTypes.has('RESEARCH');
     const b2 = document.getElementById('activeSessionBannerRes');
     if (b2) b2.style.display = hasActiveRes ? 'flex' : 'none';
-  } catch {}
+    const resBtn = document.getElementById('startResearchBtn');
+    if (resBtn) resBtn.disabled = hasActiveRes;
+  } catch(e) {
+    // Fail-open: on error, enable all buttons so user is not blocked
+    console.warn('checkActiveSessionBanner error', e);
+    const startBtn = document.getElementById('startTradeBtn');
+    if (startBtn) startBtn.disabled = false;
+    const resBtn = document.getElementById('startResearchBtn');
+    if (resBtn) resBtn.disabled = false;
+    const b1 = document.getElementById('activeSessionBanner');
+    if (b1) b1.style.display = 'none';
+    const b2 = document.getElementById('activeSessionBannerRes');
+    if (b2) b2.style.display = 'none';
+  }
 }
 
 // ============================================================
