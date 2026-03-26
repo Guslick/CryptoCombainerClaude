@@ -549,7 +549,14 @@ public class AtrEmaBackTester {
 
         @Override
         public int compareTo(BackTestResult other) {
-            return Double.compare(other.profitAfterCommission, this.profitAfterCommission);
+            int cmp = Double.compare(other.profitAfterCommission, this.profitAfterCommission);
+            if (cmp != 0) return cmp;
+            // Break ties by parameters so TreeSet doesn't treat different strategies as duplicates
+            cmp = Double.compare(this.buyGap, other.buyGap);
+            if (cmp != 0) return cmp;
+            cmp = Double.compare(this.sellWithProfitGap, other.sellWithProfitGap);
+            if (cmp != 0) return cmp;
+            return Double.compare(this.sellWithLossGap, other.sellWithLossGap);
         }
     }
 }

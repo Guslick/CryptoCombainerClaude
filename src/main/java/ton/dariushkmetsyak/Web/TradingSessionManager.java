@@ -1631,7 +1631,9 @@ public class TradingSessionManager {
                                     results.add(r);
                                     if (results.size() > 10) results.pollLast();
                                 }
-                            } catch (Exception ignored) {}
+                            } catch (Exception e) {
+                                log.debug("AtrEma backtest failed bg={} spg={} slg={}: {}", bg, spg, slg, e.getMessage());
+                            }
                             completed++;
                             int pct = (int) ((double) completed / totalIterations * 100);
                             if (pct > lastReportedPercent && pct % 5 == 0) {
