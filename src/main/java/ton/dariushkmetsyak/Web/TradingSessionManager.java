@@ -1432,14 +1432,17 @@ public class TradingSessionManager {
                     m.put("sellWithLossGap", r.getSellWithLossGap());
                     m.put("profitUsd", r.getProfitInUsd());
                     m.put("profitPercent", r.getPercentageProfit());
+                    m.put("profitUsdAfterCommission", r.getProfitInUsdAfterCommission());
+                    m.put("profitPercentAfterCommission", r.getPercentageProfitAfterCommission());
+                    m.put("totalTradeCount", r.getTotalTradeCount());
+                    m.put("profitTradeCount", r.getProfitTradeCount());
+                    m.put("lossTradeCount", r.getLossTradeCount());
                     m.put("totalCommission", r.getTotalCommission());
-                    m.put("profitAfterCommission", r.getProfitAfterCommission());
-                    m.put("winCount", r.getWinCount());
-                    m.put("lossCount", r.getLossCount());
-                    m.put("totalTrades", r.getTotalTrades());
                     m.put("strategy", "atr_ema");
                     m.put("recapitalize", recapitalize);
                     if (r.isEarlyTermination()) m.put("earlyTermination", true);
+                    // Trade events for chart visualization
+                    addTradeEventsToResult(m, tester.getTradeEvents(), tester.getEquityCurve(), tester.getHoldCurve(), tester.getTradeReport());
                     top.add(m);
                 }
 
@@ -1715,7 +1718,8 @@ public class TradingSessionManager {
                 }
                 info.addEvent("INFO", "Данные загружены. Перебор ATR+EMA стратегий...");
 
-                TreeSet<AtrEmaBackTester.BackTestResult> results = new TreeSet<>();
+                java.util.PriorityQueue<Object[]> topHeap = new java.util.PriorityQueue<>(11,
+                        Comparator.comparingDouble(p -> ((AtrEmaBackTester.BackTestResult) p[0]).getProfitInUsdAfterCommission()));
                 double step = 0.5;
                 double startBG = 0.5, maxBG = 5;
                 double startSPG = 0.5, maxSPG = 5;
@@ -1725,6 +1729,7 @@ public class TradingSessionManager {
                         * ((maxBG - startBG + step) / step));
                 int completed = 0;
                 int lastReportedPercent = 0;
+                info.backtestProgressTotal = totalIterations;
 
                 for (double bg = startBG; bg <= maxBG; bg += step) {
                     if (Thread.currentThread().isInterrupted()) break;
@@ -1737,13 +1742,14 @@ public class TradingSessionManager {
                                         coin, chart, tradingSum, bg, spg, slg, commCalc, recapitalize);
                                 AtrEmaBackTester.BackTestResult r = tester.startBackTest();
                                 if (r != null) {
-                                    results.add(r);
-                                    if (results.size() > 10) results.pollLast();
+                                    topHeap.add(new Object[]{r, tester});
+                                    while (topHeap.size() > 10) topHeap.poll();
                                 }
                             } catch (Exception e) {
                                 log.debug("AtrEma backtest failed bg={} spg={} slg={}: {}", bg, spg, slg, e.getMessage());
                             }
                             completed++;
+                            info.backtestProgressCurrent = completed;
                             int pct = (int) ((double) completed / totalIterations * 100);
                             if (pct > lastReportedPercent && pct % 5 == 0) {
                                 lastReportedPercent = pct;
@@ -1754,21 +1760,29 @@ public class TradingSessionManager {
                     }
                 }
 
+                List<Object[]> sorted = new java.util.ArrayList<>(topHeap);
+                sorted.sort(Comparator.comparingDouble(p -> -((AtrEmaBackTester.BackTestResult) p[0]).getProfitInUsdAfterCommission()));
                 List<Map<String, Object>> top10 = new ArrayList<>();
-                int rank = 1;
-                for (AtrEmaBackTester.BackTestResult r : results) {
+                for (int i = 0; i < Math.min(10, sorted.size()); i++) {
+                    AtrEmaBackTester.BackTestResult r = (AtrEmaBackTester.BackTestResult) sorted.get(i)[0];
+                    AtrEmaBackTester tester = (AtrEmaBackTester) sorted.get(i)[1];
                     Map<String, Object> rm = new LinkedHashMap<>();
-                    rm.put("rank", rank++);
+                    rm.put("rank", i + 1);
                     rm.put("buyGap", r.getBuyGap());
                     rm.put("sellWithProfitGap", r.getSellWithProfit());
                     rm.put("sellWithLossGap", r.getSellWithLossGap());
                     rm.put("profitUsd", r.getProfitInUsd());
                     rm.put("profitPercent", r.getPercentageProfit());
+                    rm.put("profitUsdAfterCommission", r.getProfitInUsdAfterCommission());
+                    rm.put("profitPercentAfterCommission", r.getPercentageProfitAfterCommission());
+                    rm.put("totalTradeCount", r.getTotalTradeCount());
+                    rm.put("profitTradeCount", r.getProfitTradeCount());
+                    rm.put("lossTradeCount", r.getLossTradeCount());
                     rm.put("totalCommission", r.getTotalCommission());
-                    rm.put("profitAfterCommission", r.getProfitAfterCommission());
-                    rm.put("winCount", r.getWinCount());
-                    rm.put("lossCount", r.getLossCount());
-                    rm.put("totalTrades", r.getTotalTrades());
+                    rm.put("strategy", "atr_ema");
+                    rm.put("recapitalize", recapitalize);
+                    if (r.isEarlyTermination()) rm.put("earlyTermination", true);
+                    addTradeEventsToResult(rm, tester.getTradeEvents(), tester.getEquityCurve(), tester.getHoldCurve(), tester.getTradeReport());
                     top10.add(rm);
                 }
                 Map<String, Object> resultMap = new LinkedHashMap<>();

@@ -1125,6 +1125,139 @@ function showStrategyTab(tabId) {
   document.getElementById('stab-' + tabId)?.classList.add('active');
   if (tabId === 'trade' || tabId === 'research') checkActiveSessionBanner();
   if (tabId === 'optimize') { updateOptCommission(); updateCombinationsCount(); }
+  // Restore running backtest/optimize state when switching to their tabs
+  if (tabId === 'backtest') resumeBacktestState();
+  if (tabId === 'optimize') resumeOptimizeState();
+}
+
+// Restore backtest progress if a backtest is still running
+async function resumeBacktestState() {
+  if (_btPollTimer || !_btSessionId) return; // already polling or nothing running
+  try {
+    const sr = await fetch(`${API_BASE}/api/trading/sessions/${_btSessionId}`, { headers: authHeaders() });
+    if (!sr.ok) { _btSessionId = null; return; }
+    const sess = await sr.json();
+    if (sess.status === 'RUNNING') {
+      // Restore progress bar and start polling
+      const btn = document.getElementById('btStartBtn');
+      btn.disabled = true; btn.innerHTML = '<div class="spinner"></div> Выполняется...';
+      document.getElementById('btProgressWrap').style.display = 'block';
+      const cur = sess.backtestProgressCurrent || 0;
+      const tot = sess.backtestProgressTotal || 0;
+      const pct = tot > 0 ? Math.round(cur / tot * 100) : 0;
+      document.getElementById('btProgressBar').style.width = pct + '%';
+      document.getElementById('btProgressText').textContent = cur + ' / ' + tot + ' тиков';
+      document.getElementById('btProgressPct').textContent = pct + '%';
+      showAlert('btAlert','info','⏳ Бэктест выполняется...');
+      const sessionId = _btSessionId;
+      _btPollTimer = setInterval(async () => {
+        try {
+          const sr2 = await fetch(`${API_BASE}/api/trading/sessions/${sessionId}`, { headers: authHeaders() }).catch(() => null);
+          if (!sr2?.ok) return;
+          const s = await sr2.json();
+          const c = s.backtestProgressCurrent || 0;
+          const t = s.backtestProgressTotal || 0;
+          const p = t > 0 ? Math.round(c / t * 100) : 0;
+          document.getElementById('btProgressBar').style.width = p + '%';
+          document.getElementById('btProgressText').textContent = c + ' / ' + t + ' тиков';
+          document.getElementById('btProgressPct').textContent = p + '%';
+          if (s.status === 'DONE') {
+            clearInterval(_btPollTimer); _btPollTimer = null; _btSessionId = null;
+            document.getElementById('btProgressBar').style.width = '100%';
+            document.getElementById('btProgressPct').textContent = '100%';
+            setTimeout(() => { document.getElementById('btProgressWrap').style.display = 'none'; }, 300);
+            const strat = _selectedStrategy || 'reversal';
+            const rr = await fetch(`${API_BASE}/api/backtest/result?strategy=${strat}`, { headers: authHeaders() });
+            const result = await rr.json();
+            _btLastResult = result;
+            showBacktestResult(result);
+            btn.disabled = false; btn.innerHTML = '🧪 ЗАПУСТИТЬ БЭКТЕСТ';
+            document.getElementById('btAlert').style.display = 'none';
+          } else if (s.status === 'ERROR') {
+            clearInterval(_btPollTimer); _btPollTimer = null; _btSessionId = null;
+            document.getElementById('btProgressWrap').style.display = 'none';
+            showAlert('btAlert','error','❌ ' + (s.lastMessage || 'Ошибка'));
+            btn.disabled = false; btn.innerHTML = '🧪 ЗАПУСТИТЬ БЭКТЕСТ';
+          }
+        } catch(e) { /* ignore */ }
+      }, 700);
+    } else if (sess.status === 'DONE') {
+      // Already done — show result if available
+      _btSessionId = null;
+      const strat = _selectedStrategy || 'reversal';
+      const rr = await fetch(`${API_BASE}/api/backtest/result?strategy=${strat}`, { headers: authHeaders() });
+      const result = await rr.json();
+      if (result && result.ready !== false) {
+        _btLastResult = result;
+        showBacktestResult(result);
+      }
+    } else {
+      _btSessionId = null;
+    }
+  } catch(e) { _btSessionId = null; }
+}
+
+// Restore optimize progress if optimize is still running
+async function resumeOptimizeState() {
+  if (_optPollTimer || !_optSessionId) return;
+  try {
+    const sr = await fetch(`${API_BASE}/api/trading/sessions/${_optSessionId}`, { headers: authHeaders() });
+    if (!sr.ok) { _optSessionId = null; return; }
+    const sess = await sr.json();
+    if (sess.status === 'RUNNING') {
+      const btn = document.getElementById('optStartBtn');
+      btn.disabled = true; btn.innerHTML = '<div class="spinner"></div> Поиск...';
+      document.getElementById('optProgressWrap').style.display = 'block';
+      const cur = sess.backtestProgressCurrent || 0;
+      const tot = sess.backtestProgressTotal || 0;
+      const pct = tot > 0 ? Math.round(cur / tot * 100) : 0;
+      document.getElementById('optProgressBar').style.width = pct + '%';
+      document.getElementById('optProgressText').textContent = cur + ' / ' + tot;
+      document.getElementById('optProgressPct').textContent = pct + '%';
+      showAlert('optAlert','info','⏳ Перебор стратегий выполняется...');
+      const sessionId = _optSessionId;
+      _optPollTimer = setInterval(async () => {
+        try {
+          const sr2 = await fetch(`${API_BASE}/api/trading/sessions/${sessionId}`, { headers: authHeaders() }).catch(() => null);
+          if (!sr2?.ok) return;
+          const s = await sr2.json();
+          const c = s.backtestProgressCurrent || 0;
+          const t = s.backtestProgressTotal || 0;
+          const p = t > 0 ? Math.round(c / t * 100) : 0;
+          document.getElementById('optProgressBar').style.width = p + '%';
+          document.getElementById('optProgressText').textContent = c + ' / ' + t;
+          document.getElementById('optProgressPct').textContent = p + '%';
+          if (s.status === 'DONE') {
+            clearInterval(_optPollTimer); _optPollTimer = null; _optSessionId = null;
+            document.getElementById('optProgressBar').style.width = '100%';
+            document.getElementById('optProgressPct').textContent = '100%';
+            setTimeout(() => { document.getElementById('optProgressWrap').style.display = 'none'; }, 300);
+            const strat = _selectedStrategy || 'reversal';
+            const rr = await fetch(`${API_BASE}/api/backtest/result?strategy=${strat}`, { headers: authHeaders() });
+            const optResult = await rr.json();
+            showOptimizeResult(optResult.topStrategies || []);
+            btn.disabled = false; btn.innerHTML = '🔍 НАЙТИ ЛУЧШИЕ СТРАТЕГИИ';
+            document.getElementById('optAlert').style.display = 'none';
+          } else if (s.status === 'ERROR') {
+            clearInterval(_optPollTimer); _optPollTimer = null; _optSessionId = null;
+            document.getElementById('optProgressWrap').style.display = 'none';
+            showAlert('optAlert','error','❌ ' + (s.lastMessage || 'Ошибка'));
+            btn.disabled = false; btn.innerHTML = '🔍 НАЙТИ ЛУЧШИЕ СТРАТЕГИИ';
+          }
+        } catch(e) { /* ignore */ }
+      }, 700);
+    } else if (sess.status === 'DONE') {
+      _optSessionId = null;
+      const strat = _selectedStrategy || 'reversal';
+      const rr = await fetch(`${API_BASE}/api/backtest/result?strategy=${strat}`, { headers: authHeaders() });
+      const optResult = await rr.json();
+      if (optResult && optResult.topStrategies) {
+        showOptimizeResult(optResult.topStrategies);
+      }
+    } else {
+      _optSessionId = null;
+    }
+  } catch(e) { _optSessionId = null; }
 }
 
 // ============================================================
@@ -1581,6 +1714,7 @@ function updateOptCommission() {
 
 let _btSessionId = null;
 let _btLastResult = null;
+let _btPollTimer = null;
 
 async function startBacktest() {
   const coin = document.getElementById('btCoinInput').value.trim();
@@ -1620,7 +1754,8 @@ async function startBacktest() {
     _btSessionId = sessionData.id;
     showAlert('btAlert','info','⏳ Бэктест запущен...');
     btn.innerHTML='<div class="spinner"></div> Выполняется...';
-    const pollId = setInterval(async ()=>{
+    if (_btPollTimer) clearInterval(_btPollTimer);
+    const pollId = _btPollTimer = setInterval(async ()=>{
       try {
         const sr = await fetch(`${API_BASE}/api/trading/sessions/${sessionData.id}`, {headers:authHeaders()}).catch(()=>null);
         if (!sr?.ok) return;
@@ -1632,7 +1767,7 @@ async function startBacktest() {
         document.getElementById('btProgressText').textContent = cur + ' / ' + tot + ' тиков';
         document.getElementById('btProgressPct').textContent = pct + '%';
         if (sess.status==='DONE') {
-          clearInterval(pollId);
+          clearInterval(pollId); _btPollTimer = null; _btSessionId = null;
           document.getElementById('btProgressBar').style.width = '100%';
           document.getElementById('btProgressPct').textContent = '100%';
           setTimeout(() => { document.getElementById('btProgressWrap').style.display='none'; }, 300);
@@ -1644,7 +1779,7 @@ async function startBacktest() {
           btn.disabled=false; btn.innerHTML='🧪 ЗАПУСТИТЬ БЭКТЕСТ';
           document.getElementById('btAlert').style.display='none';
         } else if (sess.status==='ERROR') {
-          clearInterval(pollId);
+          clearInterval(pollId); _btPollTimer = null; _btSessionId = null;
           document.getElementById('btProgressWrap').style.display='none';
           showAlert('btAlert','error','❌ '+sess.lastMessage);
           btn.disabled=false; btn.innerHTML='🧪 ЗАПУСТИТЬ БЭКТЕСТ';
@@ -2033,6 +2168,7 @@ function renderYieldChart(containerId, equityCurve, oldInstance, saveInstance, h
 // OPTIMIZE (TOP-10 STRATEGIES)
 // ============================================================
 let _optPollTimer = null;
+let _optSessionId = null;
 
 async function startOptimize() {
   const coin = document.getElementById('optCoinInput').value.trim();
@@ -2076,6 +2212,7 @@ async function startOptimize() {
     const sessionData = await r.json();
     if (sessionData.error) throw new Error(sessionData.error);
     const sessionId = sessionData.id;
+    _optSessionId = sessionId;
     showAlert('optAlert','info','⏳ Перебор стратегий запущен...');
 
     _optPollTimer = setInterval(async () => {
@@ -2092,7 +2229,7 @@ async function startOptimize() {
         document.getElementById('optProgressPct').textContent = pct + '%';
 
         if (sess.status === 'DONE') {
-          clearInterval(_optPollTimer); _optPollTimer = null;
+          clearInterval(_optPollTimer); _optPollTimer = null; _optSessionId = null;
           document.getElementById('optProgressBar').style.width = '100%';
           document.getElementById('optProgressPct').textContent = '100%';
           setTimeout(() => { document.getElementById('optProgressWrap').style.display = 'none'; }, 300);
@@ -2104,7 +2241,7 @@ async function startOptimize() {
           btn.disabled = false; btn.innerHTML = '🔍 НАЙТИ ЛУЧШИЕ СТРАТЕГИИ';
           document.getElementById('optAlert').style.display = 'none';
         } else if (sess.status === 'ERROR') {
-          clearInterval(_optPollTimer); _optPollTimer = null;
+          clearInterval(_optPollTimer); _optPollTimer = null; _optSessionId = null;
           document.getElementById('optProgressWrap').style.display = 'none';
           showAlert('optAlert','error','❌ ' + (sess.lastMessage || 'Ошибка'));
           btn.disabled = false; btn.innerHTML = '🔍 НАЙТИ ЛУЧШИЕ СТРАТЕГИИ';
@@ -2410,7 +2547,8 @@ function patchSessionCard(s, prev) {
   if (nameEl) {
     const stoppedUnexpected = s.stoppedUnexpectedly
       ? '<span class="chip" style="background:rgba(255,234,0,0.15);color:var(--yellow);">⚡ ПРЕРВАНО</span>' : '';
-    nameEl.innerHTML = `${escHtml(s.coinName)} <span class="chip">${s.type}</span>${stoppedUnexpected}`;
+    const stratChip = s.params?.strategy === 'atr_ema' ? '<span class="chip" style="background:rgba(255,167,38,0.15);color:#FFA726;">ATR+EMA</span>' : s.params?.recapitalize ? '<span class="chip" style="background:rgba(76,175,80,0.15);color:var(--green);">РЕКАП</span>' : '<span class="chip" style="background:rgba(66,165,245,0.15);color:var(--accent);">Reversal</span>';
+    nameEl.innerHTML = `${escHtml(s.coinName)} <span class="chip">${s.type}</span>${stratChip}${stoppedUnexpected}`;
   }
 
   // session-msg removed from card
@@ -2441,6 +2579,28 @@ function patchSessionCard(s, prev) {
   // Update action buttons
   const actionsEl = card.querySelector('.session-card-actions');
   if (actionsEl) actionsEl.innerHTML = buildActionsHtml(s);
+
+  // Update backtest progress bar in session card
+  if (s.type === 'BACKTEST') {
+    const btCur = s.backtestProgressCurrent || 0;
+    const btTot = s.backtestProgressTotal || 0;
+    const btPct = btTot > 0 ? Math.round(btCur / btTot * 100) : 0;
+    let progEl = card.querySelector('.bt-card-progress');
+    if (s.status === 'RUNNING') {
+      const progHtml = `<div class="bt-card-progress" style="padding:4px 12px 8px;font-size:11px;color:var(--muted)">
+        <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+          <span>⏳ Прогресс: ${btCur} / ${btTot}</span><span style="color:var(--accent);font-weight:700">${btPct}%</span>
+        </div>
+        <div style="width:100%;height:6px;background:var(--bg);border-radius:3px;overflow:hidden">
+          <div style="width:${btPct}%;height:100%;background:linear-gradient(90deg,var(--accent),var(--green));border-radius:3px;transition:width .3s"></div>
+        </div>
+      </div>`;
+      if (progEl) { progEl.outerHTML = progHtml; }
+      else { actionsEl.insertAdjacentHTML('afterend', progHtml); }
+    } else if (progEl) {
+      progEl.remove();
+    }
+  }
 }
 
 // Price line colors — must match chart line colors
@@ -2593,8 +2753,22 @@ function buildSessionCard(s) {
   const tpHtml = buildTargetPricesHtml(s);
   const actionsHtml = buildActionsHtml(s);
 
-  // Chart is shown only for running non-backtest sessions; collapsed state persists via _chartCollapsed
+  // Backtest progress bar in session card
   const isBacktest = s.type === 'BACKTEST';
+  const btCur = s.backtestProgressCurrent || 0;
+  const btTot = s.backtestProgressTotal || 0;
+  const btPct = btTot > 0 ? Math.round(btCur / btTot * 100) : 0;
+  const btProgressHtml = (isBacktest && isRunning) ? `
+      <div class="bt-card-progress" style="padding:4px 12px 8px;font-size:11px;color:var(--muted)">
+        <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+          <span>⏳ Прогресс: ${btCur} / ${btTot}</span><span style="color:var(--accent);font-weight:700">${btPct}%</span>
+        </div>
+        <div style="width:100%;height:6px;background:var(--bg);border-radius:3px;overflow:hidden">
+          <div style="width:${btPct}%;height:100%;background:linear-gradient(90deg,var(--accent),var(--green));border-radius:3px;transition:width .3s"></div>
+        </div>
+      </div>` : '';
+
+  // Chart is shown only for running non-backtest sessions; collapsed state persists via _chartCollapsed
   const isChartCollapsed = _chartCollapsed[s.id] || false;
   const chartHtml = (isRunning && !isBacktest) ? `
       <div class="inline-chart-wrap" id="cwrap-${s.id}">
@@ -2623,6 +2797,7 @@ function buildSessionCard(s) {
         </div>
       </div>
       <div class="session-card-actions" onclick="event.stopPropagation();">${actionsHtml}</div>
+      ${btProgressHtml}
       ${tpHtml}
       ${chartHtml}
     </div>`;
@@ -3155,8 +3330,9 @@ async function restoreBacktestSession(sessionId) {
       return;
     }
     // Determine strategy from result
+    const isAtrEma = result.strategy === 'atr_ema' || (result.topStrategies && result.topStrategies[0]?.strategy === 'atr_ema');
     const isRecap = result.recapitalize === true;
-    const strategy = isRecap ? 'reversal_recap' : 'reversal';
+    const strategy = isAtrEma ? (isRecap ? 'atr_ema_recap' : 'atr_ema') : (isRecap ? 'reversal_recap' : 'reversal');
     const isTop = !!result.topStrategies;
     // Close drawer if open
     if (currentDrawerSession) closeDrawer();
