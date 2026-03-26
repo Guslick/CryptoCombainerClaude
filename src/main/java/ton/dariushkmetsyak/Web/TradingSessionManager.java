@@ -1851,8 +1851,12 @@ public class TradingSessionManager {
         rm.put("totalProfit", result.getTotalProfit());
         rm.put("totalLoss", result.getTotalLoss());
         rm.put("totalCommission", result.getTotalCommission());
+        rm.put("exchangeName", result.getExchangeName());
+        rm.put("commissionRate", result.getCommissionRate());
         rm.put("exchange", commCalc.getExchange().getDisplayName());
         rm.put("feePercent", commCalc.getFeePercent());
+        rm.put("totalProfitAmount", result.getTotalProfitAmount());
+        rm.put("totalLossAmount", result.getTotalLossAmount());
         rm.put("profitAfterCommission", result.getProfitAfterCommission());
         rm.put("winCount", result.getWinCount());
         rm.put("lossCount", result.getLossCount());
