@@ -537,6 +537,7 @@ public class TradingSessionManager {
         p.put("tradingSum", tradingSum); p.put("buyGap", buyGap);
         p.put("sellWithProfitGap", spg); p.put("sellWithLossGap", slg);
         p.put("telegramUpdateSec", timeout); p.put("chartRefreshSec", chartRefresh);
+        p.put("strategy", "reversal"); // default; overridden by ATR+EMA methods
         return p;
     }
 
@@ -1357,6 +1358,114 @@ public class TradingSessionManager {
     }
     public Map<String, Object> getLastTop10Result(String strategy) {
         return lastTop10Results.get(strategy != null ? strategy : "reversal");
+    }
+
+    // ── ATR+EMA Top Strategies (custom ranges, stores in lastBacktestResults) ─
+
+    public SessionInfo startTopStrategiesAtrEma(String coinName, double tradingSum,
+                                                 String chartType, String exchangeName,
+                                                 double commissionRate, int topN,
+                                                 double buyMin, double buyMax, double buyStep,
+                                                 double profitMin, double profitMax, double profitStep,
+                                                 double lossMin, double lossMax, double lossStep,
+                                                 boolean recapitalize) {
+        String id = "optimize_atrema_" + System.currentTimeMillis();
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("tradingSum", tradingSum); params.put("chartType", chartType);
+        params.put("exchangeName", exchangeName); params.put("commissionRate", commissionRate);
+        params.put("topN", topN); params.put("strategy", "atr_ema");
+        if (recapitalize) params.put("recapitalize", true);
+        SessionInfo info = new SessionInfo(id, SessionType.BACKTEST, coinName, params, userId);
+        String strategyKey = recapitalize ? "atr_ema_recap" : "atr_ema";
+        String stratLabel = recapitalize ? " [ATR+EMA РЕКАП]" : " [ATR+EMA]";
+        info.addEvent("START", "Поиск лучших стратегий" + stratLabel + ": " + coinName);
+        Thread t = new Thread(() -> {
+            registerThread(id);
+            try {
+                CommissionCalculator commCalc = new CommissionCalculator(CommissionCalculator.Exchange.BINANCE);
+                Coin coin = CoinsList.getCoinByName(coinName);
+                info.addEvent("INFO", "Загрузка данных...");
+                Chart chart = loadChart(chartType, coin, 0, 0, info);
+                info.addEvent("INFO", "Данные загружены. Перебор ATR+EMA стратегий...");
+
+                java.util.PriorityQueue<Object[]> topHeap = new java.util.PriorityQueue<>(topN + 1,
+                        Comparator.comparingDouble(p -> ((AtrEmaBackTester.BackTestResult) p[0]).getProfitInUsdAfterCommission()));
+
+                int totalIterations = (int) (((buyMax - buyMin) / buyStep + 1)
+                        * ((profitMax - profitMin) / profitStep + 1)
+                        * ((lossMax - lossMin) / lossStep + 1));
+                info.backtestProgressTotal = totalIterations;
+                int done = 0;
+                for (double bg = buyMin; bg <= buyMax + 0.001; bg += buyStep) {
+                    if (Thread.currentThread().isInterrupted()) break;
+                    for (double spg = profitMin; spg <= profitMax + 0.001; spg += profitStep) {
+                        if (Thread.currentThread().isInterrupted()) break;
+                        for (double slg = lossMin; slg <= lossMax + 0.001; slg += lossStep) {
+                            if (Thread.currentThread().isInterrupted()) break;
+                            try {
+                                AtrEmaBackTester tester = new AtrEmaBackTester(
+                                        coin, chart, tradingSum, bg, spg, slg, commCalc, recapitalize);
+                                AtrEmaBackTester.BackTestResult r = tester.startBackTest();
+                                if (r != null) {
+                                    topHeap.add(new Object[]{r, tester});
+                                    while (topHeap.size() > topN) topHeap.poll();
+                                }
+                            } catch (Exception e) {
+                                log.debug("AtrEma optimize bg={} spg={} slg={}: {}", bg, spg, slg, e.getMessage());
+                            }
+                            done++;
+                            info.backtestProgressCurrent = done;
+                        }
+                    }
+                }
+
+                List<Object[]> sorted = new java.util.ArrayList<>(topHeap);
+                sorted.sort(Comparator.comparingDouble(p -> -((AtrEmaBackTester.BackTestResult) p[0]).getProfitInUsdAfterCommission()));
+                List<Map<String, Object>> top = new java.util.ArrayList<>();
+                for (int i = 0; i < Math.min(topN, sorted.size()); i++) {
+                    AtrEmaBackTester.BackTestResult r = (AtrEmaBackTester.BackTestResult) sorted.get(i)[0];
+                    AtrEmaBackTester tester = (AtrEmaBackTester) sorted.get(i)[1];
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("rank", i + 1);
+                    m.put("buyGap", r.getBuyGap());
+                    m.put("sellWithProfitGap", r.getSellWithProfit());
+                    m.put("sellWithLossGap", r.getSellWithLossGap());
+                    m.put("profitUsd", r.getProfitInUsd());
+                    m.put("profitPercent", r.getPercentageProfit());
+                    m.put("totalCommission", r.getTotalCommission());
+                    m.put("profitAfterCommission", r.getProfitAfterCommission());
+                    m.put("winCount", r.getWinCount());
+                    m.put("lossCount", r.getLossCount());
+                    m.put("totalTrades", r.getTotalTrades());
+                    m.put("strategy", "atr_ema");
+                    m.put("recapitalize", recapitalize);
+                    if (r.isEarlyTermination()) m.put("earlyTermination", true);
+                    top.add(m);
+                }
+
+                Map<String, Object> rm = new LinkedHashMap<>();
+                rm.put("coinName", coinName); rm.put("chartType", chartType);
+                rm.put("exchangeName", exchangeName); rm.put("commissionRate", commissionRate);
+                rm.put("topStrategies", top);
+                lastBacktestResults.put(strategyKey, rm);
+                info.backtestResultData = rm;
+                info.status = "DONE"; info.endedAt = System.currentTimeMillis();
+                info.backtestProgressCurrent = info.backtestProgressTotal;
+                info.addEvent("DONE", "[ATR+EMA] Найдено топ-" + top.size() + " стратегий");
+            } catch (Exception e) {
+                if (Thread.currentThread().isInterrupted()) {
+                    info.status = "STOPPED"; info.addEvent("STOP", "Прервано");
+                } else {
+                    info.status = "ERROR"; info.endedAt = System.currentTimeMillis();
+                    info.addEvent("ERROR", "Ошибка: " + e.getMessage());
+                    log.error("AtrEma top strategies error", e);
+                }
+                info.endedAt = System.currentTimeMillis();
+            } finally { unregisterThread(); saveSessions(); }
+        });
+        t.setDaemon(true); info.thread = t;
+        sessions.put(id, info); t.start();
+        return info;
     }
 
     // ══════════════════════════════════════════════════════════════════════════

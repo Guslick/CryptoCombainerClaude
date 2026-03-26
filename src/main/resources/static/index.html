@@ -358,7 +358,6 @@
         </div>
         <div class="tabs sub-tabs" id="strategySubTabs">
           <button class="tab" onclick="showStrategyTab('trade')" id="stab-trade">⚡ ТОРГОВЛЯ</button>
-          <button class="tab" onclick="showStrategyTab('research')" id="stab-research">🔬 ИССЛ.</button>
           <button class="tab" onclick="showStrategyTab('backtest')" id="stab-backtest">🧪 БЭКТЕСТ</button>
           <button class="tab" onclick="showStrategyTab('optimize')" id="stab-optimize">🏆 ТОП</button>
         </div>
@@ -436,7 +435,7 @@
     </div>
 
     <!-- RESEARCH -->
-    <div class="sub-page" id="page-research">
+    <div class="sub-page" id="page-research" style="display:none !important">
       <div class="card">
         <div class="card-title">🔬 ИССЛЕДОВАНИЕ В РЕАЛЬНОМ ВРЕМЕНИ</div>
         <div class="research-hint" style="margin-bottom:12px;">Стратегия запускается на виртуальном аккаунте с реальными ценами.</div>
@@ -1515,11 +1514,13 @@ async function startTrading() {
     if (data.error) throw new Error(data.error);
     showAlert('tradeAlert','success',`✅ Сессия запущена! ID: ${data.id}`);
     showToast('✅ Торговля запущена!');
+    checkActiveSessionBanner(); // refresh banner to disable button for this type
+    return; // keep button disabled — session is running
   } catch(e) {
     const msg = e.name === 'AbortError' ? 'Таймаут запроса. Проверьте сервер и попробуйте снова.' : e.message;
     showAlert('tradeAlert','error','❌ '+msg);
   }
-  finally { btn.disabled=false; btn.innerHTML='▶ ЗАПУСТИТЬ'; }
+  btn.disabled=false; btn.innerHTML='▶ ЗАПУСТИТЬ';
 }
 
 async function stopAllTrading() {
@@ -2615,7 +2616,7 @@ function buildSessionCard(s) {
       <div class="session-card-header" onclick="openDrawer('${s.id}')">
         <div class="session-dot ${s.status}" style="margin-top:4px;flex-shrink:0;width:10px;height:10px;"></div>
         <div class="session-card-body" style="flex:1;min-width:0;">
-          <div class="session-name">${escHtml(s.coinName)} <span class="chip">${s.type}</span>${stoppedUnexpected}</div>
+          <div class="session-name">${escHtml(s.coinName)} <span class="chip">${s.type}</span>${s.params?.strategy === 'atr_ema' ? '<span class="chip" style="background:rgba(255,167,38,0.15);color:#FFA726;">ATR+EMA</span>' : s.params?.recapitalize ? '<span class="chip" style="background:rgba(76,175,80,0.15);color:var(--green);">РЕКАП</span>' : '<span class="chip" style="background:rgba(66,165,245,0.15);color:var(--accent);">Reversal</span>'}${stoppedUnexpected}</div>
           <div class="session-time">▶ ${fmtDateTime(s.startedAt)}${s.endedAt ? '  ⏹ ' + fmtDateTime(s.endedAt) : ''}</div>
           <div class="session-balance">💼 ${balText}</div>
           ${buildSessionStatsHtml(s)}
@@ -3223,52 +3224,52 @@ async function deleteInactiveSessions() {
 
 // ── Per-session chart refresh timers ───────────────────────────────────────
 
+let _globalChartCountdown = 60;
+let _globalChartRefreshSec = 60;
+let _globalChartTimer = null;
+
 function startSessionsRefresh() {
   stopSessionsRefresh();
-  // Light poll: just session metadata (status, balances, prices) — NOT chart data
+  // Metadata poll every 8s for all sessions
   sessionsRefreshTimer = setInterval(loadSessions, 8000);
+  // Single synchronized chart refresh for ALL running sessions
+  if (!_globalChartTimer) {
+    _globalChartCountdown = _globalChartRefreshSec;
+    _globalChartTimer = setInterval(() => {
+      _globalChartCountdown--;
+      // Update all countdowns at once
+      Object.keys(inlineCharts).forEach(id => updateChartCountdown(id, _globalChartCountdown));
+      if (_globalChartCountdown <= 0) {
+        _globalChartCountdown = _globalChartRefreshSec;
+        // Refresh all running charts simultaneously
+        Object.keys(_sessionsData).forEach(id => {
+          const sess = _sessionsData[id];
+          if (sess && sess.status === 'RUNNING' && sess.type !== 'BACKTEST' && inlineCharts[id]) {
+            loadInlineChartData(sess);
+          }
+        });
+      }
+    }, 1000);
+  }
 }
 function stopSessionsRefresh() {
   if (sessionsRefreshTimer) { clearInterval(sessionsRefreshTimer); sessionsRefreshTimer = null; }
+  if (_globalChartTimer) { clearInterval(_globalChartTimer); _globalChartTimer = null; }
 }
 
 function clearChartTimer(id) {
   if (_chartTimers[id]) { clearInterval(_chartTimers[id].interval); delete _chartTimers[id]; }
 }
 
-/** Start (or restart) the per-session chart refresh countdown.
- *  refreshSec comes from session params.chartRefreshSec (default 60). */
+/** Register a session for chart refresh (uses global synchronized timer). */
 function startChartTimer(sessionId, refreshSec) {
-  clearChartTimer(sessionId);
-  let countdown = refreshSec;
-  updateChartCountdown(sessionId, countdown);
-  const iv = setInterval(() => {
-    countdown--;
-    updateChartCountdown(sessionId, countdown);
-    if (countdown <= 0) {
-      countdown = refreshSec;
-      const sess = _sessionsData[sessionId];
-      if (!sess) return;
-      // Self-healing: check if chart DOM still exists and chart is valid
-      const container = document.getElementById('ichart-' + sessionId);
-      const entry = inlineCharts[sessionId];
-      if (!container || !entry) {
-        // Chart was lost — try to reinitialize
-        if (entry) { try { entry.chart.remove(); } catch(e){} delete inlineCharts[sessionId]; }
-        if (container) initInlineChart(sess);
-        return;
-      }
-      // Check if canvas still exists inside container
-      if (!container.querySelector('canvas')) {
-        try { entry.chart.remove(); } catch(e){}
-        delete inlineCharts[sessionId];
-        initInlineChart(sess);
-        return;
-      }
-      loadInlineChartData(sess);
-    }
-  }, 1000);
-  _chartTimers[sessionId] = { interval: iv, refreshSec };
+  // Just update the global refresh interval to the minimum across sessions
+  if (refreshSec < _globalChartRefreshSec) {
+    _globalChartRefreshSec = refreshSec;
+    _globalChartCountdown = Math.min(_globalChartCountdown, refreshSec);
+  }
+  _chartTimers[sessionId] = { refreshSec };
+  updateChartCountdown(sessionId, _globalChartCountdown);
 }
 
 function updateChartCountdown(sessionId, val) {

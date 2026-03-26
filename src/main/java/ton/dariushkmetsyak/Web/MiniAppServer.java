@@ -315,13 +315,23 @@ public class MiniAppServer {
                 double lossMax = toDouble(body.get("lossMax"), 15.0);
                 double lossStep = toDouble(body.get("lossStep"), 1.0);
                 String strategy = (String) body.getOrDefault("strategy", "reversal");
-                boolean recapitalize = "reversal_recap".equals(strategy);
-                TradingSessionManager.SessionInfo info = TradingSessionManager.forUser(userId)
-                        .startTopStrategies(coinName, tradingSum, chartType, exchangeName,
-                                commissionRate, topN,
-                                buyMin, buyMax, buyStep,
-                                profitMin, profitMax, profitStep,
-                                lossMin, lossMax, lossStep, recapitalize);
+                boolean recapitalize = "reversal_recap".equals(strategy) || "atr_ema_recap".equals(strategy);
+                boolean isAtrEma = strategy != null && strategy.startsWith("atr_ema");
+                TradingSessionManager mgr = TradingSessionManager.forUser(userId);
+                TradingSessionManager.SessionInfo info;
+                if (isAtrEma) {
+                    info = mgr.startTopStrategiesAtrEma(coinName, tradingSum, chartType, exchangeName,
+                            commissionRate, topN,
+                            buyMin, buyMax, buyStep,
+                            profitMin, profitMax, profitStep,
+                            lossMin, lossMax, lossStep, recapitalize);
+                } else {
+                    info = mgr.startTopStrategies(coinName, tradingSum, chartType, exchangeName,
+                            commissionRate, topN,
+                            buyMin, buyMax, buyStep,
+                            profitMin, profitMax, profitStep,
+                            lossMin, lossMax, lossStep, recapitalize);
+                }
                 return info.toMap();
             });
         });
