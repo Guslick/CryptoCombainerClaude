@@ -470,6 +470,8 @@ public class MiniAppServer {
     }
 
     public void stop() {
+        log.info("Shutting down MiniAppServer — saving all sessions...");
+        TradingSessionManager.saveAllSessions();
         if (server != null) server.stop(1);
     }
 

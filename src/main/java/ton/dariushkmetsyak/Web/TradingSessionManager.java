@@ -315,6 +315,14 @@ public class TradingSessionManager {
 
     // ── Persistence ───────────────────────────────────────────────────────────
 
+    /** Save sessions for ALL users. Called from shutdown hook. */
+    public static void saveAllSessions() {
+        for (TradingSessionManager mgr : userManagers.values()) {
+            mgr.saveSessions();
+        }
+        log.info("All user sessions saved ({} managers)", userManagers.size());
+    }
+
     public void saveSessions() {
         try {
             Files.createDirectories(Paths.get(new File(sessionStoreFile).getParent()));

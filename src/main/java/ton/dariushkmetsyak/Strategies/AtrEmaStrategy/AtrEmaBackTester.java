@@ -110,7 +110,7 @@ public class AtrEmaBackTester {
         try {
             this.coin = Coin.createCoin(chart.getCoinName());
             Map<Coin, Double> testAssets = new HashMap<>();
-            testAssets.put(USDT, 100d);
+            testAssets.put(USDT, tradingSum);
             testAssets.put(coin, 0d);
             this.account = AccountBuilder.createNewTester(testAssets);
             this.tradingSum = tradingSum;
@@ -334,7 +334,8 @@ public class AtrEmaBackTester {
                 max = true;
                 currentMaxPrice[0] = pointPrice;
                 currentMaxPriceTimestamp[0] = pointTimestamp;
-                if (getDropPercent() > buyGap) {
+                // When price makes a new high and previous drop was > buyGap, reset min
+                if (getDropFromMaxPercent(currentMinPrice[0]) > buyGap) {
                     currentMinPrice[0] = pointPrice;
                 }
             }
@@ -342,10 +343,10 @@ public class AtrEmaBackTester {
                 max = false;
                 currentMinPrice[0] = pointPrice;
                 currentMinPriceTimestamp[0] = pointTimestamp;
-                if (getDropPercent() > buyGap && isAboveEma(pointPrice)) {
-                    // Buy signal: price dropped enough from max AND above EMA (uptrend)
-                    return executeBuy(pointTimestamp, pointPrice);
-                }
+            }
+            // Buy when current price drop from max exceeds buyGap AND price is above EMA (uptrend)
+            if (getDropFromMaxPercent(pointPrice) > buyGap && isAboveEma(pointPrice)) {
+                return executeBuy(pointTimestamp, pointPrice);
             }
         }
 
@@ -355,6 +356,11 @@ public class AtrEmaBackTester {
     private double getDropPercent() {
         if (currentMaxPrice[0] == null || currentMaxPrice[0] <= 0) return 0;
         return 100 - (currentMinPrice[0] / currentMaxPrice[0] * 100);
+    }
+
+    private double getDropFromMaxPercent(double price) {
+        if (currentMaxPrice[0] == null || currentMaxPrice[0] <= 0) return 0;
+        return 100 - (price / currentMaxPrice[0] * 100);
     }
 
     private boolean executeBuy(double ts, double price)

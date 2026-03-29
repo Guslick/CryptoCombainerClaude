@@ -2677,7 +2677,7 @@ function buildTargetPricesHtml(s) {
     const lossSumVal = s.lossSum || 0;
     const isTester = s.type === 'TESTER' || s.type === 'BACKTEST';
     const commissionVal = s.estimatedCommission || 0;
-    const netPnl = profitSumVal + lossSumVal - (isTester ? commissionVal : 0);
+    const netPnl = profitSumVal - lossSumVal - commissionVal;
     const tradeStatsRow = (profitTrades > 0 || lossTrades > 0) ? `
       <span class="tp-label">📊 Сделки:</span><span class="tp-val"><span style="color:${PC.sellProfit}">+${profitTrades}($${profitSumVal.toFixed(2)})</span> <span style="color:${PC.sold}">-${lossTrades}($${Math.abs(lossSumVal).toFixed(2)})</span></span><span class="tp-rem"></span><span></span>
       ${isTester ? `<span class="tp-label">💸 Комиссия:</span><span class="tp-val" style="color:#ffea00">$${commissionVal.toFixed(4)}</span><span class="tp-rem" style="font-size:9px;color:var(--muted)">(Binance est.)</span><span></span>` : ''}` : '';
@@ -3505,8 +3505,9 @@ async function fetchSessionDetail(id) {
 
 function scheduleDrawerRefresh(sess) {
   if (drawerRefreshTimer) clearInterval(drawerRefreshTimer);
-  // Use telegramUpdateSec if available, otherwise 30s
-  const intervalSec = parseInt((sess?.params?.telegramUpdateSec) || 30, 10);
+  // Running sessions refresh every 5s for responsive updates; stopped — use telegramUpdateSec or 30s
+  const isRunning = sess?.status === 'RUNNING';
+  const intervalSec = isRunning ? 5 : parseInt((sess?.params?.telegramUpdateSec) || 30, 10);
   const intervalMs = Math.max(intervalSec, 5) * 1000;
   drawerRefreshTimer = setInterval(refreshDrawer, intervalMs);
 }
@@ -4253,16 +4254,16 @@ async function profLoadReport() {
         const lossSum = s.lossSum || 0;
         const commission = s.estimatedCommission || 0;
         const isTester = s.type === 'TESTER' || s.type === 'BACKTEST';
-        const netPnl = profSum + lossSum;
-        const netPnlAfterComm = netPnl - (isTester ? commission : 0);
+        const netPnl = profSum - lossSum;
+        const netPnlAfterComm = netPnl - commission;
         const hasTrades = profTrades > 0 || lossTrades > 0;
         const tradeStats = hasTrades ? `
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;font-size:10px">
             <span style="color:var(--green)">+${profTrades} ($${profSum.toFixed(2)})</span>
             <span style="color:var(--red)">-${lossTrades} ($${Math.abs(lossSum).toFixed(2)})</span>
             <span style="color:${netPnl>=0?'var(--green)':'var(--red)'}">P&L: ${netPnl>=0?'+':''}${netPnl.toFixed(2)}</span>
-            ${isTester && commission > 0 ? `<span style="color:#ffea00">комиссия: $${commission.toFixed(4)}</span>` : ''}
-            ${isTester && commission > 0 ? `<span style="color:${netPnlAfterComm>=0?'var(--green)':'var(--red)'}">P&L c комис.: ${netPnlAfterComm>=0?'+':''}${netPnlAfterComm.toFixed(2)}</span>` : ''}
+            ${commission > 0 ? `<span style="color:#ffea00">комиссия: $${commission.toFixed(4)}</span>` : ''}
+            ${commission > 0 ? `<span style="color:${netPnlAfterComm>=0?'var(--green)':'var(--red)'}">P&L c комис.: ${netPnlAfterComm>=0?'+':''}${netPnlAfterComm.toFixed(2)}</span>` : ''}
           </div>` : '';
         html += `<div style="background:var(--bg3);border-radius:var(--radius-sm);padding:8px 10px;border:1px solid var(--border)">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
