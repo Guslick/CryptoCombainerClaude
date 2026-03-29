@@ -262,6 +262,18 @@ public class ReversalPointsStrategyTrader {
                                      currentMaxPrice[0] > 0 ? currentMaxPrice[0] : 0}, "initPoint"));
             }
 
+            // Fix stuck state: if not trading but last reversal is "max", add reset
+            // so buy signals are not permanently blocked after a sell
+            if (!trading && !reversalArrayList.isEmpty()) {
+                Reversal last = reversalArrayList.get(reversalArrayList.size() - 1);
+                if ("max".equals(last.tag)) {
+                    reversalArrayList.add(new Reversal(
+                            new double[]{(double) System.currentTimeMillis(),
+                                         currentMinPrice[0] != null ? currentMinPrice[0] : 0}, "sellReset"));
+                    log.info("[Trader] Fixed stuck state: last reversal was 'max' but not trading. Added sellReset.");
+                }
+            }
+
             // Restore trade statistics
             if (state.getWinCount() > 0 || state.getLossCount() > 0) {
                 tradeStats.setWinCount(state.getWinCount());
@@ -413,6 +425,8 @@ public class ReversalPointsStrategyTrader {
                 }
                 currentMinPrice[0] = pointPrice;
                 currentMaxPrice[0] = pointPrice;
+                // Reset reversal so next buy signal is not blocked by stale "max" tag
+                reversalArrayList.add(new Reversal(new double[]{pointTimestamp, pointPrice}, "sellReset"));
                 persistState();
                 return true;
             }
@@ -476,6 +490,8 @@ public class ReversalPointsStrategyTrader {
                 }
                 currentMinPrice[0] = pointPrice;
                 currentMaxPrice[0] = pointPrice;
+                // Reset reversal so next buy signal is not blocked by stale "max" tag
+                reversalArrayList.add(new Reversal(new double[]{pointTimestamp, pointPrice}, "sellReset"));
                 persistState();
                 return true;
             }

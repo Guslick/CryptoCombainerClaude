@@ -1523,7 +1523,7 @@ function toggleVolume() {
 function dedupeVolumeData(rawVolumes, priceData) {
   if (!rawVolumes || !rawVolumes.length) return [];
   const seen = new Set();
-  const sorted = rawVolumes.map(v => ({ time: Math.floor(v[0] / 1000), value: v[1] }))
+  const sorted = rawVolumes.map(v => ({ time: toChartTimeSec(v[0]), value: v[1] }))
     .filter(v => v.value >= 0).sort((a, b) => a.time - b.time)
     .filter(v => { if (seen.has(v.time)) return false; seen.add(v.time); return true; });
   // Color bars: green if price went up, red if down
@@ -1578,7 +1578,7 @@ async function loadChartData(coinId, interval) {
 
 function dedupeChartData(raw) {
   const seen = new Set();
-  return raw.map(p => ({time: Math.floor(p[0]/1000), value:p[1]}))
+  return raw.map(p => ({time: toChartTimeSec(p[0]), value:p[1]}))
     .filter(p => p.value > 0).sort((a,b) => a.time - b.time)
     .filter(p => { if(seen.has(p.time)) return false; seen.add(p.time); return true; });
 }
@@ -2059,7 +2059,7 @@ function showBacktestChart() {
     const ts = Array.isArray(ev) ? ev[0] : ev.timestamp;
     const price = Array.isArray(ev) ? ev[1] : ev.price;
     const type = Array.isArray(ev) ? ev[2] : (ev.eventType != null ? ev.eventType : ev.type); // 0=buy, 1=sell+, 2=sell-
-    const timeSec = Math.floor(ts / 1000);
+    const timeSec = toChartTimeSec(ts);
     priceData.push({ time: timeSec, value: price });
     let color, shape, text;
     if (type === 0) {
@@ -2129,7 +2129,7 @@ function renderYieldChart(containerId, equityCurve, oldInstance, saveInstance, h
   });
 
   const data = equityCurve.map(eq => ({
-    time: Math.floor((eq.timestamp || eq[0]) / 1000),
+    time: toChartTimeSec(eq.timestamp || eq[0]),
     value: eq.equity != null ? eq.equity : eq[1]
   })).sort((a, b) => a.time - b.time);
 
@@ -2149,7 +2149,7 @@ function renderYieldChart(containerId, equityCurve, oldInstance, saveInstance, h
       crosshairMarkerVisible: false,
     });
     const holdData = holdCurve.map(eq => ({
-      time: Math.floor((eq.timestamp || eq[0]) / 1000),
+      time: toChartTimeSec(eq.timestamp || eq[0]),
       value: eq.equity != null ? eq.equity : eq[1]
     })).sort((a, b) => a.time - b.time);
     const holdDeduped = [];
@@ -2374,7 +2374,7 @@ function renderOptChart(idx) {
     const ts = ev.timestamp || ev[0];
     const price = ev.price || ev[1];
     const type = ev.eventType != null ? ev.eventType : (ev[2] != null ? ev[2] : ev.type);
-    const timeSec = Math.floor(ts / 1000);
+    const timeSec = toChartTimeSec(ts);
     priceData.push({ time: timeSec, value: price });
     let color, shape, text;
     if (type === 0) {
@@ -2897,8 +2897,8 @@ function getChartIntervalForSession(sess) {
  *  Before session: dim gray. During session: accent cyan. After session: dim gray.
  *  Uses two line series stored in entry.lineBefore and entry.lineAfter. */
 function applySessionRangeColoring(entry, data, sess) {
-  const sessionStartSec = sess.startedAt ? Math.floor(sess.startedAt / 1000) : null;
-  const sessionEndSec   = sess.endedAt   ? Math.floor(sess.endedAt   / 1000) : null;
+  const sessionStartSec = sess.startedAt ? toChartTimeSec(sess.startedAt) : null;
+  const sessionEndSec   = sess.endedAt   ? toChartTimeSec(sess.endedAt)   : null;
   const GRAY  = 'rgba(104,120,168,0.35)';
   const CYAN  = '#00e5ff';
 
@@ -3095,7 +3095,7 @@ function applyChartMarkers(lineSeries, data, events, inlineMode = false) {
   const markers = events
     .filter(e => e.type === 'BUY' || e.type === 'SELL')
     .map(e => {
-      const rawT = Math.floor(e.timestamp / 1000);
+      const rawT = toChartTimeSec(e.timestamp);
       const nearest = snapToNearestPoint(rawT);
       const gapSec = Math.abs(nearest.time - rawT);
       // In inline mode, skip markers that are > 20 minutes away from any candle
@@ -3735,6 +3735,11 @@ function fmtDateTime(ts) {
 function fmtTime(ts) {
   if (!ts) return '';
   return new Date(ts).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+/** Convert ms timestamp to seconds with local timezone offset for lightweight-charts */
+function toChartTimeSec(tsMs) {
+  const tsSec = Math.floor(tsMs / 1000);
+  return tsSec - new Date(tsMs).getTimezoneOffset() * 60;
 }
 function escHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function showAlert(id,type,msg) {
