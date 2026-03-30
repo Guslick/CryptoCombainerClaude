@@ -311,7 +311,8 @@ public class AtrEmaTrader {
     }
 
     private boolean isAboveEma(double price) {
-        return Double.isNaN(currentEma) || price > currentEma;
+        if (Double.isNaN(currentEma)) return false;
+        return price > currentEma;
     }
 
     private boolean isBelowEma(double price) {

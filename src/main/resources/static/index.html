@@ -335,26 +335,21 @@
         <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
           <button class="btn btn-primary" style="text-align:left;padding:12px 16px" onclick="selectStrategy('reversal')">
             <div style="font-family:var(--font-head);font-size:13px;font-weight:700">📐 Разворотные точки</div>
-            <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:4px">Покупка при падении от максимума, продажа по целям прибыли/убытка. Фиксированная сумма сделки.</div>
-          </button>
-          <button class="btn btn-primary" style="text-align:left;padding:12px 16px;border:1px solid var(--green)" onclick="selectStrategy('reversal_recap')">
-            <div style="font-family:var(--font-head);font-size:13px;font-weight:700">📐💹 Разворотные точки + Рекапитализация</div>
-            <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:4px">Та же логика, но после каждого цикла покупка-продажа сумма сделки обновляется с учётом результата. Прибыль наращивает капитал, убыток уменьшает.</div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:4px">Покупка при падении от максимума, продажа по целям прибыли/убытка.</div>
           </button>
           <button class="btn btn-primary" style="text-align:left;padding:12px 16px;border:1px solid #FFA726" onclick="selectStrategy('atr_ema')">
             <div style="font-family:var(--font-head);font-size:13px;font-weight:700">📐📊 ATR+EMA Адаптивная</div>
-            <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:4px">Разворотные точки с адаптивными порогами (ATR — волатильность, EMA-50 — тренд). Покупает только в восходящем тренде, пороги автоматически подстраиваются.</div>
-          </button>
-          <button class="btn btn-primary" style="text-align:left;padding:12px 16px;border:1px solid #FFA726;border-style:dashed" onclick="selectStrategy('atr_ema_recap')">
-            <div style="font-family:var(--font-head);font-size:13px;font-weight:700">📐📊💹 ATR+EMA + Рекапитализация</div>
-            <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:4px">ATR+EMA с рекапитализацией: прибыль увеличивает объём следующей сделки.</div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:4px">Разворотные точки с адаптивными порогами (ATR — волатильность, EMA-50 — тренд). Покупает только в восходящем тренде.</div>
           </button>
         </div>
       </div>
       <div id="strategyWorkspace" style="display:none">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
           <button class="btn btn-secondary btn-sm" onclick="deselectStrategy()" style="font-size:10px">← Назад</button>
           <span id="strategyTitle" style="font-family:var(--font-head);font-size:12px;color:var(--accent)"></span>
+          <label style="margin-left:auto;display:flex;align-items:center;gap:5px;font-size:11px;color:var(--green);cursor:pointer">
+            <input type="checkbox" id="recapCheckbox" onchange="updateStrategyTitle()"> 💹 Рекапитализация
+          </label>
         </div>
         <div class="tabs sub-tabs" id="strategySubTabs">
           <button class="tab" onclick="showStrategyTab('trade')" id="stab-trade">⚡ ТОРГОВЛЯ</button>
@@ -1095,12 +1090,15 @@ function goToStrategyTab(tabId) {
 }
 
 function selectStrategy(strategyId) {
-  _selectedStrategy = strategyId;
-  try { localStorage.setItem('cc_strategy', strategyId); } catch(e) {}
+  // Handle legacy recap IDs: extract base strategy and set checkbox
+  const isRecap = strategyId.endsWith('_recap');
+  _selectedStrategy = isRecap ? strategyId.replace('_recap', '') : strategyId;
+  const cb = document.getElementById('recapCheckbox');
+  if (cb) cb.checked = isRecap;
+  try { localStorage.setItem('cc_strategy', _selectedStrategy); localStorage.setItem('cc_recap', isRecap ? '1' : '0'); } catch(e) {}
   document.getElementById('strategySelector').style.display = 'none';
   document.getElementById('strategyWorkspace').style.display = 'block';
-  const titles = { reversal: '📐 Разворотные точки', reversal_recap: '📐💹 Разворотные точки + Рекап', atr_ema: '📐📊 ATR+EMA Адаптивная', atr_ema_recap: '📐📊💹 ATR+EMA + Рекап' };
-  document.getElementById('strategyTitle').textContent = titles[strategyId] || strategyId;
+  updateStrategyTitle();
   // Clear previous strategy results to prevent leaking between strategies
   _btLastResult = null;
   _optResults = [];
@@ -1109,6 +1107,21 @@ function selectStrategy(strategyId) {
   document.getElementById('btYieldCard').style.display = 'none';
   document.getElementById('optResultCard').style.display = 'none';
   showStrategyTab('trade');
+}
+
+function updateStrategyTitle() {
+  const recap = document.getElementById('recapCheckbox')?.checked;
+  try { localStorage.setItem('cc_recap', recap ? '1' : '0'); } catch(e) {}
+  const titles = { reversal: '📐 Разворотные точки', atr_ema: '📐📊 ATR+EMA Адаптивная' };
+  const base = titles[_selectedStrategy] || _selectedStrategy;
+  document.getElementById('strategyTitle').textContent = base + (recap ? ' + 💹 Рекап' : '');
+}
+
+/** Returns the effective strategy ID including recap suffix */
+function getEffectiveStrategy() {
+  const base = _selectedStrategy || 'reversal';
+  const recap = document.getElementById('recapCheckbox')?.checked;
+  return recap ? base + '_recap' : base;
 }
 
 function deselectStrategy() {
@@ -1166,7 +1179,7 @@ async function resumeBacktestState() {
             document.getElementById('btProgressBar').style.width = '100%';
             document.getElementById('btProgressPct').textContent = '100%';
             setTimeout(() => { document.getElementById('btProgressWrap').style.display = 'none'; }, 300);
-            const strat = _selectedStrategy || 'reversal';
+            const strat = getEffectiveStrategy();
             const rr = await fetch(`${API_BASE}/api/backtest/result?strategy=${strat}`, { headers: authHeaders() });
             const result = await rr.json();
             _btLastResult = result;
@@ -1184,7 +1197,7 @@ async function resumeBacktestState() {
     } else if (sess.status === 'DONE') {
       // Already done — show result if available
       _btSessionId = null;
-      const strat = _selectedStrategy || 'reversal';
+      const strat = getEffectiveStrategy();
       const rr = await fetch(`${API_BASE}/api/backtest/result?strategy=${strat}`, { headers: authHeaders() });
       const result = await rr.json();
       if (result && result.ready !== false) {
@@ -1232,7 +1245,7 @@ async function resumeOptimizeState() {
             document.getElementById('optProgressBar').style.width = '100%';
             document.getElementById('optProgressPct').textContent = '100%';
             setTimeout(() => { document.getElementById('optProgressWrap').style.display = 'none'; }, 300);
-            const strat = _selectedStrategy || 'reversal';
+            const strat = getEffectiveStrategy();
             const rr = await fetch(`${API_BASE}/api/backtest/result?strategy=${strat}`, { headers: authHeaders() });
             const optResult = await rr.json();
             showOptimizeResult(optResult.topStrategies || []);
@@ -1248,7 +1261,7 @@ async function resumeOptimizeState() {
       }, 700);
     } else if (sess.status === 'DONE') {
       _optSessionId = null;
-      const strat = _selectedStrategy || 'reversal';
+      const strat = getEffectiveStrategy();
       const rr = await fetch(`${API_BASE}/api/backtest/result?strategy=${strat}`, { headers: authHeaders() });
       const optResult = await rr.json();
       if (optResult && optResult.topStrategies) {
@@ -1632,7 +1645,7 @@ async function startTrading() {
   btn.disabled = true; btn.innerHTML = '<div class="spinner"></div> Запуск...';
   const body = {
     type: document.getElementById('tradeType').value, coin,
-    strategy: _selectedStrategy || 'reversal',
+    strategy: getEffectiveStrategy(),
     startAssets: +document.getElementById('tradeStartAssets').value||150,
     tradingSum: +document.getElementById('tradeTradingSum').value||100,
     buyGap: +document.getElementById('tradeBuyGap').value||3.5,
@@ -1672,7 +1685,7 @@ async function startResearch() {
   if (btn) { btn.disabled = true; btn.innerHTML = '<div class="spinner"></div> Запуск...'; }
   const body = {
     type:'research', coin,
-    strategy: _selectedStrategy || 'reversal',
+    strategy: getEffectiveStrategy(),
     startAssets: +document.getElementById('resStartAssets').value||150,
     tradingSum: +document.getElementById('resTradingSum').value||100,
     buyGap: +document.getElementById('resBuyGap').value||3.5,
@@ -1739,7 +1752,7 @@ async function startBacktest() {
     sellWithLossGap: +document.getElementById('btSellLoss').value||8.0,
     chartType: document.getElementById('btChartType').value,
     exchangeName: exchange, commissionRate,
-    strategy: _selectedStrategy || 'reversal',
+    strategy: getEffectiveStrategy(),
   };
   if (body.chartType === 'custom') {
     const fromVal = document.getElementById('btCustomFrom').value;
@@ -1771,7 +1784,7 @@ async function startBacktest() {
           document.getElementById('btProgressBar').style.width = '100%';
           document.getElementById('btProgressPct').textContent = '100%';
           setTimeout(() => { document.getElementById('btProgressWrap').style.display='none'; }, 300);
-          const strat = _selectedStrategy || 'reversal';
+          const strat = getEffectiveStrategy();
           const rr = await fetch(`${API_BASE}/api/backtest/result?strategy=${strat}`, {headers:authHeaders()});
           const result = await rr.json();
           _btLastResult = result;
@@ -2200,7 +2213,7 @@ async function startOptimize() {
     lossMin: +document.getElementById('optLossMin').value || 3,
     lossMax: +document.getElementById('optLossMax').value || 15,
     lossStep: +document.getElementById('optLossStep').value || 1,
-    strategy: _selectedStrategy || 'reversal',
+    strategy: getEffectiveStrategy(),
   };
 
   if (_optPollTimer) { clearInterval(_optPollTimer); _optPollTimer = null; }
@@ -2234,7 +2247,7 @@ async function startOptimize() {
           document.getElementById('optProgressPct').textContent = '100%';
           setTimeout(() => { document.getElementById('optProgressWrap').style.display = 'none'; }, 300);
           // Fetch optimize result (stored in lastBacktestResult as {topStrategies:[...]})
-          const strat = _selectedStrategy || 'reversal';
+          const strat = getEffectiveStrategy();
           const rr = await fetch(`${API_BASE}/api/backtest/result?strategy=${strat}`, { headers: authHeaders() });
           const optResult = await rr.json();
           showOptimizeResult(optResult.topStrategies || []);
@@ -2547,7 +2560,7 @@ function patchSessionCard(s, prev) {
   if (nameEl) {
     const stoppedUnexpected = s.stoppedUnexpectedly
       ? '<span class="chip" style="background:rgba(255,234,0,0.15);color:var(--yellow);">⚡ ПРЕРВАНО</span>' : '';
-    const stratChip = s.params?.strategy === 'atr_ema' ? '<span class="chip" style="background:rgba(255,167,38,0.15);color:#FFA726;">ATR+EMA</span>' : s.params?.recapitalize ? '<span class="chip" style="background:rgba(76,175,80,0.15);color:var(--green);">РЕКАП</span>' : '<span class="chip" style="background:rgba(66,165,245,0.15);color:var(--accent);">Reversal</span>';
+    const stratChip = buildStrategyChip(s);
     nameEl.innerHTML = `${escHtml(s.coinName)} <span class="chip">${s.type}</span>${stratChip}${stoppedUnexpected}`;
   }
 
@@ -2790,7 +2803,7 @@ function buildSessionCard(s) {
       <div class="session-card-header" onclick="openDrawer('${s.id}')">
         <div class="session-dot ${s.status}" style="margin-top:4px;flex-shrink:0;width:10px;height:10px;"></div>
         <div class="session-card-body" style="flex:1;min-width:0;">
-          <div class="session-name">${escHtml(s.coinName)} <span class="chip">${s.type}</span>${s.params?.strategy === 'atr_ema' ? '<span class="chip" style="background:rgba(255,167,38,0.15);color:#FFA726;">ATR+EMA</span>' : s.params?.recapitalize ? '<span class="chip" style="background:rgba(76,175,80,0.15);color:var(--green);">РЕКАП</span>' : '<span class="chip" style="background:rgba(66,165,245,0.15);color:var(--accent);">Reversal</span>'}${stoppedUnexpected}</div>
+          <div class="session-name">${escHtml(s.coinName)} <span class="chip">${s.type}</span>${buildStrategyChip(s)}${stoppedUnexpected}</div>
           <div class="session-time">▶ ${fmtDateTime(s.startedAt)}${s.endedAt ? '  ⏹ ' + fmtDateTime(s.endedAt) : ''}</div>
           <div class="session-balance">💼 ${balText}</div>
           ${buildSessionStatsHtml(s)}
@@ -3736,6 +3749,15 @@ function fmtTime(ts) {
   if (!ts) return '';
   return new Date(ts).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
 }
+function buildStrategyChip(s) {
+  const strat = s.params?.strategy || '';
+  const isAtr = strat.includes('atr_ema');
+  const isRecap = strat.includes('recap') || s.params?.recapitalize;
+  if (isAtr && isRecap) return '<span class="chip" style="background:rgba(255,167,38,0.15);color:#FFA726;">ATR+EMA+Рекап</span>';
+  if (isAtr) return '<span class="chip" style="background:rgba(255,167,38,0.15);color:#FFA726;">ATR+EMA</span>';
+  if (isRecap) return '<span class="chip" style="background:rgba(76,175,80,0.15);color:var(--green);">Reversal+Рекап</span>';
+  return '<span class="chip" style="background:rgba(66,165,245,0.15);color:var(--accent);">Reversal</span>';
+}
 /** Convert ms timestamp to seconds with local timezone offset for lightweight-charts */
 function toChartTimeSec(tsMs) {
   const tsSec = Math.floor(tsMs / 1000);
@@ -4337,10 +4359,12 @@ function profReadPem(suffix, input) {
 // ============================================================
 (async function init() {
   restoreFields();
-  // Restore saved strategy selection
+  // Restore saved strategy selection + recap checkbox
   try {
     const savedStrategy = localStorage.getItem('cc_strategy');
     if (savedStrategy) _selectedStrategy = savedStrategy;
+    const savedRecap = localStorage.getItem('cc_recap');
+    if (savedRecap === '1') { const cb = document.getElementById('recapCheckbox'); if (cb) cb.checked = true; }
   } catch(e) {}
   updateTradeForm();
   updateExchangeBadge();

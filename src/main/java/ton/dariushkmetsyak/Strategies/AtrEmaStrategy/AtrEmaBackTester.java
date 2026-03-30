@@ -212,7 +212,9 @@ public class AtrEmaBackTester {
     }
 
     private boolean isAboveEma(double price) {
-        return Double.isNaN(currentEma) || price > currentEma;
+        // Don't allow buys until EMA is initialized (needs ~50 data points)
+        if (Double.isNaN(currentEma)) return false;
+        return price > currentEma;
     }
 
     private boolean isBelowEma(double price) {
