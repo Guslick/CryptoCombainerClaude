@@ -456,15 +456,40 @@ public class AtrEmaTrader {
             throws NoSuchSymbolException, InsufficientAmountOfUsdtException {
         Double buyResult = null;
         String failureReason = "";
-        try {
-            buyResult = account.trader().buy(coin, executionPrice, tradingSum / executionPrice);
-            if (buyResult == null) failureReason = "null result from exchange";
-        } catch (InsufficientAmountOfUsdtException | NoSuchSymbolException e) {
-            failureReason = e.getMessage();
-            throw e;
-        } catch (RuntimeException e) {
-            failureReason = e.getMessage();
-            log.warn("Buy attempt failed", e);
+        // Retry up to 3 times with backoff for transient failures
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            try {
+                double currentExecPrice = executionPrice;
+                if (attempt > 1) {
+                    try {
+                        currentExecPrice = Prices.round(Account.getCurrentPrice(coin));
+                        log.info("[ATR+EMA] Buy retry #{}: updated price ${} -> ${}", attempt, Prices.round(executionPrice), Prices.round(currentExecPrice));
+                    } catch (Exception ignored) {}
+                }
+                buyResult = account.trader().buy(coin, currentExecPrice, tradingSum / currentExecPrice);
+                if (buyResult != null) {
+                    if (attempt > 1) log.info("[ATR+EMA] Buy succeeded on attempt #{}", attempt);
+                    break;
+                }
+                failureReason = "null result from exchange";
+                if (attempt < 3) {
+                    log.warn("[ATR+EMA] Buy attempt #{} returned null, retrying in {}s...", attempt, attempt * 2);
+                    try { TimeUnit.SECONDS.sleep(attempt * 2L); } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt(); break;
+                    }
+                }
+            } catch (InsufficientAmountOfUsdtException | NoSuchSymbolException e) {
+                failureReason = e.getMessage();
+                throw e;
+            } catch (RuntimeException e) {
+                failureReason = e.getMessage();
+                log.warn("[ATR+EMA] Buy attempt #{} failed: {}", attempt, failureReason);
+                if (attempt < 3) {
+                    try { TimeUnit.SECONDS.sleep(attempt * 2L); } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt(); break;
+                    }
+                }
+            }
         }
 
         if (buyResult != null) {

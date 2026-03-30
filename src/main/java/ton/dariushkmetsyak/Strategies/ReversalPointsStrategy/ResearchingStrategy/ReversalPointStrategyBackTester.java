@@ -344,9 +344,6 @@ public class ReversalPointStrategyBackTester {
                 chartScreenshotMessage = "SOLD WITH PROFIT";
                 trading = false;
                 isSold=false;
-                currentMinPrice[0] = pointPrice;
-                currentMaxPrice[0] = pointPrice;
-                reversalArrayList.add(new Reversal(new double[]{pointTimestamp, pointPrice}, "sellReset"));
                 return true;
             }
             if (((buyPrice - pointPrice) / buyPrice * 100) > sellWithLossGap) {
@@ -398,9 +395,6 @@ public class ReversalPointStrategyBackTester {
                 chartScreenshotMessage = "SOLD WITH LOSS";
                 trading = false;
                 isSold=false;
-                currentMinPrice[0] = pointPrice;
-                currentMaxPrice[0] = pointPrice;
-                reversalArrayList.add(new Reversal(new double[]{pointTimestamp, pointPrice}, "sellReset"));
                 return true;
             }
         }

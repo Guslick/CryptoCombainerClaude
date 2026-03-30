@@ -425,8 +425,6 @@ public class ReversalPointsStrategyTrader {
                 }
                 currentMinPrice[0] = pointPrice;
                 currentMaxPrice[0] = pointPrice;
-                // Reset reversal so next buy signal is not blocked by stale "max" tag
-                reversalArrayList.add(new Reversal(new double[]{pointTimestamp, pointPrice}, "sellReset"));
                 persistState();
                 return true;
             }
@@ -490,8 +488,6 @@ public class ReversalPointsStrategyTrader {
                 }
                 currentMinPrice[0] = pointPrice;
                 currentMaxPrice[0] = pointPrice;
-                // Reset reversal so next buy signal is not blocked by stale "max" tag
-                reversalArrayList.add(new Reversal(new double[]{pointTimestamp, pointPrice}, "sellReset"));
                 persistState();
                 return true;
             }
@@ -546,15 +542,41 @@ public class ReversalPointsStrategyTrader {
             throws NoSuchSymbolException, InsufficientAmountOfUsdtException {
         Double buyResult = null;
         String failureReason = "";
-        try {
-            buyResult = account.trader().buy(coin, executionPrice, tradingSum / executionPrice);
-            if (buyResult == null) failureReason = "биржа не подтвердила исполнение ордера (null)";
-        } catch (InsufficientAmountOfUsdtException | NoSuchSymbolException e) {
-            failureReason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-            throw e;
-        } catch (RuntimeException e) {
-            failureReason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-            log.warn("Buy attempt failed", e);
+        // Retry up to 3 times with backoff for transient failures (null return)
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            try {
+                // Re-fetch current price on retry to get accurate execution price
+                double currentExecPrice = executionPrice;
+                if (attempt > 1) {
+                    try {
+                        currentExecPrice = Prices.round(Account.getCurrentPrice(coin));
+                        log.info("[Trader] Buy retry #{}: updated price ${} -> ${}", attempt, Prices.round(executionPrice), Prices.round(currentExecPrice));
+                    } catch (Exception ignored) { /* use original price */ }
+                }
+                buyResult = account.trader().buy(coin, currentExecPrice, tradingSum / currentExecPrice);
+                if (buyResult != null) {
+                    if (attempt > 1) log.info("[Trader] Buy succeeded on attempt #{}", attempt);
+                    break; // success
+                }
+                failureReason = "биржа не подтвердила исполнение ордера (null)";
+                if (attempt < 3) {
+                    log.warn("[Trader] Buy attempt #{} returned null, retrying in {}s...", attempt, attempt * 2);
+                    try { TimeUnit.SECONDS.sleep(attempt * 2L); } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt(); break;
+                    }
+                }
+            } catch (InsufficientAmountOfUsdtException | NoSuchSymbolException e) {
+                failureReason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+                throw e;
+            } catch (RuntimeException e) {
+                failureReason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+                log.warn("[Trader] Buy attempt #{} failed: {}", attempt, failureReason);
+                if (attempt < 3) {
+                    try { TimeUnit.SECONDS.sleep(attempt * 2L); } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt(); break;
+                    }
+                }
+            }
         }
 
         if (buyResult != null) {
