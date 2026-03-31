@@ -345,10 +345,10 @@ public class AtrEmaBackTester {
                 max = false;
                 currentMinPrice[0] = pointPrice;
                 currentMinPriceTimestamp[0] = pointTimestamp;
-            }
-            // Buy when current price drop from max exceeds buyGap AND price is above EMA (uptrend)
-            if (getDropFromMaxPercent(pointPrice) > buyGap && isAboveEma(pointPrice)) {
-                return executeBuy(pointTimestamp, pointPrice);
+                // Buy only at new local minimum when drop from max exceeds buyGap AND price is above EMA
+                if (getDropFromMaxPercent(pointPrice) > buyGap && isAboveEma(pointPrice)) {
+                    return executeBuy(pointTimestamp, pointPrice);
+                }
             }
         }
 

@@ -374,11 +374,11 @@ public class AtrEmaTrader {
                 max = false;
                 currentMinPrice[0] = pointPrice;
                 currentMinPriceTimestamp[0] = pointTimestamp;
-            }
-
-            double dropPct = getDropFromMaxPercent(pointPrice);
-            if (dropPct > buyGap && isAboveEma(pointPrice) && !trading) {
-                attemptBuy(pointTimestamp, pointPrice);
+                // Buy only at new local minimum when drop from max exceeds buyGap AND above EMA
+                double dropPct = getDropFromMaxPercent(pointPrice);
+                if (dropPct > buyGap && isAboveEma(pointPrice) && !trading) {
+                    attemptBuy(pointTimestamp, pointPrice);
+                }
             }
         }
 
