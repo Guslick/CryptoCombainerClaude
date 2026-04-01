@@ -54,7 +54,10 @@ public class TradingSessionManager {
      * @param userId Telegram user ID. Use 0 for legacy/unauthenticated.
      */
     public static TradingSessionManager forUser(long userId) {
-        return userManagers.computeIfAbsent(userId, TradingSessionManager::new);
+        TradingSessionManager mgr = userManagers.computeIfAbsent(userId, TradingSessionManager::new);
+        // Ensure persisted sessions/events are available after JVM restart
+        mgr.loadSessions();
+        return mgr;
     }
 
     /** Legacy compatibility — returns global (userId=0) manager */
@@ -346,6 +349,7 @@ public class TradingSessionManager {
         }
         File f = new File(sessionStoreFile);
         if (!f.exists()) { sessionsLoaded = true; return; }
+        boolean mutatedDuringLoad = false;
         try {
             List<Map<String, Object>> list = mapper.readValue(f, List.class);
             for (Map<String, Object> m : list) {
@@ -395,6 +399,7 @@ public class TradingSessionManager {
                     info.stoppedUnexpectedly = true;
                     info.endedAt = System.currentTimeMillis();
                     info.addEvent("ERROR", "Сессия прервана (JVM завершён) — ожидает возобновления");
+                    mutatedDuringLoad = true;
                 }
                 // Skip sessions already in memory (e.g. already running after resume)
                 SessionInfo existing = sessions.get(info.id);
@@ -410,6 +415,8 @@ public class TradingSessionManager {
             }
             sessionsLoaded = true;
             log.info("Loaded {} sessions for user {}", sessions.size(), userId);
+            // Persist "RUNNING -> STOPPED (unexpected)" transitions immediately
+            if (mutatedDuringLoad) saveSessions();
         } catch (Exception e) {
             log.warn("Failed to load sessions for user {}: {}", userId, e.getMessage());
         }
