@@ -3,6 +3,7 @@ import ton.dariushkmetsyak.Charts.Chart;
 import ton.dariushkmetsyak.Commission.CommissionCalculator;
 import ton.dariushkmetsyak.GeckoApiService.geckoEntities.Coin;
 import ton.dariushkmetsyak.Graphics.DrawTradingChart.TradingChart;
+import ton.dariushkmetsyak.Strategies.Core.ReversalDecisionEngine;
 import ton.dariushkmetsyak.Telegram.ImageAndMessageSender;
 import ton.dariushkmetsyak.TradingApi.ApiService.Account;
 import ton.dariushkmetsyak.TradingApi.ApiService.AccountBuilder;
@@ -73,6 +74,14 @@ public class ReversalPointStrategyBackTester {
     private final List<Map<String, Object>> tradeReport = new ArrayList<>();
     // Track last max price seen (for buy report: drop from max)
     private double lastMaxPriceForReport = 0;
+    // Let profits run: sell only after pullback from local peak once target is reached
+    private final double profitTrailGapPercent = 1.0;
+    private final boolean trailProfitEnabled;
+    private boolean profitTrailArmed = false;
+    private double peakPriceSinceBuy = 0;
+    private final ReversalDecisionEngine decisionEngine = new ReversalDecisionEngine();
+    private ReversalDecisionEngine.State decisionState;
+    private ReversalDecisionEngine.Params decisionParams;
     static {
         try {
             USDT=Coin.createCoin("Tether");
@@ -94,23 +103,29 @@ public class ReversalPointStrategyBackTester {
     public List<Map<String, Object>> getTradeReport() { return tradeReport; }
 
     public ReversalPointStrategyBackTester(Coin coin, Chart chart, double tradingSum, double buyGap, double sellWithProfitGap, double sellWithLossGap) {
-        this(coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, new CommissionCalculator(CommissionCalculator.Exchange.BINANCE));
+        this(coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, new CommissionCalculator(CommissionCalculator.Exchange.BINANCE), false, false);
     }
 
     public ReversalPointStrategyBackTester(Coin coin, Chart chart, double tradingSum, double buyGap, double sellWithProfitGap, double sellWithLossGap, String exchangeName, double commissionRate) {
-        this(coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, new CommissionCalculator(CommissionCalculator.Exchange.BINANCE));
+        this(coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, new CommissionCalculator(CommissionCalculator.Exchange.BINANCE), false, false);
     }
 
     public ReversalPointStrategyBackTester(Coin coin, Chart chart, double tradingSum, double buyGap, double sellWithProfitGap, double sellWithLossGap, CommissionCalculator commissionCalc) {
-        this(coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, commissionCalc, false);
+        this(coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, commissionCalc, false, false);
     }
 
     public ReversalPointStrategyBackTester(Coin coin, Chart chart, double tradingSum, double buyGap, double sellWithProfitGap, double sellWithLossGap, CommissionCalculator commissionCalc, boolean recapitalize) {
+        this(coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, commissionCalc, recapitalize, false);
+    }
+
+    public ReversalPointStrategyBackTester(Coin coin, Chart chart, double tradingSum, double buyGap, double sellWithProfitGap, double sellWithLossGap, CommissionCalculator commissionCalc, boolean recapitalize, boolean trailProfitEnabled) {
         try {
             this.coin=Coin.createCoin(chart.getCoinName());
             Map<Coin, Double> testAssets = new HashMap<>();
             testAssets.put(USDT, 100d);
-            testAssets.put(coin, 0d);
+            // IMPORTANT: use the exact Coin instance stored in this.coin as wallet key
+            // otherwise wallet lookups by this.coin return 0 and all trade sizes become zero.
+            testAssets.put(this.coin, 0d);
             this.account= AccountBuilder.createNewTester(testAssets);
             this.tradingSum=tradingSum;
             this.initialTradingSum=tradingSum;
@@ -118,8 +133,10 @@ public class ReversalPointStrategyBackTester {
             this.chart=chart;
             this.sellWithProfitGap = sellWithProfitGap;
             this.sellWithLossGap = sellWithLossGap;
+            this.decisionParams = new ReversalDecisionEngine.Params(buyGap, sellWithProfitGap, sellWithLossGap);
             this.commissionCalc = commissionCalc;
             this.recapitalize = recapitalize;
+            this.trailProfitEnabled = trailProfitEnabled;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -288,14 +305,49 @@ public class ReversalPointStrategyBackTester {
 
     private void init (double pointTimestamp, double pointPrice){
         reversalArrayList.add(new ReversalPointStrategyBackTester.Reversal(new double[]{pointTimestamp, pointPrice}, "initPoint"));
+        this.decisionState = decisionEngine.init(pointTimestamp, pointPrice);
+        this.currentMinPrice[0] = pointPrice;
+        this.currentMaxPrice[0] = pointPrice;
+        this.currentMinPriceTimestamp[0] = pointTimestamp;
+        this.currentMaxPriceTimestamp[0] = pointTimestamp;
     }
     private boolean startBackTestingPoint(double pointTimestamp, double pointPrice) throws NoSuchSymbolException, InsufficientAmountOfUsdtException {
 
         this.pointPrice = pointPrice;
         hasPrices = true;
+        boolean wasTrading = this.trading;
+        // Keep decision state aligned with runtime position before evaluating next tick
+        decisionState.trading = this.trading;
+        decisionState.buyPrice = this.buyPrice;
 
-        if (trading) {
-            if (((pointPrice - buyPrice) / buyPrice * 100) > sellWithProfitGap) {
+        ReversalDecisionEngine.Decision decision = decisionEngine.onTick(
+                decisionState, decisionParams, pointTimestamp, pointPrice
+        );
+        // Keep runtime position state authoritative; sync only wave extrema from decision state.
+        this.currentMinPrice[0] = decisionState.currentMinPrice;
+        this.currentMaxPrice[0] = decisionState.currentMaxPrice;
+        this.currentMinPriceTimestamp[0] = decisionState.currentMinPriceTimestamp;
+        this.currentMaxPriceTimestamp[0] = decisionState.currentMaxPriceTimestamp;
+
+        if (decision.newReversalPoint != null) {
+            reversalArrayList.add(new Reversal(
+                    new double[]{decision.newReversalPoint.timestamp, decision.newReversalPoint.price},
+                    decision.newReversalPoint.tag
+            ));
+        }
+
+        if (trailProfitEnabled && wasTrading) {
+            if (pointPrice > peakPriceSinceBuy) peakPriceSinceBuy = pointPrice;
+            if (buyPrice > 0 && pointPrice >= buyPrice * (1 + sellWithProfitGap / 100.0)) {
+                profitTrailArmed = true;
+            }
+        }
+        boolean trailingProfitExit = wasTrading
+                && (!trailProfitEnabled || (profitTrailArmed
+                && peakPriceSinceBuy > 0
+                && ((peakPriceSinceBuy - pointPrice) / peakPriceSinceBuy * 100.0) >= profitTrailGapPercent));
+
+        if (decision.action == ReversalDecisionEngine.Action.SELL_PROFIT && wasTrading && trailingProfitExit) {
                     Double coinQuantityInWallet = account.wallet().getAllAssets().get(coin);
                     Double UsdtQuantityInWallet = account.wallet().getAllAssets().get(USDT);
                     double sellValue = coinQuantityInWallet * pointPrice;
@@ -343,10 +395,18 @@ public class ReversalPointStrategyBackTester {
                 isSold =true;
                 chartScreenshotMessage = "SOLD WITH PROFIT";
                 trading = false;
+                decisionState.trading = false;
+                profitTrailArmed = false;
+                peakPriceSinceBuy = 0;
                 isSold=false;
                 return true;
-            }
-            if (((buyPrice - pointPrice) / buyPrice * 100) > sellWithLossGap) {
+        }
+        if (trailProfitEnabled && decision.action == ReversalDecisionEngine.Action.SELL_PROFIT && wasTrading && !trailingProfitExit) {
+            // keep position open until pullback condition is reached
+            decisionState.trading = true;
+            decisionState.buyPrice = buyPrice;
+        }
+        if (decision.action == ReversalDecisionEngine.Action.SELL_LOSS && wasTrading) {
                     Double coinQuantityInWallet = account.wallet().getAllAssets().get(coin);
                     Double UsdtQuantityInWallet = account.wallet().getAllAssets().get(USDT);
                     double sellValue = coinQuantityInWallet * pointPrice;
@@ -394,81 +454,57 @@ public class ReversalPointStrategyBackTester {
                 isSold=true;
                 chartScreenshotMessage = "SOLD WITH LOSS";
                 trading = false;
+                decisionState.trading = false;
+                profitTrailArmed = false;
+                peakPriceSinceBuy = 0;
                 isSold=false;
                 return true;
-            }
         }
-        if (hasPrices && !trading) {
-
-            ReversalPointStrategyBackTester.Reversal previousRec = reversalArrayList.get(reversalArrayList.toArray().length - 1);
-            if (pointPrice > currentMaxPrice[0]) {
-                max=true;
-                currentMaxPrice[0] = pointPrice;
-                currentMaxPriceTimestamp[0] = pointTimestamp;
-                if (100 - (currentMinPrice[0] / currentMaxPrice[0] * 100) > buyGap) {
-                    if (!Objects.equals(previousRec.tag, "min")) {
-                        ReversalPointStrategyBackTester.Reversal r = new ReversalPointStrategyBackTester.Reversal(new double[]{currentMinPriceTimestamp[0], currentMinPrice[0]}, "min");
-                        reversalArrayList.add(r);
-
-                    }
-                    currentMinPrice[0] = pointPrice;
-                }
+        if (decision.action == ReversalDecisionEngine.Action.BUY && !wasTrading) {
+            Double coinQuantityInWallet = account.wallet().getAllAssets().get(coin);
+            Double UsdtQuantityInWallet = account.wallet().getAllAssets().get(USDT);
+            // Use tradingSum (not full wallet balance) to determine buy amount
+            // When recapitalize=false, tradingSum stays fixed at initial value
+            // When recapitalize=true, tradingSum is updated after each sell
+            double spendAmount = Math.min(tradingSum, UsdtQuantityInWallet);
+            double buyQty = spendAmount / pointPrice;
+            coinQuantityInWallet += buyQty;
+            UsdtQuantityInWallet -= spendAmount;
+            if (UsdtQuantityInWallet < 0){
+                return false;
             }
-            if (pointPrice < currentMinPrice[0]) {
-                max=false;
-                currentMinPrice[0] = pointPrice;
-                currentMinPriceTimestamp[0] = pointTimestamp;
-                if (100 - (currentMinPrice[0] / currentMaxPrice[0] * 100) > buyGap) {
-                    if (!Objects.equals(previousRec.tag, "max")) {
-                        ReversalPointStrategyBackTester.Reversal r = new ReversalPointStrategyBackTester.Reversal(new double[]{currentMaxPriceTimestamp[0], currentMaxPrice[0]}, "max");
-                        reversalArrayList.add(r);
-                        if (!trading){
-                                Double coinQuantityInWallet = account.wallet().getAllAssets().get(coin);
-                                Double UsdtQuantityInWallet = account.wallet().getAllAssets().get(USDT);
-                                // Use tradingSum (not full wallet balance) to determine buy amount
-                                // When recapitalize=false, tradingSum stays fixed at initial value
-                                // When recapitalize=true, tradingSum is updated after each sell
-                                double spendAmount = Math.min(tradingSum, UsdtQuantityInWallet);
-                                double buyQty = spendAmount / pointPrice;
-                                coinQuantityInWallet += buyQty;
-                                UsdtQuantityInWallet -= spendAmount;
-                                if (UsdtQuantityInWallet < 0){
-                                    return false;
-                                }
-                                account.wallet().getAllAssets().replace(coin, coinQuantityInWallet);
-                                account.wallet().getAllAssets().replace(USDT, UsdtQuantityInWallet);
-                                buyPoints.add(new double[]{pointTimestamp, pointPrice});
-                                buyPrice = pointPrice;
-                                trading = true;
-                                // Record trade event for chart
-                                tradeEvents.add(new double[]{pointTimestamp, pointPrice, 0}); // 0=buy
-                                recordEquity(pointTimestamp, pointPrice);
-                                // Detailed trade report: BUY
-                                double dropFromMaxUsdt = currentMaxPrice[0] - pointPrice;
-                                double dropFromMaxPct = currentMaxPrice[0] > 0 ? (dropFromMaxUsdt / currentMaxPrice[0] * 100) : 0;
-                                double buyCommission = commissionCalc.calcCommission(spendAmount);
-                                double buyCommPct = spendAmount > 0 ? (buyCommission / spendAmount * 100) : 0;
-                                Map<String, Object> buyRecord = new LinkedHashMap<>();
-                                buyRecord.put("type", "BUY");
-                                buyRecord.put("timestamp", (long) pointTimestamp);
-                                buyRecord.put("quantity", buyQty);
-                                buyRecord.put("price", pointPrice);
-                                buyRecord.put("totalUsdt", spendAmount);
-                                buyRecord.put("maxPrice", currentMaxPrice[0]);
-                                buyRecord.put("dropFromMaxUsdt", dropFromMaxUsdt);
-                                buyRecord.put("dropFromMaxPct", dropFromMaxPct);
-                                buyRecord.put("commission", buyCommission);
-                                buyRecord.put("commissionPct", buyCommPct);
-                                buyRecord.put("walletUsdt", UsdtQuantityInWallet);
-                                buyRecord.put("walletCoin", coinQuantityInWallet);
-                                tradeReport.add(buyRecord);
-                                lastMaxPriceForReport = currentMaxPrice[0];
-                        }
-                    }
-                    currentMaxPrice[0] = pointPrice;
-
-                }
-            }
+            account.wallet().getAllAssets().replace(coin, coinQuantityInWallet);
+            account.wallet().getAllAssets().replace(USDT, UsdtQuantityInWallet);
+            buyPoints.add(new double[]{pointTimestamp, pointPrice});
+            buyPrice = pointPrice;
+            trading = true;
+            decisionState.trading = true;
+            decisionState.buyPrice = pointPrice;
+            profitTrailArmed = false;
+            peakPriceSinceBuy = pointPrice;
+            // Record trade event for chart
+            tradeEvents.add(new double[]{pointTimestamp, pointPrice, 0}); // 0=buy
+            recordEquity(pointTimestamp, pointPrice);
+            // Detailed trade report: BUY
+            double dropFromMaxUsdt = currentMaxPrice[0] - pointPrice;
+            double dropFromMaxPct = currentMaxPrice[0] > 0 ? (dropFromMaxUsdt / currentMaxPrice[0] * 100) : 0;
+            double buyCommission = commissionCalc.calcCommission(spendAmount);
+            double buyCommPct = spendAmount > 0 ? (buyCommission / spendAmount * 100) : 0;
+            Map<String, Object> buyRecord = new LinkedHashMap<>();
+            buyRecord.put("type", "BUY");
+            buyRecord.put("timestamp", (long) pointTimestamp);
+            buyRecord.put("quantity", buyQty);
+            buyRecord.put("price", pointPrice);
+            buyRecord.put("totalUsdt", spendAmount);
+            buyRecord.put("maxPrice", currentMaxPrice[0]);
+            buyRecord.put("dropFromMaxUsdt", dropFromMaxUsdt);
+            buyRecord.put("dropFromMaxPct", dropFromMaxPct);
+            buyRecord.put("commission", buyCommission);
+            buyRecord.put("commissionPct", buyCommPct);
+            buyRecord.put("walletUsdt", UsdtQuantityInWallet);
+            buyRecord.put("walletCoin", coinQuantityInWallet);
+            tradeReport.add(buyRecord);
+            lastMaxPriceForReport = currentMaxPrice[0];
         }
 
         return true;

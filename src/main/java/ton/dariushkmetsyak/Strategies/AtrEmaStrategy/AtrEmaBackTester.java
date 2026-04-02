@@ -111,7 +111,8 @@ public class AtrEmaBackTester {
             this.coin = Coin.createCoin(chart.getCoinName());
             Map<Coin, Double> testAssets = new HashMap<>();
             testAssets.put(USDT, tradingSum);
-            testAssets.put(coin, 0d);
+            // IMPORTANT: use the same Coin key instance as this.coin for wallet consistency
+            testAssets.put(this.coin, 0d);
             this.account = AccountBuilder.createNewTester(testAssets);
             this.tradingSum = tradingSum;
             this.initialTradingSum = tradingSum;

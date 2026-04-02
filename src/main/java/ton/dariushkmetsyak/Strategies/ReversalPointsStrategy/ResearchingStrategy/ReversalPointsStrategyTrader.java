@@ -7,6 +7,7 @@ import ton.dariushkmetsyak.GeckoApiService.geckoEntities.Coin;
 import ton.dariushkmetsyak.Graphics.DrawTradingChart.TradingChart;
 import ton.dariushkmetsyak.Persistence.StateManager;
 import ton.dariushkmetsyak.Persistence.TradingState;
+import ton.dariushkmetsyak.Strategies.Core.ReversalDecisionEngine;
 import ton.dariushkmetsyak.Telegram.ImageAndMessageSender;
 import ton.dariushkmetsyak.Commission.CommissionCalculator;
 import ton.dariushkmetsyak.Commission.TradeStatistics;
@@ -86,6 +87,14 @@ public class ReversalPointsStrategyTrader {
     private final CommissionCalculator commissionCalc = new CommissionCalculator(CommissionCalculator.Exchange.BINANCE);
     private final TradeStatistics tradeStats = new TradeStatistics();
     private boolean isTesterAccount = false;
+    private final ReversalDecisionEngine decisionEngine = new ReversalDecisionEngine();
+    private ReversalDecisionEngine.State decisionState;
+    private ReversalDecisionEngine.Params decisionParams;
+    // Let profits run: exit profit position on pullback from local peak after target is reached
+    private final double profitTrailGapPercent = 1.0;
+    private final boolean trailProfitEnabled;
+    private boolean profitTrailArmed = false;
+    private double peakPriceSinceBuy = 0;
 
     class Reversal {
         private final double[] data;
@@ -156,9 +165,19 @@ public class ReversalPointsStrategyTrader {
                                         double sellWithLossGap, int updateTimeout, Long chatID,
                                         TradingState savedState, String sessionId, boolean isResume,
                                         long storageUserId, boolean recapitalize) {
+        this(account, coin, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chatID,
+                savedState, sessionId, isResume, storageUserId, recapitalize, false);
+    }
+
+    public ReversalPointsStrategyTrader(Account account, Coin coin, double tradingSum,
+                                        double buyGap, double sellWithProfitGap,
+                                        double sellWithLossGap, int updateTimeout, Long chatID,
+                                        TradingState savedState, String sessionId, boolean isResume,
+                                        long storageUserId, boolean recapitalize, boolean trailProfitEnabled) {
         this.account = account;
         this.coin = coin;
         this.recapitalize = recapitalize;
+        this.trailProfitEnabled = trailProfitEnabled;
         this.chatID = chatID;
         this.sessionId = sessionId != null ? sessionId : "trader_" + System.currentTimeMillis();
         this.accountType = account.getClass().getSimpleName().toUpperCase();
@@ -168,6 +187,7 @@ public class ReversalPointsStrategyTrader {
         long stateUserId = storageUserId > 0 ? storageUserId : (chatID != null ? chatID : 0L);
         this.stateManager = new StateManager(stateUserId);
         this.isResume = isResume;
+        this.decisionParams = new ReversalDecisionEngine.Params(buyGap, sellWithProfitGap, sellWithLossGap);
 
         if (savedState != null && tryRestoreFromState(savedState)) {
             restoredFromState = true;
@@ -219,6 +239,7 @@ public class ReversalPointsStrategyTrader {
         }
 
         // Start periodic autosave (shutdown hook registered once globally — see static block)
+        syncDecisionStateFromRuntime();
         stateManager.startAutosave();
     }
 
@@ -283,6 +304,7 @@ public class ReversalPointsStrategyTrader {
                 tradeStats.setTotalCommission(state.getTotalCommission());
                 if (state.getStartBalance() > 0) tradeStats.setStartBalance(state.getStartBalance());
             }
+            this.decisionParams = new ReversalDecisionEngine.Params(buyGap, sellWithProfitGap, sellWithLossGap);
 
             return true;
         } catch (Exception e) {
@@ -359,7 +381,37 @@ public class ReversalPointsStrategyTrader {
 
     public void init(double pointTimestamp, double pointPrice) {
         reversalArrayList.add(new Reversal(new double[]{pointTimestamp, pointPrice}, "initPoint"));
+        decisionState = decisionEngine.init(pointTimestamp, pointPrice);
+        syncRuntimeFromDecisionState();
         persistState();
+    }
+
+    private void syncDecisionStateFromRuntime() {
+        if (decisionState == null) {
+            double ts = (currentMaxPriceTimestamp[0] != null && currentMaxPriceTimestamp[0] > 0)
+                    ? currentMaxPriceTimestamp[0]
+                    : System.currentTimeMillis();
+            double px = (pointPrice > 0) ? pointPrice : (currentMaxPrice[0] != null && currentMaxPrice[0] > 0 ? currentMaxPrice[0] : 0);
+            if (px <= 0) px = 1;
+            decisionState = decisionEngine.init(ts, px);
+        }
+        decisionState.trading = trading;
+        decisionState.buyPrice = buyPrice;
+        decisionState.currentMinPrice = currentMinPrice[0] != null ? currentMinPrice[0] : Double.MAX_VALUE;
+        decisionState.currentMaxPrice = currentMaxPrice[0] != null ? currentMaxPrice[0] : 0.0;
+        decisionState.currentMinPriceTimestamp = currentMinPriceTimestamp[0] != null ? currentMinPriceTimestamp[0] : Double.MAX_VALUE;
+        decisionState.currentMaxPriceTimestamp = currentMaxPriceTimestamp[0] != null ? currentMaxPriceTimestamp[0] : 0.0;
+        if (!reversalArrayList.isEmpty()) {
+            decisionState.lastReversalTag = reversalArrayList.get(reversalArrayList.size() - 1).tag;
+        }
+    }
+
+    private void syncRuntimeFromDecisionState() {
+        if (decisionState == null) return;
+        currentMinPrice[0] = decisionState.currentMinPrice;
+        currentMaxPrice[0] = decisionState.currentMaxPrice;
+        currentMinPriceTimestamp[0] = decisionState.currentMinPriceTimestamp;
+        currentMaxPriceTimestamp[0] = decisionState.currentMaxPriceTimestamp;
     }
 
     public boolean startResearchingChart(double pointTimestamp, double pointPrice)
@@ -369,9 +421,31 @@ public class ReversalPointsStrategyTrader {
         prices.put(pointTimestamp, pointPrice);
         TradingChart.addSimplePoint(pointTimestamp, pointPrice);
         TradingChart.addSimplePriceMarker(pointTimestamp, pointPrice);
+        boolean wasTrading = trading;
+        syncDecisionStateFromRuntime();
+        ReversalDecisionEngine.Decision decision = decisionEngine.onTick(
+                decisionState, decisionParams, pointTimestamp, pointPrice
+        );
+        syncRuntimeFromDecisionState();
+        if (trailProfitEnabled && wasTrading) {
+            if (pointPrice > peakPriceSinceBuy) peakPriceSinceBuy = pointPrice;
+            if (buyPrice > 0 && pointPrice >= buyPrice * (1 + sellWithProfitGap / 100.0)) {
+                profitTrailArmed = true;
+            }
+        }
+        boolean trailingProfitExit = wasTrading
+                && (!trailProfitEnabled || (profitTrailArmed
+                && peakPriceSinceBuy > 0
+                && ((peakPriceSinceBuy - pointPrice) / peakPriceSinceBuy * 100.0) >= profitTrailGapPercent));
+        if (decision.newReversalPoint != null) {
+            reversalArrayList.add(new Reversal(
+                    new double[]{decision.newReversalPoint.timestamp, decision.newReversalPoint.price},
+                    decision.newReversalPoint.tag
+            ));
+        }
 
-        if (trading) {
-            if (((pointPrice - buyPrice) / buyPrice * 100) > sellWithProfitGap) {
+        if (wasTrading) {
+            if (decision.action == ReversalDecisionEngine.Action.SELL_PROFIT && trailingProfitExit) {
                 System.out.println("Timestamp: " + pointTimestamp + "  Price: " + pointPrice);
                 try {
                     soldFor = account.trader().sell(coin, pointPrice, tradingSum / buyPrice);
@@ -416,6 +490,9 @@ public class ReversalPointsStrategyTrader {
                 prevMessageId = 0;
                 TradingChart.clearChart();
                 trading = false;
+                decisionState.trading = false;
+                profitTrailArmed = false;
+                peakPriceSinceBuy = 0;
                 isSold = false;
                 // Recapitalize: next cycle uses current USDT balance
                 if (recapitalize) {
@@ -423,12 +500,20 @@ public class ReversalPointsStrategyTrader {
                     catch (Exception ignored) {}
                     log.info("[Trader] Recapitalized: next tradingSum = {}", Prices.round(tradingSum));
                 }
+                // Reset reversal state after sell to avoid stale "max" lock that can block next buy
+                reversalArrayList.add(new Reversal(new double[]{pointTimestamp, pointPrice}, "sellReset"));
                 currentMinPrice[0] = pointPrice;
                 currentMaxPrice[0] = pointPrice;
+                currentMinPriceTimestamp[0] = pointTimestamp;
+                currentMaxPriceTimestamp[0] = pointTimestamp;
                 persistState();
                 return true;
             }
-            if (((buyPrice - pointPrice) / buyPrice * 100) > sellWithLossGap) {
+            if (trailProfitEnabled && decision.action == ReversalDecisionEngine.Action.SELL_PROFIT && !trailingProfitExit) {
+                decisionState.trading = true;
+                decisionState.buyPrice = buyPrice;
+            }
+            if (decision.action == ReversalDecisionEngine.Action.SELL_LOSS) {
                 System.out.println("Timestamp: " + pointTimestamp + "  Price: " + pointPrice);
                 try {
                     soldFor = account.trader().sell(coin, pointPrice, tradingSum / buyPrice);
@@ -473,6 +558,9 @@ public class ReversalPointsStrategyTrader {
                 prevMessageId = 0;
                 TradingChart.clearChart();
                 trading = false;
+                decisionState.trading = false;
+                profitTrailArmed = false;
+                peakPriceSinceBuy = 0;
                 isSold = false;
                 // Recapitalize: next cycle uses current USDT balance
                 if (recapitalize) {
@@ -486,38 +574,24 @@ public class ReversalPointsStrategyTrader {
                         return true; // will exit trading loop naturally
                     }
                 }
+                // Reset reversal state after sell to avoid stale "max" lock that can block next buy
+                reversalArrayList.add(new Reversal(new double[]{pointTimestamp, pointPrice}, "sellReset"));
                 currentMinPrice[0] = pointPrice;
                 currentMaxPrice[0] = pointPrice;
+                currentMinPriceTimestamp[0] = pointTimestamp;
+                currentMaxPriceTimestamp[0] = pointTimestamp;
                 persistState();
                 return true;
             }
         }
 
-        if (!prices.isEmpty() && !trading) {
-            Reversal previousRec = reversalArrayList.get(reversalArrayList.toArray().length - 1);
-
-            if (pointPrice > currentMaxPrice[0]) {
-                max = true;
-                currentMaxPrice[0] = pointPrice;
-                currentMaxPriceTimestamp[0] = pointTimestamp;
-                if (100 - (currentMinPrice[0] / currentMaxPrice[0] * 100) > buyGap) {
-                    if (!Objects.equals(previousRec.tag, "min")) {
-                        reversalArrayList.add(new Reversal(
-                                new double[]{currentMinPriceTimestamp[0], currentMinPrice[0]}, "min"));
-                    }
-                    currentMinPrice[0] = pointPrice;
-                }
-            }
-
-            if (pointPrice < currentMinPrice[0]) {
-                max = false;
-                currentMinPrice[0] = pointPrice;
-                currentMinPriceTimestamp[0] = pointTimestamp;
-            }
-
-            boolean buySignalReached = isBuySignalReached(pointPrice);
-            if (buySignalReached && !Objects.equals(previousRec.tag, "max") && !trading) {
-                attemptBuy(pointTimestamp, pointPrice);
+        if (!prices.isEmpty() && !wasTrading && decision.action == ReversalDecisionEngine.Action.BUY) {
+            boolean bought = attemptBuy(pointTimestamp, pointPrice);
+            if (!bought) {
+                // restore engine state: buy was signaled but exchange order wasn't executed
+                decisionState.trading = false;
+                decisionState.buyPrice = 0;
+                syncRuntimeFromDecisionState();
             }
         }
 
@@ -528,17 +602,12 @@ public class ReversalPointsStrategyTrader {
         return false;
     }
 
-    private boolean isBuySignalReached(double currentPrice) {
-        if (currentMaxPrice[0] == null || currentMaxPrice[0] <= 0) return false;
-        return getDropFromMaxPercent(currentPrice) > buyGap;
-    }
-
     private double getDropFromMaxPercent(double currentPrice) {
         if (currentMaxPrice[0] == null || currentMaxPrice[0] <= 0) return 0;
         return 100 - (currentPrice / currentMaxPrice[0] * 100);
     }
 
-    private void attemptBuy(double pointTimestamp, double executionPrice)
+    private boolean attemptBuy(double pointTimestamp, double executionPrice)
             throws NoSuchSymbolException, InsufficientAmountOfUsdtException {
         Double buyResult = null;
         String failureReason = "";
@@ -586,6 +655,8 @@ public class ReversalPointsStrategyTrader {
                     new double[]{currentMaxPriceTimestamp[0], currentMaxPrice[0]}, "max"));
             buyPrice = boughtFor;
             trading = true;
+            profitTrailArmed = false;
+            peakPriceSinceBuy = boughtFor;
             currentMaxPrice[0] = boughtFor;
             double coinAmt = 0;
             try { coinAmt = account.wallet().getAmountOfCoin(coin); } catch (Exception ignored) {}
@@ -608,9 +679,10 @@ public class ReversalPointsStrategyTrader {
             ImageAndMessageSender.sendTelegramMessage(buyMsg, chatID);
             log.info("[Trader] BUY executed: {} @ ${}", coin.getSymbol(), Prices.round(boughtFor));
             persistState(); // Immediate save on buy — most critical moment
-            return;
+            return true;
         }
         notifyBuyFailure(failureReason, executionPrice);
+        return false;
     }
 
     private void notifyBuyFailure(String reason, double executionPrice) {

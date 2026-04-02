@@ -12,6 +12,8 @@ import ton.dariushkmetsyak.Persistence.TradingState;
 import ton.dariushkmetsyak.Commission.CommissionCalculator;
 import ton.dariushkmetsyak.Strategies.AtrEmaStrategy.AtrEmaBackTester;
 import ton.dariushkmetsyak.Strategies.AtrEmaStrategy.AtrEmaTrader;
+import ton.dariushkmetsyak.Strategies.LadderStrategy.LadderStrategyBackTester;
+import ton.dariushkmetsyak.Strategies.LadderStrategy.LadderStrategyTrader;
 import ton.dariushkmetsyak.Strategies.ReversalPointsStrategy.ResearchingStrategy.ReversalPointStrategyBackTester;
 import ton.dariushkmetsyak.Strategies.ReversalPointsStrategy.ResearchingStrategy.ReversalPointsStrategyTrader;
 import ton.dariushkmetsyak.Telegram.ImageAndMessageSender;
@@ -54,7 +56,10 @@ public class TradingSessionManager {
      * @param userId Telegram user ID. Use 0 for legacy/unauthenticated.
      */
     public static TradingSessionManager forUser(long userId) {
-        return userManagers.computeIfAbsent(userId, TradingSessionManager::new);
+        TradingSessionManager mgr = userManagers.computeIfAbsent(userId, TradingSessionManager::new);
+        // Ensure persisted sessions/events are available after JVM restart
+        mgr.loadSessions();
+        return mgr;
     }
 
     /** Legacy compatibility — returns global (userId=0) manager */
@@ -346,6 +351,7 @@ public class TradingSessionManager {
         }
         File f = new File(sessionStoreFile);
         if (!f.exists()) { sessionsLoaded = true; return; }
+        boolean mutatedDuringLoad = false;
         try {
             List<Map<String, Object>> list = mapper.readValue(f, List.class);
             for (Map<String, Object> m : list) {
@@ -395,6 +401,7 @@ public class TradingSessionManager {
                     info.stoppedUnexpectedly = true;
                     info.endedAt = System.currentTimeMillis();
                     info.addEvent("ERROR", "Сессия прервана (JVM завершён) — ожидает возобновления");
+                    mutatedDuringLoad = true;
                 }
                 // Skip sessions already in memory (e.g. already running after resume)
                 SessionInfo existing = sessions.get(info.id);
@@ -410,6 +417,8 @@ public class TradingSessionManager {
             }
             sessionsLoaded = true;
             log.info("Loaded {} sessions for user {}", sessions.size(), userId);
+            // Persist "RUNNING -> STOPPED (unexpected)" transitions immediately
+            if (mutatedDuringLoad) saveSessions();
         } catch (Exception e) {
             log.warn("Failed to load sessions for user {}: {}", userId, e.getMessage());
         }
@@ -541,11 +550,16 @@ public class TradingSessionManager {
     }
     private static Map<String, Object> buildParams(double tradingSum, double buyGap,
             double spg, double slg, int timeout, int chartRefresh) {
+        return buildParams(tradingSum, buyGap, spg, slg, timeout, chartRefresh, "reversal");
+    }
+
+    private static Map<String, Object> buildParams(double tradingSum, double buyGap,
+            double spg, double slg, int timeout, int chartRefresh, String strategy) {
         Map<String, Object> p = new LinkedHashMap<>();
         p.put("tradingSum", tradingSum); p.put("buyGap", buyGap);
         p.put("sellWithProfitGap", spg); p.put("sellWithLossGap", slg);
         p.put("telegramUpdateSec", timeout); p.put("chartRefreshSec", chartRefresh);
-        p.put("strategy", "reversal"); // default; overridden by ATR+EMA methods
+        p.put("strategy", strategy != null ? strategy : "reversal");
         return p;
     }
 
@@ -558,9 +572,16 @@ public class TradingSessionManager {
 
     public Object startTesterTrading(String coinName, double startAssets, double tradingSum,
             double buyGap, double spg, double slg, int timeout, int chartRefresh, long chatId, boolean recapitalize) {
+        return startTesterTrading(coinName, startAssets, tradingSum, buyGap, spg, slg, timeout, chartRefresh, chatId, recapitalize, false);
+    }
+
+    public Object startTesterTrading(String coinName, double startAssets, double tradingSum,
+            double buyGap, double spg, double slg, int timeout, int chartRefresh, long chatId, boolean recapitalize, boolean trailProfit) {
         if (hasActiveSessionOfType(SessionType.TESTER)) return tooManySessionsError(SessionType.TESTER);
         String id = "tester_" + System.currentTimeMillis();
-        Map<String, Object> params = buildParams(tradingSum, buyGap, spg, slg, timeout, chartRefresh);
+        String strategy = trailProfit ? (recapitalize ? "reversal_trail_recap" : "reversal_trail")
+                                      : (recapitalize ? "reversal_recap" : "reversal");
+        Map<String, Object> params = buildParams(tradingSum, buyGap, spg, slg, timeout, chartRefresh, strategy);
         params.put("startAssets", startAssets);
         if (recapitalize) params.put("recapitalize", true);
         SessionInfo info = new SessionInfo(id, SessionType.TESTER, coinName, params, userId);
@@ -573,13 +594,37 @@ public class TradingSessionManager {
         return info;
     }
 
+    public Object startTesterTradingLadder(String coinName, double startAssets, double orderUsdt,
+                                           double stepPercent, int timeout, int chartRefresh, long chatId) {
+        if (hasActiveSessionOfType(SessionType.TESTER)) return tooManySessionsError(SessionType.TESTER);
+        String id = "tester_ladder_" + System.currentTimeMillis();
+        Map<String, Object> params = buildParams(orderUsdt, stepPercent, stepPercent, stepPercent, timeout, chartRefresh, "ladder");
+        params.put("startAssets", startAssets);
+        params.put("orderUsdt", orderUsdt);
+        params.put("stepPercent", stepPercent);
+        SessionInfo info = new SessionInfo(id, SessionType.TESTER, coinName, params, userId);
+        info.addEvent("START", "Ladder TESTER сессия запущена: " + coinName);
+        info.startUsdtBalance = startAssets;
+        sessions.put(id, info);
+        launchTesterThread(info, startAssets, orderUsdt, stepPercent, stepPercent, stepPercent, timeout, null, chatId, false);
+        saveSessions();
+        return info;
+    }
+
     // ── Start Research (same logic as Tester, separate type for concurrent sessions) ──
 
     public Object startResearchTrading(String coinName, double startAssets, double tradingSum,
             double buyGap, double spg, double slg, int timeout, int chartRefresh, long chatId, boolean recapitalize) {
+        return startResearchTrading(coinName, startAssets, tradingSum, buyGap, spg, slg, timeout, chartRefresh, chatId, recapitalize, false);
+    }
+
+    public Object startResearchTrading(String coinName, double startAssets, double tradingSum,
+            double buyGap, double spg, double slg, int timeout, int chartRefresh, long chatId, boolean recapitalize, boolean trailProfit) {
         if (hasActiveSessionOfType(SessionType.RESEARCH)) return tooManySessionsError(SessionType.RESEARCH);
         String id = "research_" + System.currentTimeMillis();
-        Map<String, Object> params = buildParams(tradingSum, buyGap, spg, slg, timeout, chartRefresh);
+        String strategy = trailProfit ? (recapitalize ? "reversal_trail_recap" : "reversal_trail")
+                                      : (recapitalize ? "reversal_recap" : "reversal");
+        Map<String, Object> params = buildParams(tradingSum, buyGap, spg, slg, timeout, chartRefresh, strategy);
         params.put("startAssets", startAssets);
         if (recapitalize) params.put("recapitalize", true);
         SessionInfo info = new SessionInfo(id, SessionType.RESEARCH, coinName, params, userId);
@@ -588,6 +633,23 @@ public class TradingSessionManager {
         info.startUsdtBalance = startAssets;
         sessions.put(id, info);
         launchTesterThread(info, startAssets, tradingSum, buyGap, spg, slg, timeout, null, chatId, recapitalize);
+        saveSessions();
+        return info;
+    }
+
+    public Object startResearchTradingLadder(String coinName, double startAssets, double orderUsdt,
+                                             double stepPercent, int timeout, int chartRefresh, long chatId) {
+        if (hasActiveSessionOfType(SessionType.RESEARCH)) return tooManySessionsError(SessionType.RESEARCH);
+        String id = "research_ladder_" + System.currentTimeMillis();
+        Map<String, Object> params = buildParams(orderUsdt, stepPercent, stepPercent, stepPercent, timeout, chartRefresh, "ladder");
+        params.put("startAssets", startAssets);
+        params.put("orderUsdt", orderUsdt);
+        params.put("stepPercent", stepPercent);
+        SessionInfo info = new SessionInfo(id, SessionType.RESEARCH, coinName, params, userId);
+        info.addEvent("START", "Ladder RESEARCH сессия запущена: " + coinName);
+        info.startUsdtBalance = startAssets;
+        sessions.put(id, info);
+        launchTesterThread(info, startAssets, orderUsdt, stepPercent, stepPercent, stepPercent, timeout, null, chatId, false);
         saveSessions();
         return info;
     }
@@ -623,8 +685,14 @@ public class TradingSessionManager {
                 Account account = AccountBuilder.createNewTester(assets);
                 boolean resume = savedState != null || info.events.stream()
                     .anyMatch(e -> "START".equals(e.type) && e.message != null && e.message.contains("возобновлена"));
-                new ReversalPointsStrategyTrader(account, coin, tradingSum, buyGap, spg, slg,
-                        timeout, chatId, savedState, info.id, resume, userId, recapitalize).startTrading();
+                String strategy = String.valueOf(info.params.getOrDefault("strategy", "reversal"));
+                if (strategy.startsWith("ladder")) {
+                    new LadderStrategyTrader(account, coin, tradingSum, buyGap, timeout).startTrading();
+                } else {
+                    boolean trailProfit = strategy.startsWith("reversal_trail");
+                    new ReversalPointsStrategyTrader(account, coin, tradingSum, buyGap, spg, slg,
+                            timeout, chatId, savedState, info.id, resume, userId, recapitalize, trailProfit).startTrading();
+                }
                 setFinalStatus(info);
             } catch (Exception e) {
                 info.status = "ERROR"; info.endedAt = System.currentTimeMillis();
@@ -652,15 +720,39 @@ public class TradingSessionManager {
     public Object startBinanceTrading(String coinName, double tradingSum, double buyGap,
             double spg, double slg, int timeout, int chartRefresh,
             long chatId, UserProfileManager.UserProfile profile, boolean recapitalize) {
+        return startBinanceTrading(coinName, tradingSum, buyGap, spg, slg, timeout, chartRefresh, chatId, profile, recapitalize, false);
+    }
+
+    public Object startBinanceTrading(String coinName, double tradingSum, double buyGap,
+            double spg, double slg, int timeout, int chartRefresh,
+            long chatId, UserProfileManager.UserProfile profile, boolean recapitalize, boolean trailProfit) {
         if (hasActiveSessionOfType(SessionType.BINANCE_REAL)) return tooManySessionsError(SessionType.BINANCE_REAL);
         String id = "binance_" + System.currentTimeMillis();
-        Map<String, Object> params = buildParams(tradingSum, buyGap, spg, slg, timeout, chartRefresh);
+        String strategy = trailProfit ? (recapitalize ? "reversal_trail_recap" : "reversal_trail")
+                                      : (recapitalize ? "reversal_recap" : "reversal");
+        Map<String, Object> params = buildParams(tradingSum, buyGap, spg, slg, timeout, chartRefresh, strategy);
         if (recapitalize) params.put("recapitalize", true);
         SessionInfo info = new SessionInfo(id, SessionType.BINANCE_REAL, coinName, params, userId);
         String stratLabel = recapitalize ? " [РЕКАП]" : "";
         info.addEvent("START", "Binance REAL сессия запущена" + stratLabel + ": " + coinName);
         sessions.put(id, info);
         launchBinanceThread(info, tradingSum, buyGap, spg, slg, timeout, false, null, chatId, profile, recapitalize);
+        saveSessions();
+        return info;
+    }
+
+    public Object startBinanceTradingLadder(String coinName, double orderUsdt, double stepPercent,
+                                            int timeout, int chartRefresh, long chatId,
+                                            UserProfileManager.UserProfile profile) {
+        if (hasActiveSessionOfType(SessionType.BINANCE_REAL)) return tooManySessionsError(SessionType.BINANCE_REAL);
+        String id = "binance_ladder_" + System.currentTimeMillis();
+        Map<String, Object> params = buildParams(orderUsdt, stepPercent, stepPercent, stepPercent, timeout, chartRefresh, "ladder");
+        params.put("orderUsdt", orderUsdt);
+        params.put("stepPercent", stepPercent);
+        SessionInfo info = new SessionInfo(id, SessionType.BINANCE_REAL, coinName, params, userId);
+        info.addEvent("START", "Ladder Binance REAL сессия запущена: " + coinName);
+        sessions.put(id, info);
+        launchBinanceThread(info, orderUsdt, stepPercent, stepPercent, stepPercent, timeout, false, null, chatId, profile, false);
         saveSessions();
         return info;
     }
@@ -674,15 +766,39 @@ public class TradingSessionManager {
     public Object startBinanceTestTrading(String coinName, double tradingSum, double buyGap,
             double spg, double slg, int timeout, int chartRefresh,
             long chatId, UserProfileManager.UserProfile profile, boolean recapitalize) {
+        return startBinanceTestTrading(coinName, tradingSum, buyGap, spg, slg, timeout, chartRefresh, chatId, profile, recapitalize, false);
+    }
+
+    public Object startBinanceTestTrading(String coinName, double tradingSum, double buyGap,
+            double spg, double slg, int timeout, int chartRefresh,
+            long chatId, UserProfileManager.UserProfile profile, boolean recapitalize, boolean trailProfit) {
         if (hasActiveSessionOfType(SessionType.BINANCE_TEST)) return tooManySessionsError(SessionType.BINANCE_TEST);
         String id = "binance_test_" + System.currentTimeMillis();
-        Map<String, Object> params = buildParams(tradingSum, buyGap, spg, slg, timeout, chartRefresh);
+        String strategy = trailProfit ? (recapitalize ? "reversal_trail_recap" : "reversal_trail")
+                                      : (recapitalize ? "reversal_recap" : "reversal");
+        Map<String, Object> params = buildParams(tradingSum, buyGap, spg, slg, timeout, chartRefresh, strategy);
         if (recapitalize) params.put("recapitalize", true);
         SessionInfo info = new SessionInfo(id, SessionType.BINANCE_TEST, coinName, params, userId);
         String stratLabel = recapitalize ? " [РЕКАП]" : "";
         info.addEvent("START", "Binance TEST сессия запущена" + stratLabel + ": " + coinName);
         sessions.put(id, info);
         launchBinanceThread(info, tradingSum, buyGap, spg, slg, timeout, true, null, chatId, profile, recapitalize);
+        saveSessions();
+        return info;
+    }
+
+    public Object startBinanceTestTradingLadder(String coinName, double orderUsdt, double stepPercent,
+                                                int timeout, int chartRefresh, long chatId,
+                                                UserProfileManager.UserProfile profile) {
+        if (hasActiveSessionOfType(SessionType.BINANCE_TEST)) return tooManySessionsError(SessionType.BINANCE_TEST);
+        String id = "binance_test_ladder_" + System.currentTimeMillis();
+        Map<String, Object> params = buildParams(orderUsdt, stepPercent, stepPercent, stepPercent, timeout, chartRefresh, "ladder");
+        params.put("orderUsdt", orderUsdt);
+        params.put("stepPercent", stepPercent);
+        SessionInfo info = new SessionInfo(id, SessionType.BINANCE_TEST, coinName, params, userId);
+        info.addEvent("START", "Ladder Binance TEST сессия запущена: " + coinName);
+        sessions.put(id, info);
+        launchBinanceThread(info, orderUsdt, stepPercent, stepPercent, stepPercent, timeout, true, null, chatId, profile, false);
         saveSessions();
         return info;
     }
@@ -711,8 +827,14 @@ public class TradingSessionManager {
                         testnet ? AccountBuilder.BINANCE_BASE_URL.TESTNET : AccountBuilder.BINANCE_BASE_URL.MAINNET);
                 boolean resume = savedState != null || info.events.stream()
                     .anyMatch(e -> "START".equals(e.type) && e.message != null && e.message.contains("возобновлена"));
-                new ReversalPointsStrategyTrader(account, coin, tradingSum, buyGap, spg, slg,
-                        timeout, chatId, savedState, info.id, resume, userId, recapitalize).startTrading();
+                String strategy = String.valueOf(info.params.getOrDefault("strategy", "reversal"));
+                if (strategy.startsWith("ladder")) {
+                    new LadderStrategyTrader(account, coin, tradingSum, buyGap, timeout).startTrading();
+                } else {
+                    boolean trailProfit = strategy.startsWith("reversal_trail");
+                    new ReversalPointsStrategyTrader(account, coin, tradingSum, buyGap, spg, slg,
+                            timeout, chatId, savedState, info.id, resume, userId, recapitalize, trailProfit).startTrading();
+                }
                 setFinalStatus(info);
             } catch (Exception e) {
                 info.status = "ERROR"; info.endedAt = System.currentTimeMillis();
@@ -865,22 +987,31 @@ public class TradingSessionManager {
     public SessionInfo startBacktest(String coinName, double tradingSum, double buyGap,
                                      double spg, double slg, String chartType,
                                      String exchangeName, double commissionRate) {
-        return startBacktest(coinName, tradingSum, buyGap, spg, slg, chartType, exchangeName, commissionRate, 0, 0, false);
+        return startBacktest(coinName, tradingSum, buyGap, spg, slg, chartType, exchangeName, commissionRate, 0, 0, false, false);
     }
 
     public SessionInfo startBacktest(String coinName, double tradingSum, double buyGap,
                                      double spg, double slg, String chartType,
                                      String exchangeName, double commissionRate,
                                      long customFrom, long customTo) {
-        return startBacktest(coinName, tradingSum, buyGap, spg, slg, chartType, exchangeName, commissionRate, customFrom, customTo, false);
+        return startBacktest(coinName, tradingSum, buyGap, spg, slg, chartType, exchangeName, commissionRate, customFrom, customTo, false, false);
     }
 
     public SessionInfo startBacktest(String coinName, double tradingSum, double buyGap,
                                      double spg, double slg, String chartType,
                                      String exchangeName, double commissionRate,
                                      long customFrom, long customTo, boolean recapitalize) {
+        return startBacktest(coinName, tradingSum, buyGap, spg, slg, chartType, exchangeName, commissionRate, customFrom, customTo, recapitalize, false);
+    }
+
+    public SessionInfo startBacktest(String coinName, double tradingSum, double buyGap,
+                                     double spg, double slg, String chartType,
+                                     String exchangeName, double commissionRate,
+                                     long customFrom, long customTo, boolean recapitalize, boolean trailProfit) {
         String id = "backtest_" + System.currentTimeMillis();
-        Map<String, Object> params = buildParams(tradingSum, buyGap, spg, slg, 30, 60);
+        String strategy = trailProfit ? (recapitalize ? "reversal_trail_recap" : "reversal_trail")
+                                      : (recapitalize ? "reversal_recap" : "reversal");
+        Map<String, Object> params = buildParams(tradingSum, buyGap, spg, slg, 30, 60, strategy);
         params.put("chartType", chartType);
         params.put("exchangeName", exchangeName);
         params.put("commissionRate", commissionRate);
@@ -888,7 +1019,7 @@ public class TradingSessionManager {
         if (customTo > 0) params.put("customTo", customTo);
         if (recapitalize) params.put("recapitalize", true);
         SessionInfo info = new SessionInfo(id, SessionType.BACKTEST, coinName, params, userId);
-        String strategyKey = recapitalize ? "reversal_recap" : "reversal";
+        String strategyKey = strategy;
         lastBacktestResults.remove(strategyKey);
         lastBacktestChartPaths.remove(strategyKey);
         String stratLabel = recapitalize ? " [РЕКАП]" : "";
@@ -933,7 +1064,7 @@ public class TradingSessionManager {
                 info.addEvent("INFO", "Данные загружены (" + chart.getPrices().size() + " точек), запуск бэктеста" + stratLabel + "...");
                 ReversalPointStrategyBackTester tester = new ReversalPointStrategyBackTester(
                         coin, chart, tradingSum, buyGap, spg, slg,
-                        new CommissionCalculator(CommissionCalculator.Exchange.BINANCE), recapitalize);
+                        new CommissionCalculator(CommissionCalculator.Exchange.BINANCE), recapitalize, trailProfit);
                 info.backtestProgressTotal = chart.getPrices().size();
 
                 // Start progress updater thread
@@ -1043,21 +1174,279 @@ public class TradingSessionManager {
         return info;
     }
 
+    public SessionInfo startBacktestLadder(String coinName, double tradingSum, double orderUsdt,
+                                           double stepPercent, String chartType,
+                                           String exchangeName, long customFrom, long customTo) {
+        String id = "backtest_ladder_" + System.currentTimeMillis();
+        String strategy = "ladder";
+        Map<String, Object> params = buildParams(tradingSum, stepPercent, stepPercent, stepPercent, 30, 60, strategy);
+        params.put("orderUsdt", orderUsdt);
+        params.put("stepPercent", stepPercent);
+        params.put("chartType", chartType);
+        params.put("exchangeName", exchangeName);
+        if (customFrom > 0) params.put("customFrom", customFrom);
+        if (customTo > 0) params.put("customTo", customTo);
+        SessionInfo info = new SessionInfo(id, SessionType.BACKTEST, coinName, params, userId);
+        lastBacktestResults.remove(strategy);
+        lastBacktestChartPaths.remove(strategy);
+        info.addEvent("START", "Бэктест Лесенки запущен: " + coinName);
+        Thread t = new Thread(() -> {
+            registerThread(id);
+            try {
+                Coin coin = CoinsList.getCoinByName(coinName);
+                Chart chart;
+                switch (chartType) {
+                    case "5yr":
+                        chart = Chart.getBinanceChart(coin, 5);
+                        break;
+                    case "3yr":
+                        chart = Chart.getBinanceChart(coin, 3);
+                        break;
+                    case "yearly":
+                        chart = Chart.getBinanceChart(coin, 1);
+                        break;
+                    case "monthly":
+                        chart = Chart.getMonthlyChart_1hourInterval(coin, java.time.YearMonth.now().minusMonths(1));
+                        break;
+                    case "custom":
+                        long cfrom = customFrom > 0 ? customFrom : toLong(params.get("customFrom"));
+                        long cto = customTo > 0 ? customTo : toLong(params.get("customTo"));
+                        if (cfrom <= 0 || cto <= 0) {
+                            cto = System.currentTimeMillis();
+                            cfrom = cto - 365L * 24 * 3600 * 1000;
+                        }
+                        chart = Chart.getBinanceChart(coin, cfrom, cto);
+                        break;
+                    default:
+                        chart = Chart.get1DayUntilNowChart_5MinuteInterval(coin);
+                        break;
+                }
+
+                LadderStrategyBackTester tester = new LadderStrategyBackTester(
+                        coin, chart, tradingSum, orderUsdt, stepPercent);
+                LadderStrategyBackTester.BackTestResult result = tester.run();
+                if (result == null) {
+                    info.status = "ERROR";
+                    info.endedAt = System.currentTimeMillis();
+                    info.addEvent("ERROR", "Бэктест Лесенки завершился без результата");
+                    return;
+                }
+
+                Map<String, Object> rm = new LinkedHashMap<>();
+                rm.put("coinName", coinName);
+                rm.put("strategy", "ladder");
+                rm.put("orderUsdt", result.orderUsdt);
+                rm.put("stepPercent", result.stepPercent);
+                rm.put("profitUsd", result.profitUsd);
+                rm.put("profitPercent", result.profitPercent);
+                rm.put("tradingSum", tradingSum);
+                rm.put("chartType", chartType);
+                rm.put("totalTrades", result.totalTrades);
+                rm.put("buyCount", result.buyCount);
+                rm.put("sellCount", result.sellCount);
+                rm.put("finalEquity", result.finalEquity);
+
+                List<Map<String, Object>> evList = new ArrayList<>();
+                for (double[] ev : tester.getTradeEvents()) {
+                    Map<String, Object> evm = new LinkedHashMap<>();
+                    evm.put("timestamp", (long) ev[0]);
+                    evm.put("price", ev[1]);
+                    evm.put("eventType", (int) ev[2]);
+                    evList.add(evm);
+                }
+                rm.put("tradeEvents", evList);
+
+                List<Map<String, Object>> eqList = new ArrayList<>();
+                for (double[] eq : tester.getEquityCurve()) {
+                    Map<String, Object> eqm = new LinkedHashMap<>();
+                    eqm.put("timestamp", (long) eq[0]);
+                    eqm.put("equity", eq[1]);
+                    eqList.add(eqm);
+                }
+                rm.put("equityCurve", eqList);
+
+                List<Map<String, Object>> holdList = new ArrayList<>();
+                for (double[] h : tester.getHoldCurve()) {
+                    Map<String, Object> hm = new LinkedHashMap<>();
+                    hm.put("timestamp", (long) h[0]);
+                    hm.put("equity", h[1]);
+                    holdList.add(hm);
+                }
+                rm.put("holdCurve", holdList);
+
+                lastBacktestResults.put(strategy, rm);
+                info.backtestResultData = rm;
+                info.status = "DONE";
+                info.endedAt = System.currentTimeMillis();
+                info.addEvent("DONE", String.format("Лесенка: прибыль %.2f USD (%.2f%%), сделок %d",
+                        result.profitUsd, result.profitPercent, result.totalTrades));
+            } catch (Exception e) {
+                if (Thread.currentThread().isInterrupted()) {
+                    info.status = "STOPPED";
+                    info.addEvent("STOP", "Прервано");
+                } else {
+                    info.status = "ERROR";
+                    info.addEvent("ERROR", "Ошибка: " + e.getMessage());
+                    log.error("Ladder backtest error for user {}", userId, e);
+                }
+                info.endedAt = System.currentTimeMillis();
+            } finally {
+                unregisterThread();
+                saveSessions();
+            }
+        });
+        t.setDaemon(true);
+        info.thread = t;
+        sessions.put(id, info);
+        t.start();
+        return info;
+    }
+
     // ── Top-10 strategy search ───────────────────────────────────────────────
+
+    public SessionInfo startTop10SearchLadder(String coinName, double tradingSum, double orderUsdt, String chartType, String exchange) {
+        return startTopStrategiesLadder(coinName, tradingSum, chartType, exchange, 10, 0.5, 10.0, 0.5, orderUsdt);
+    }
+
+    public SessionInfo startTopStrategiesLadder(String coinName, double tradingSum, String chartType,
+                                                String exchangeName, int topN,
+                                                double stepMin, double stepMax, double stepInc, double orderUsdt) {
+        String id = "optimize_ladder_" + System.currentTimeMillis();
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("tradingSum", tradingSum);
+        params.put("chartType", chartType);
+        params.put("exchangeName", exchangeName);
+        params.put("strategy", "ladder");
+        params.put("topN", topN);
+        params.put("stepMin", stepMin);
+        params.put("stepMax", stepMax);
+        params.put("stepInc", stepInc);
+        params.put("orderUsdt", orderUsdt);
+        SessionInfo info = new SessionInfo(id, SessionType.BACKTEST, coinName, params, userId);
+        lastBacktestResults.remove("ladder");
+        info.addEvent("START", "Поиск ТОП стратегий Лесенка: " + coinName);
+
+        Thread t = new Thread(() -> {
+            registerThread(id);
+            try {
+                Coin coin = CoinsList.getCoinByName(coinName);
+                Chart chart;
+                switch (chartType) {
+                    case "yearly":
+                        chart = Chart.getYearlyChart_1hourInterval(coin);
+                        break;
+                    case "monthly":
+                        chart = Chart.getMonthlyChart_1hourInterval(coin, YearMonth.now().minusMonths(1));
+                        break;
+                    default:
+                        chart = Chart.get1DayUntilNowChart_5MinuteInterval(coin);
+                        break;
+                }
+
+                List<Map<String, Object>> ranked = new ArrayList<>();
+                int total = (int) Math.max(1, Math.floor((stepMax - stepMin) / Math.max(stepInc, 0.0001)) + 1);
+                info.backtestProgressTotal = total;
+                int done = 0;
+
+                for (double step = stepMin; step <= stepMax + 1e-9; step += stepInc) {
+                    if (Thread.currentThread().isInterrupted()) break;
+                    LadderStrategyBackTester tester = new LadderStrategyBackTester(coin, chart, tradingSum, orderUsdt, step);
+                    LadderStrategyBackTester.BackTestResult r = tester.run();
+                    if (r != null) {
+                        Map<String, Object> m = new LinkedHashMap<>();
+                        m.put("stepPercent", step);
+                        m.put("orderUsdt", orderUsdt);
+                        m.put("profitUsd", r.profitUsd);
+                        m.put("profitPercent", r.profitPercent);
+                        m.put("buyCount", r.buyCount);
+                        m.put("sellCount", r.sellCount);
+                        m.put("totalTrades", r.totalTrades);
+
+                        List<Map<String, Object>> evList = new ArrayList<>();
+                        for (double[] ev : tester.getTradeEvents()) {
+                            Map<String, Object> evm = new LinkedHashMap<>();
+                            evm.put("timestamp", (long) ev[0]);
+                            evm.put("price", ev[1]);
+                            evm.put("eventType", (int) ev[2]);
+                            evList.add(evm);
+                        }
+                        m.put("tradeEvents", evList);
+
+                        List<Map<String, Object>> eqList = new ArrayList<>();
+                        for (double[] eq : tester.getEquityCurve()) {
+                            Map<String, Object> eqm = new LinkedHashMap<>();
+                            eqm.put("timestamp", (long) eq[0]);
+                            eqm.put("equity", eq[1]);
+                            eqList.add(eqm);
+                        }
+                        m.put("equityCurve", eqList);
+
+                        ranked.add(m);
+                    }
+                    done++;
+                    info.backtestProgressCurrent = done;
+                }
+
+                ranked.sort((a, b) -> Double.compare(toDouble(b.get("profitUsd")), toDouble(a.get("profitUsd"))));
+                List<Map<String, Object>> top = ranked.subList(0, Math.min(Math.max(topN, 1), ranked.size()));
+                int rank = 1;
+                for (Map<String, Object> m : top) m.put("rank", rank++);
+
+                Map<String, Object> resultMap = new LinkedHashMap<>();
+                resultMap.put("strategy", "ladder");
+                resultMap.put("coinName", coinName);
+                resultMap.put("tradingSum", tradingSum);
+                resultMap.put("topStrategies", top);
+                resultMap.put("ready", true);
+
+                lastBacktestResults.put("ladder", resultMap);
+                info.backtestResultData = resultMap;
+                info.status = "DONE";
+                info.endedAt = System.currentTimeMillis();
+                info.backtestProgressCurrent = info.backtestProgressTotal;
+                info.addEvent("DONE", "Поиск Лесенка завершен. Найдено: " + top.size());
+            } catch (Exception e) {
+                if (Thread.currentThread().isInterrupted()) {
+                    info.status = "STOPPED";
+                    info.addEvent("STOP", "Прервано");
+                } else {
+                    info.status = "ERROR";
+                    info.addEvent("ERROR", "Ошибка: " + e.getMessage());
+                    log.error("Top ladder error for user {}", userId, e);
+                }
+                info.endedAt = System.currentTimeMillis();
+            } finally {
+                unregisterThread();
+                saveSessions();
+            }
+        });
+        t.setDaemon(true);
+        info.thread = t;
+        sessions.put(id, info);
+        t.start();
+        return info;
+    }
 
     public SessionInfo startTop10Search(String coinName, double tradingSum, String chartType, String exchange) {
         return startTop10Search(coinName, tradingSum, chartType, exchange, false);
     }
 
     public SessionInfo startTop10Search(String coinName, double tradingSum, String chartType, String exchange, boolean recapitalize) {
+        return startTop10Search(coinName, tradingSum, chartType, exchange, recapitalize, false);
+    }
+
+    public SessionInfo startTop10Search(String coinName, double tradingSum, String chartType, String exchange, boolean recapitalize, boolean trailProfit) {
         String id = "top10_" + System.currentTimeMillis();
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("tradingSum", tradingSum);
         params.put("chartType", chartType);
         params.put("exchange", exchange);
+        params.put("strategy", trailProfit ? "reversal_trail" : "reversal");
         if (recapitalize) params.put("recapitalize", true);
         SessionInfo info = new SessionInfo(id, SessionType.BACKTEST, coinName, params, userId);
-        String strategyKey = recapitalize ? "reversal_recap" : "reversal";
+        String strategyKey = trailProfit
+                ? (recapitalize ? "reversal_trail_recap" : "reversal_trail")
+                : (recapitalize ? "reversal_recap" : "reversal");
         lastTop10Results.remove(strategyKey);
         String stratLabel = recapitalize ? " [РЕКАП]" : "";
         info.addEvent("START", "Поиск ТОП-10 стратегий" + stratLabel + ": " + coinName);
@@ -1094,7 +1483,7 @@ public class TradingSessionManager {
                             if (Thread.currentThread().isInterrupted()) break;
                             try {
                                 ReversalPointStrategyBackTester tester = new ReversalPointStrategyBackTester(
-                                        coin, chart, tradingSum, bg, spg, slg, commCalc, recapitalize);
+                                        coin, chart, tradingSum, bg, spg, slg, commCalc, recapitalize, trailProfit);
                                 ReversalPointStrategyBackTester.BackTestResult r = tester.startBackTest();
                                 if (r != null) {
                                     results.add(r);
@@ -1178,7 +1567,7 @@ public class TradingSessionManager {
                                                         double profitMin, double profitMax, double profitStep,
                                                         double lossMin, double lossMax, double lossStep) {
         return findTopStrategies(coinName, tradingSum, chartType, exchangeName, commissionRate, topN, progressInfo,
-                buyMin, buyMax, buyStep, profitMin, profitMax, profitStep, lossMin, lossMax, lossStep, false);
+                buyMin, buyMax, buyStep, profitMin, profitMax, profitStep, lossMin, lossMax, lossStep, false, false);
     }
 
     /** Find top N strategies by brute-force backtest over parameter grid */
@@ -1189,7 +1578,8 @@ public class TradingSessionManager {
                                                         double buyMin, double buyMax, double buyStep,
                                                         double profitMin, double profitMax, double profitStep,
                                                         double lossMin, double lossMax, double lossStep,
-                                                        boolean recapitalize) {
+                                                        boolean recapitalize,
+                                                        boolean trailProfit) {
         try {
             Coin coin = CoinsList.getCoinByName(coinName);
             Chart chart;
@@ -1224,7 +1614,7 @@ public class TradingSessionManager {
                         if (pg >= lg) { done++; if (progressInfo != null) progressInfo.backtestProgressCurrent = done; continue; }
                         ReversalPointStrategyBackTester tester = new ReversalPointStrategyBackTester(
                                 coin, chart, tradingSum, bg, pg, lg,
-                                new CommissionCalculator(CommissionCalculator.Exchange.BINANCE), recapitalize);
+                                new CommissionCalculator(CommissionCalculator.Exchange.BINANCE), recapitalize, trailProfit);
                         ReversalPointStrategyBackTester.BackTestResult r = tester.startBackTest();
                         if (r != null) {
                             topHeap.add(new Object[]{r, tester});
@@ -1305,7 +1695,7 @@ public class TradingSessionManager {
                                            double profitMin, double profitMax, double profitStep,
                                            double lossMin, double lossMax, double lossStep) {
         return startTopStrategies(coinName, tradingSum, chartType, exchangeName, commissionRate, topN,
-                buyMin, buyMax, buyStep, profitMin, profitMax, profitStep, lossMin, lossMax, lossStep, false);
+                buyMin, buyMax, buyStep, profitMin, profitMax, profitStep, lossMin, lossMax, lossStep, false, false);
     }
 
     public SessionInfo startTopStrategies(String coinName, double tradingSum,
@@ -1315,14 +1705,28 @@ public class TradingSessionManager {
                                            double profitMin, double profitMax, double profitStep,
                                            double lossMin, double lossMax, double lossStep,
                                            boolean recapitalize) {
+        return startTopStrategies(coinName, tradingSum, chartType, exchangeName, commissionRate, topN,
+                buyMin, buyMax, buyStep, profitMin, profitMax, profitStep, lossMin, lossMax, lossStep, recapitalize, false);
+    }
+
+    public SessionInfo startTopStrategies(String coinName, double tradingSum,
+                                           String chartType, String exchangeName,
+                                           double commissionRate, int topN,
+                                           double buyMin, double buyMax, double buyStep,
+                                           double profitMin, double profitMax, double profitStep,
+                                           double lossMin, double lossMax, double lossStep,
+                                           boolean recapitalize, boolean trailProfit) {
         String id = "optimize_" + System.currentTimeMillis();
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("tradingSum", tradingSum); params.put("chartType", chartType);
         params.put("exchangeName", exchangeName); params.put("commissionRate", commissionRate);
         params.put("topN", topN);
+        params.put("strategy", trailProfit ? "reversal_trail" : "reversal");
         if (recapitalize) params.put("recapitalize", true);
         SessionInfo info = new SessionInfo(id, SessionType.BACKTEST, coinName, params, userId);
-        String strategyKey = recapitalize ? "reversal_recap" : "reversal";
+        String strategyKey = trailProfit
+                ? (recapitalize ? "reversal_trail_recap" : "reversal_trail")
+                : (recapitalize ? "reversal_recap" : "reversal");
         String stratLabel = recapitalize ? " [РЕКАП]" : "";
         info.addEvent("START", "Поиск лучших стратегий" + stratLabel + ": " + coinName);
         Thread t = new Thread(() -> {
@@ -1331,7 +1735,7 @@ public class TradingSessionManager {
                 List<Map<String, Object>> top = findTopStrategies(coinName, tradingSum, chartType,
                         exchangeName, commissionRate, topN, info,
                         buyMin, buyMax, buyStep, profitMin, profitMax, profitStep,
-                        lossMin, lossMax, lossStep, recapitalize);
+                        lossMin, lossMax, lossStep, recapitalize, trailProfit);
                 Map<String, Object> rm = new LinkedHashMap<>();
                 rm.put("coinName", coinName); rm.put("chartType", chartType);
                 rm.put("exchangeName", exchangeName); rm.put("commissionRate", commissionRate);
@@ -1359,13 +1763,19 @@ public class TradingSessionManager {
     }
 
     public Map<String, Object> getLastBacktestResult(String strategy) {
-        return lastBacktestResults.get(strategy != null ? strategy : "reversal");
+        return lastBacktestResults.get(normalizeStrategyKey(strategy));
     }
     public String getLastBacktestChartPath(String strategy) {
-        return lastBacktestChartPaths.get(strategy != null ? strategy : "reversal");
+        return lastBacktestChartPaths.get(normalizeStrategyKey(strategy));
     }
     public Map<String, Object> getLastTop10Result(String strategy) {
-        return lastTop10Results.get(strategy != null ? strategy : "reversal");
+        return lastTop10Results.get(normalizeStrategyKey(strategy));
+    }
+
+    private String normalizeStrategyKey(String strategy) {
+        String key = strategy != null ? strategy : "reversal";
+        if (key.startsWith("ladder")) return "ladder";
+        return key;
     }
 
     // ── ATR+EMA Top Strategies (custom ranges, stores in lastBacktestResults) ─

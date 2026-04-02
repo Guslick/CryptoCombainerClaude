@@ -314,12 +314,19 @@ public class MiniAppServer {
                 double lossMin = toDouble(body.get("lossMin"), 3.0);
                 double lossMax = toDouble(body.get("lossMax"), 15.0);
                 double lossStep = toDouble(body.get("lossStep"), 1.0);
+                double orderUsdt = toDouble(body.get("orderUsdt"), tradingSum);
                 String strategy = (String) body.getOrDefault("strategy", "reversal");
-                boolean recapitalize = "reversal_recap".equals(strategy) || "atr_ema_recap".equals(strategy);
+                boolean recapitalize = "reversal_recap".equals(strategy) || "atr_ema_recap".equals(strategy)
+                        || "reversal_trail_recap".equals(strategy);
                 boolean isAtrEma = strategy != null && strategy.startsWith("atr_ema");
+                boolean isReversalTrail = strategy != null && strategy.startsWith("reversal_trail");
+                boolean isLadder = strategy != null && strategy.startsWith("ladder");
                 TradingSessionManager mgr = TradingSessionManager.forUser(userId);
                 TradingSessionManager.SessionInfo info;
-                if (isAtrEma) {
+                if (isLadder) {
+                    info = mgr.startTopStrategiesLadder(coinName, tradingSum, chartType, exchangeName,
+                            topN, buyMin, buyMax, buyStep, orderUsdt);
+                } else if (isAtrEma) {
                     info = mgr.startTopStrategiesAtrEma(coinName, tradingSum, chartType, exchangeName,
                             commissionRate, topN,
                             buyMin, buyMax, buyStep,
@@ -330,7 +337,7 @@ public class MiniAppServer {
                             commissionRate, topN,
                             buyMin, buyMax, buyStep,
                             profitMin, profitMax, profitStep,
-                            lossMin, lossMax, lossStep, recapitalize);
+                            lossMin, lossMax, lossStep, recapitalize, isReversalTrail);
                 }
                 return info.toMap();
             });
@@ -347,15 +354,21 @@ public class MiniAppServer {
                 double tradingSum = toDouble(body.get("tradingSum"), 100.0);
                 String chartType = (String) body.getOrDefault("chartType", "1d");
                 String exch = (String) body.getOrDefault("exchange", "binance");
+                double orderUsdt = toDouble(body.get("orderUsdt"), tradingSum);
                 String strategy = (String) body.getOrDefault("strategy", "reversal");
-                boolean recapitalize = "reversal_recap".equals(strategy) || "atr_ema_recap".equals(strategy);
+                boolean recapitalize = "reversal_recap".equals(strategy) || "atr_ema_recap".equals(strategy)
+                        || "reversal_trail_recap".equals(strategy);
                 boolean isAtrEma = strategy != null && strategy.startsWith("atr_ema");
+                boolean isReversalTrail = strategy != null && strategy.startsWith("reversal_trail");
+                boolean isLadder = strategy != null && strategy.startsWith("ladder");
                 TradingSessionManager mgr = TradingSessionManager.forUser(userId);
                 TradingSessionManager.SessionInfo info;
-                if (isAtrEma) {
+                if (isLadder) {
+                    info = mgr.startTop10SearchLadder(coinName, tradingSum, orderUsdt, chartType, exch);
+                } else if (isAtrEma) {
                     info = mgr.startTop10SearchAtrEma(coinName, tradingSum, chartType, exch, recapitalize);
                 } else {
-                    info = mgr.startTop10Search(coinName, tradingSum, chartType, exch, recapitalize);
+                    info = mgr.startTop10Search(coinName, tradingSum, chartType, exch, recapitalize, isReversalTrail);
                 }
                 return info.toMap();
             });
@@ -681,8 +694,13 @@ public class MiniAppServer {
         int chartRefresh = toInt(body.get("chartRefreshInterval"), 60);
         long chatId = toLong(body.get("chatId"), AppConfig.getInstance().getDefaultChatId());
         String strategy = (String) body.getOrDefault("strategy", "reversal");
-        boolean recapitalize = "reversal_recap".equals(strategy) || "atr_ema_recap".equals(strategy);
+        boolean recapitalize = "reversal_recap".equals(strategy) || "atr_ema_recap".equals(strategy)
+                || "reversal_trail_recap".equals(strategy);
         boolean isAtrEma = strategy.startsWith("atr_ema");
+        boolean isReversalTrail = strategy != null && strategy.startsWith("reversal_trail");
+        boolean isLadder = strategy != null && strategy.startsWith("ladder");
+        double ladderOrderUsdt = toDouble(body.get("orderUsdt"), tradingSum);
+        double ladderStepPercent = toDouble(body.get("stepPercent"), buyGap);
 
         UserProfileManager.UserProfile profile = userId > 0
             ? UserProfileManager.getInstance().loadProfile(userId) : null;
@@ -691,39 +709,47 @@ public class MiniAppServer {
         Object result;
         switch (type.toLowerCase()) {
             case "binance": case "binance_real":
-                if (isAtrEma) {
+                if (isLadder) {
+                    result = mgr.startBinanceTradingLadder(coinName, ladderOrderUsdt, ladderStepPercent, timeout, chartRefresh, chatId, profile);
+                } else if (isAtrEma) {
                     result = mgr.startBinanceTradingAtrEma(coinName, tradingSum, buyGap, spg, slg,
                             timeout, chartRefresh, chatId, profile, recapitalize);
                 } else {
                     result = mgr.startBinanceTrading(coinName, tradingSum, buyGap, spg, slg,
-                            timeout, chartRefresh, chatId, profile, recapitalize);
+                            timeout, chartRefresh, chatId, profile, recapitalize, isReversalTrail);
                 }
                 break;
             case "binance_test":
-                if (isAtrEma) {
+                if (isLadder) {
+                    result = mgr.startBinanceTestTradingLadder(coinName, ladderOrderUsdt, ladderStepPercent, timeout, chartRefresh, chatId, profile);
+                } else if (isAtrEma) {
                     result = mgr.startBinanceTestTradingAtrEma(coinName, tradingSum, buyGap, spg, slg,
                             timeout, chartRefresh, chatId, profile, recapitalize);
                 } else {
                     result = mgr.startBinanceTestTrading(coinName, tradingSum, buyGap, spg, slg,
-                            timeout, chartRefresh, chatId, profile, recapitalize);
+                            timeout, chartRefresh, chatId, profile, recapitalize, isReversalTrail);
                 }
                 break;
             case "research":
-                if (isAtrEma) {
+                if (isLadder) {
+                    result = mgr.startResearchTradingLadder(coinName, startAssets, ladderOrderUsdt, ladderStepPercent, timeout, chartRefresh, chatId);
+                } else if (isAtrEma) {
                     result = mgr.startResearchTradingAtrEma(coinName, startAssets, tradingSum, buyGap, spg, slg,
                             timeout, chartRefresh, chatId, recapitalize);
                 } else {
                     result = mgr.startResearchTrading(coinName, startAssets, tradingSum, buyGap, spg, slg,
-                            timeout, chartRefresh, chatId, recapitalize);
+                            timeout, chartRefresh, chatId, recapitalize, isReversalTrail);
                 }
                 break;
             default:
-                if (isAtrEma) {
+                if (isLadder) {
+                    result = mgr.startTesterTradingLadder(coinName, startAssets, ladderOrderUsdt, ladderStepPercent, timeout, chartRefresh, chatId);
+                } else if (isAtrEma) {
                     result = mgr.startTesterTradingAtrEma(coinName, startAssets, tradingSum, buyGap, spg, slg,
                             timeout, chartRefresh, chatId, recapitalize);
                 } else {
                     result = mgr.startTesterTrading(coinName, startAssets, tradingSum, buyGap, spg, slg,
-                            timeout, chartRefresh, chatId, recapitalize);
+                            timeout, chartRefresh, chatId, recapitalize, isReversalTrail);
                 }
         }
         if (result instanceof TradingSessionManager.SessionInfo)
@@ -741,16 +767,23 @@ public class MiniAppServer {
         String chartType = (String) body.getOrDefault("chartType", "1d");
         String exch = (String) body.getOrDefault("exchange", "binance");
         String strategy = (String) body.getOrDefault("strategy", "reversal");
-        boolean recapitalize = "reversal_recap".equals(strategy) || "atr_ema_recap".equals(strategy);
+        boolean recapitalize = "reversal_recap".equals(strategy) || "atr_ema_recap".equals(strategy)
+                || "reversal_trail_recap".equals(strategy);
         boolean isAtrEma = strategy.startsWith("atr_ema");
+        boolean isReversalTrail = strategy.startsWith("reversal_trail");
+        boolean isLadder = strategy.startsWith("ladder");
         long customFrom = toLong(body.get("customFrom"), 0);
         long customTo = toLong(body.get("customTo"), 0);
         TradingSessionManager mgr = TradingSessionManager.forUser(userId);
         TradingSessionManager.SessionInfo info;
-        if (isAtrEma) {
+        if (isLadder) {
+            double orderUsdt = toDouble(body.get("orderUsdt"), tradingSum);
+            double stepPercent = toDouble(body.get("stepPercent"), buyGap);
+            info = mgr.startBacktestLadder(coinName, tradingSum, orderUsdt, stepPercent, chartType, exch, customFrom, customTo);
+        } else if (isAtrEma) {
             info = mgr.startBacktestAtrEma(coinName, tradingSum, buyGap, spg, slg, chartType, exch, 0.1, customFrom, customTo, recapitalize);
         } else {
-            info = mgr.startBacktest(coinName, tradingSum, buyGap, spg, slg, chartType, exch, 0.1, customFrom, customTo, recapitalize);
+            info = mgr.startBacktest(coinName, tradingSum, buyGap, spg, slg, chartType, exch, 0.1, customFrom, customTo, recapitalize, isReversalTrail);
         }
         return info.toMap();
     }

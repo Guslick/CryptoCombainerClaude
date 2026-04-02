@@ -341,11 +341,25 @@
             <div style="font-family:var(--font-head);font-size:13px;font-weight:700">📐📊 ATR+EMA Адаптивная</div>
             <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:4px">Разворотные точки с адаптивными порогами (ATR — волатильность, EMA-50 — тренд). Покупает только в восходящем тренде.</div>
           </button>
+          <button class="btn btn-primary" style="text-align:left;padding:12px 16px;border:1px solid #26C6DA" onclick="selectStrategy('reversal_trail')">
+            <div style="font-family:var(--font-head);font-size:13px;font-weight:700">📐🎯 Разворотные + Трейлинг-профит</div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:4px">Покупка как в Reversal, а фиксация прибыли — по откату от локального пика после достижения цели.</div>
+          </button>
+          <button class="btn btn-primary" style="text-align:left;padding:12px 16px;border:1px solid #7E57C2" onclick="selectStrategy('ladder')">
+            <div style="font-family:var(--font-head);font-size:13px;font-weight:700">🪜 Лесенка (v1)</div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:4px">Сетка уровней от стартовой цены: покупка на новой ступени, продажа самого дешёвого лота при росте на шаг.</div>
+          </button>
         </div>
       </div>
       <div id="strategyWorkspace" style="display:none">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
           <button class="btn btn-secondary btn-sm" onclick="deselectStrategy()" style="font-size:10px">← Назад</button>
+          <select id="quickStrategySelect" onchange="selectStrategy(this.value)" style="max-width:210px;font-size:11px;padding:6px 8px">
+            <option value="reversal">📐 Разворотные точки</option>
+            <option value="reversal_trail">📐🎯 Reversal + Trail</option>
+            <option value="atr_ema">📐📊 ATR+EMA</option>
+            <option value="ladder">🪜 Лесенка (v1)</option>
+          </select>
           <span id="strategyTitle" style="font-family:var(--font-head);font-size:12px;color:var(--accent)"></span>
           <label style="margin-left:auto;display:flex;align-items:center;gap:5px;font-size:11px;color:var(--green);cursor:pointer">
             <input type="checkbox" id="recapCheckbox" onchange="updateStrategyTitle()"> 💹 Рекапитализация
@@ -388,15 +402,19 @@
             <label class="input-label">СУММА СДЕЛКИ (USDT)</label>
             <input type="number" id="tradeTradingSum" value="100" min="10" step="10" oninput="saveField('tradeTradingSum')">
           </div>
+          <div class="input-wrap" id="tradeOrderWrap" style="display:none">
+            <label class="input-label">ОРДЕР ЛЕСЕНКИ (USDT)</label>
+            <input type="number" id="tradeOrderUsdt" value="25" min="5" step="5" oninput="saveField('tradeOrderUsdt')">
+          </div>
           <div class="input-wrap">
             <label class="input-label">КОЭ. ПОКУПКИ (%)</label>
             <input type="number" id="tradeBuyGap" value="3.5" min="0.1" step="0.1" oninput="saveField('tradeBuyGap')">
           </div>
-          <div class="input-wrap">
+          <div class="input-wrap" id="tradeSellProfitWrap">
             <label class="input-label">КОЭ. ПРОДАЖИ + (%)</label>
             <input type="number" id="tradeSellProfit" value="2.0" min="0.1" step="0.1" oninput="saveField('tradeSellProfit')">
           </div>
-          <div class="input-wrap">
+          <div class="input-wrap" id="tradeSellLossWrap">
             <label class="input-label">КОЭ. ПРОДАЖИ - (%)</label>
             <input type="number" id="tradeSellLoss" value="8.0" min="0.1" step="0.1" oninput="saveField('tradeSellLoss')">
           </div>
@@ -509,15 +527,19 @@
             <label class="input-label">СУММА (USDT)</label>
             <input type="number" id="btTradingSum" value="100" min="10" step="10" oninput="saveField('btTradingSum')">
           </div>
+          <div class="input-wrap" id="btOrderWrap" style="display:none">
+            <label class="input-label">ОРДЕР ЛЕСЕНКИ (USDT)</label>
+            <input type="number" id="btOrderUsdt" value="25" min="5" step="5" oninput="saveField('btOrderUsdt')">
+          </div>
           <div class="input-wrap">
             <label class="input-label">КОЭ. ПОКУПКИ (%)</label>
             <input type="number" id="btBuyGap" value="3.5" min="0.1" step="0.1" oninput="saveField('btBuyGap')">
           </div>
-          <div class="input-wrap">
+          <div class="input-wrap" id="btSellProfitWrap">
             <label class="input-label">КОЭ. ПРОДАЖИ + (%)</label>
             <input type="number" id="btSellProfit" value="2.0" min="0.1" step="0.1" oninput="saveField('btSellProfit')">
           </div>
-          <div class="input-wrap">
+          <div class="input-wrap" id="btSellLossWrap">
             <label class="input-label">КОЭ. ПРОДАЖИ - (%)</label>
             <input type="number" id="btSellLoss" value="8.0" min="0.1" step="0.1" oninput="saveField('btSellLoss')">
           </div>
@@ -625,6 +647,10 @@
             <label class="input-label">СУММА (USDT)</label>
             <input type="number" id="optTradingSum" value="100" min="10" step="10" oninput="saveField('optTradingSum')">
           </div>
+          <div class="input-wrap" id="optOrderWrap" style="display:none">
+            <label class="input-label">ОРДЕР ЛЕСЕНКИ (USDT)</label>
+            <input type="number" id="optOrderUsdt" value="25" min="5" step="5" oninput="saveField('optOrderUsdt')">
+          </div>
           <div class="input-wrap">
             <label class="input-label">КОЛИЧЕСТВО ТОП</label>
             <input type="number" id="optTopN" value="10" min="1" max="20" oninput="saveField('optTopN')">
@@ -647,7 +673,7 @@
               <div class="input-wrap"><label class="input-label">ШАГ</label><input type="number" id="optBuyStep" value="1" min="0.1" step="0.1" oninput="updateCombinationsCount();saveField('optBuyStep')"></div>
             </div>
           </div>
-          <div class="form-full" style="margin-top:4px">
+          <div class="form-full" id="optProfitRange" style="margin-top:4px">
             <div style="font-family:var(--font-head);font-size:10px;color:var(--green);margin-bottom:8px">📈 ДИАПАЗОН ПРОДАЖИ + (%)</div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
               <div class="input-wrap"><label class="input-label">МИН</label><input type="number" id="optProfitMin" value="1" min="0.1" step="0.1" oninput="updateCombinationsCount();saveField('optProfitMin')"></div>
@@ -655,7 +681,7 @@
               <div class="input-wrap"><label class="input-label">ШАГ</label><input type="number" id="optProfitStep" value="0.5" min="0.1" step="0.1" oninput="updateCombinationsCount();saveField('optProfitStep')"></div>
             </div>
           </div>
-          <div class="form-full" style="margin-top:4px">
+          <div class="form-full" id="optLossRange" style="margin-top:4px">
             <div style="font-family:var(--font-head);font-size:10px;color:var(--red);margin-bottom:8px">📉 ДИАПАЗОН ПРОДАЖИ - (%)</div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
               <div class="input-wrap"><label class="input-label">МИН</label><input type="number" id="optLossMin" value="3" min="0.1" step="0.1" oninput="updateCombinationsCount();saveField('optLossMin')"></div>
@@ -1094,10 +1120,23 @@ function selectStrategy(strategyId) {
   const isRecap = strategyId.endsWith('_recap');
   _selectedStrategy = isRecap ? strategyId.replace('_recap', '') : strategyId;
   const cb = document.getElementById('recapCheckbox');
-  if (cb) cb.checked = isRecap;
-  try { localStorage.setItem('cc_strategy', _selectedStrategy); localStorage.setItem('cc_recap', isRecap ? '1' : '0'); } catch(e) {}
+  if (cb) {
+    cb.checked = _selectedStrategy === 'ladder' ? false : isRecap;
+    cb.disabled = _selectedStrategy === 'ladder';
+    cb.parentElement.style.opacity = _selectedStrategy === 'ladder' ? '0.6' : '1';
+    cb.parentElement.title = _selectedStrategy === 'ladder'
+      ? 'Для Ladder v1 рекапитализация пока не поддерживается'
+      : '';
+  }
+  try {
+    localStorage.setItem('cc_strategy', _selectedStrategy);
+    localStorage.setItem('cc_recap', (cb && cb.checked) ? '1' : '0');
+  } catch(e) {}
   document.getElementById('strategySelector').style.display = 'none';
   document.getElementById('strategyWorkspace').style.display = 'block';
+  const quickSel = document.getElementById('quickStrategySelect');
+  if (quickSel) quickSel.value = _selectedStrategy;
+  applyStrategySpecificForm();
   updateStrategyTitle();
   // Clear previous strategy results to prevent leaking between strategies
   _btLastResult = null;
@@ -1110,18 +1149,50 @@ function selectStrategy(strategyId) {
 }
 
 function updateStrategyTitle() {
-  const recap = document.getElementById('recapCheckbox')?.checked;
+  const cb = document.getElementById('recapCheckbox');
+  const recap = _selectedStrategy === 'ladder' ? false : cb?.checked;
   try { localStorage.setItem('cc_recap', recap ? '1' : '0'); } catch(e) {}
-  const titles = { reversal: '📐 Разворотные точки', atr_ema: '📐📊 ATR+EMA Адаптивная' };
+  const titles = { reversal: '📐 Разворотные точки', reversal_trail: '📐🎯 Разворотные + Трейлинг-профит', atr_ema: '📐📊 ATR+EMA Адаптивная', ladder: '🪜 Лесенка (v1)' };
   const base = titles[_selectedStrategy] || _selectedStrategy;
-  document.getElementById('strategyTitle').textContent = base + (recap ? ' + 💹 Рекап' : '');
+  const suffix = recap ? ' + 💹 Рекап' : (_selectedStrategy === 'ladder' ? ' (без рекапа)' : '');
+  document.getElementById('strategyTitle').textContent = base + suffix;
+  applyStrategySpecificForm();
 }
 
 /** Returns the effective strategy ID including recap suffix */
 function getEffectiveStrategy() {
   const base = _selectedStrategy || 'reversal';
-  const recap = document.getElementById('recapCheckbox')?.checked;
+  const recap = base === 'ladder' ? false : document.getElementById('recapCheckbox')?.checked;
   return recap ? base + '_recap' : base;
+}
+
+function applyStrategySpecificForm() {
+  const isLadder = (_selectedStrategy || '').startsWith('ladder');
+  const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
+  const relabel = (inputId, text) => {
+    const input = document.getElementById(inputId);
+    const lbl = input?.closest('.input-wrap')?.querySelector('.input-label');
+    if (lbl && text) lbl.textContent = text;
+  };
+
+  show('tradeOrderWrap', isLadder);
+  show('tradeSellProfitWrap', !isLadder);
+  show('tradeSellLossWrap', !isLadder);
+  relabel('tradeBuyGap', isLadder ? 'ШАГ ЛЕСЕНКИ (%)' : 'КОЭ. ПОКУПКИ (%)');
+  relabel('tradeTradingSum', isLadder ? 'СУММА КАПИТАЛА (USDT)' : 'СУММА СДЕЛКИ (USDT)');
+
+  show('btOrderWrap', isLadder);
+  show('btSellProfitWrap', !isLadder);
+  show('btSellLossWrap', !isLadder);
+  relabel('btBuyGap', isLadder ? 'ШАГ ЛЕСЕНКИ (%)' : 'КОЭ. ПОКУПКИ (%)');
+  relabel('btTradingSum', isLadder ? 'СТАРТОВЫЙ КАПИТАЛ (USDT)' : 'СУММА (USDT)');
+
+  show('optOrderWrap', isLadder);
+  show('optProfitRange', !isLadder);
+  show('optLossRange', !isLadder);
+  relabel('optBuyMin', isLadder ? 'МИН ШАГ (%)' : 'МИН');
+  relabel('optBuyMax', isLadder ? 'МАКС ШАГ (%)' : 'МАКС');
+  relabel('optBuyStep', isLadder ? 'ШАГ (%)' : 'ШАГ');
 }
 
 function deselectStrategy() {
@@ -1654,6 +1725,10 @@ async function startTrading() {
     updateTimeout: +(document.getElementById('tradeTimeout')?.value)||30,
     chartRefreshInterval: +(document.getElementById('tradeChartRefresh')?.value)||60,
   };
+  if (getEffectiveStrategy().startsWith('ladder')) {
+    body.orderUsdt = +document.getElementById('tradeOrderUsdt')?.value || body.tradingSum;
+    body.stepPercent = body.buyGap;
+  }
   try {
     const r = await fetchWithTimeout(`${API_BASE}/api/trading/start`, {method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
     const data = await r.json();
@@ -1754,6 +1829,10 @@ async function startBacktest() {
     exchangeName: exchange, commissionRate,
     strategy: getEffectiveStrategy(),
   };
+  if ((body.strategy || '').startsWith('ladder')) {
+    body.orderUsdt = +document.getElementById('btOrderUsdt')?.value || body.tradingSum;
+    body.stepPercent = body.buyGap;
+  }
   if (body.chartType === 'custom') {
     const fromVal = document.getElementById('btCustomFrom').value;
     const toVal = document.getElementById('btCustomTo').value;
@@ -1809,6 +1888,7 @@ async function startBacktest() {
 function showBacktestResult(result) {
   if (!result||result.ready===false) return;
   document.getElementById('btResultCard').style.display='block';
+  const isLadder = (result.strategy || '') === 'ladder';
   const profit = result.profitUsd || 0;
   const profitAfterComm = result.profitUsdAfterCommission != null ? result.profitUsdAfterCommission : profit;
   const pct = result.profitPercent || 0;
@@ -1816,8 +1896,8 @@ function showBacktestResult(result) {
   const commission = result.totalCommission || 0;
   const pos = profit >= 0;
   const posAfter = profitAfterComm >= 0;
-  const profTrades = result.profitTradeCount || 0;
-  const lossTrades = result.lossTradeCount || 0;
+  const profTrades = isLadder ? (result.sellCount || 0) : (result.profitTradeCount || 0);
+  const lossTrades = isLadder ? 0 : (result.lossTradeCount || 0);
   const totalTrades = profTrades + lossTrades;
   const profitSum = result.totalProfit || 0;
   const lossSum = Math.abs(result.totalLoss || 0);
@@ -1844,9 +1924,14 @@ function showBacktestResult(result) {
   `;
 
   document.getElementById('btParamsDisplay').innerHTML = `
-    📥 Коэф. покупки: <b>${result.buyGap||'—'}%</b><br>
-    📈 Коэф. продажи+: <b>${result.sellWithProfitGap||'—'}%</b><br>
-    📉 Коэф. продажи-: <b>${result.sellWithLossGap||'—'}%</b><br>
+    ${isLadder
+      ? `🪜 Шаг сетки: <b>${result.stepPercent||'—'}%</b><br>
+         💵 Сумма ордера: <b>${result.orderUsdt||result.tradingSum||'—'} USDT</b><br>
+         🛒 Покупок: <b>${result.buyCount||0}</b><br>
+         💰 Продаж: <b>${result.sellCount||0}</b><br>`
+      : `📥 Коэф. покупки: <b>${result.buyGap||'—'}%</b><br>
+         📈 Коэф. продажи+: <b>${result.sellWithProfitGap||'—'}%</b><br>
+         📉 Коэф. продажи-: <b>${result.sellWithLossGap||'—'}%</b><br>`}
     📅 Период: <b>${periodLabel}</b><br>
     ${profTrades > 0 ? `💚 Прибыль (сделки+): <b>$${profitSum.toFixed(2)}</b><br>` : ''}
     ${lossTrades > 0 ? `❤️ Убыток (сделки-): <b>$${lossSum.toFixed(2)}</b><br>` : ''}
@@ -1869,6 +1954,17 @@ function showBacktestResult(result) {
 function startTradingFromBacktest() {
   const r = _btLastResult;
   if (!r) return;
+  if ((r.strategy || '').startsWith('ladder')) {
+    prefillTradingForm(
+      document.getElementById('btCoinInput')?.value || r.coinName || '',
+      r.orderUsdt || r.tradingSum,
+      r.stepPercent || 3.5,
+      2.0,
+      8.0
+    );
+    showToast('🪜 Параметры Ladder перенесены в форму торговли');
+    return;
+  }
   const coin = document.getElementById('btCoinInput')?.value || r.coinName || '';
   prefillTradingForm(coin, r.tradingSum, r.buyGap, r.sellWithProfitGap, r.sellWithLossGap);
 }
@@ -1876,6 +1972,17 @@ function startTradingFromBacktest() {
 function startTradingFromOptResult(idx) {
   const r = _optResults[idx];
   if (!r) return;
+  if (getEffectiveStrategy().startsWith('ladder')) {
+    prefillTradingForm(
+      document.getElementById('optCoinInput')?.value || r.coinName || '',
+      r.orderUsdt || +document.getElementById('optTradingSum')?.value || 100,
+      r.stepPercent || 3.5,
+      2.0,
+      8.0
+    );
+    showToast('🪜 Лучшие параметры Ladder перенесены в форму торговли');
+    return;
+  }
   const coin = document.getElementById('optCoinInput')?.value || r.coinName || '';
   prefillTradingForm(coin, r.tradingSum, r.buyGap, r.sellWithProfitGap, r.sellWithLossGap);
 }
@@ -2215,6 +2322,9 @@ async function startOptimize() {
     lossStep: +document.getElementById('optLossStep').value || 1,
     strategy: getEffectiveStrategy(),
   };
+  if ((body.strategy || '').startsWith('ladder')) {
+    body.orderUsdt = +document.getElementById('optOrderUsdt')?.value || body.tradingSum;
+  }
 
   if (_optPollTimer) { clearInterval(_optPollTimer); _optPollTimer = null; }
 
@@ -2287,6 +2397,7 @@ function showOptimizeResult(results) {
   _optResults = results;
   let html = '';
   results.forEach((r, i) => {
+    const isLadder = getEffectiveStrategy().startsWith('ladder');
     const profit = r.profitUsd || 0;
     const profitAfter = r.profitUsdAfterCommission != null ? r.profitUsdAfterCommission : profit;
     const pct = r.profitPercent || 0;
@@ -2294,8 +2405,8 @@ function showOptimizeResult(results) {
     const commission = r.totalCommission || 0;
     const pos = profit >= 0;
     const posAfter = profitAfter >= 0;
-    const profTrades = r.profitTradeCount || 0;
-    const lossTrades = r.lossTradeCount || 0;
+    const profTrades = isLadder ? (r.sellCount || 0) : (r.profitTradeCount || 0);
+    const lossTrades = isLadder ? 0 : (r.lossTradeCount || 0);
     const hasTrades = r.tradeEvents && r.tradeEvents.length > 0;
     const hasEquity = r.equityCurve && r.equityCurve.length > 1;
     html += `<div style="background:var(--bg3);border-radius:var(--radius-sm);padding:10px 12px;border:1px solid var(--border);margin-bottom:8px">
@@ -2310,9 +2421,11 @@ function showOptimizeResult(results) {
         <span style="font-size:11px;color:var(--muted);margin-left:auto">${posAfter?'+':''}${pctAfter.toFixed(2)}%</span>
       </div>` : ''}
       <div style="font-size:11px;color:var(--muted);line-height:1.7">
-        📥 Покупка: <b style="color:var(--text)">${r.buyGap}%</b> &nbsp;
-        📈 Продажа+: <b style="color:var(--green)">${r.sellWithProfitGap}%</b> &nbsp;
-        📉 Продажа−: <b style="color:var(--red)">${r.sellWithLossGap}%</b><br>
+        ${isLadder
+          ? `🪜 Шаг: <b style="color:var(--text)">${r.stepPercent}%</b> &nbsp; 💵 Ордер: <b style="color:var(--text)">${r.orderUsdt} USDT</b><br>`
+          : `📥 Покупка: <b style="color:var(--text)">${r.buyGap}%</b> &nbsp;
+             📈 Продажа+: <b style="color:var(--green)">${r.sellWithProfitGap}%</b> &nbsp;
+             📉 Продажа−: <b style="color:var(--red)">${r.sellWithLossGap}%</b><br>`}
         <span style="color:var(--green)">+${profTrades} сделок</span> &nbsp;
         <span style="color:var(--red)">-${lossTrades} сделок</span>
         ${commission > 0 ? `&nbsp; 💸 <span style="color:#ffea00">комиссия: $${commission.toFixed(4)}</span>` : ''}
@@ -2434,6 +2547,7 @@ function toggleOptYield(idx) {
 }
 
 function updateCombinationsCount() {
+  const isLadder = getEffectiveStrategy().startsWith('ladder');
   const buyMin = +document.getElementById('optBuyMin')?.value || 1;
   const buyMax = +document.getElementById('optBuyMax')?.value || 10;
   const buyStep = +document.getElementById('optBuyStep')?.value || 1;
@@ -2444,7 +2558,9 @@ function updateCombinationsCount() {
   const lossMax = +document.getElementById('optLossMax')?.value || 15;
   const lossStep = +document.getElementById('optLossStep')?.value || 1;
   const count = (v1, v2, s) => s > 0 ? Math.floor((v2 - v1) / s) + 1 : 1;
-  const total = count(buyMin, buyMax, buyStep) * count(profitMin, profitMax, profitStep) * count(lossMin, lossMax, lossStep);
+  const total = isLadder
+    ? count(buyMin, buyMax, buyStep)
+    : count(buyMin, buyMax, buyStep) * count(profitMin, profitMax, profitStep) * count(lossMin, lossMax, lossStep);
   const el = document.getElementById('optCombinationsCount');
   if (el) el.textContent = 'Комбинаций: ~' + total;
 }
@@ -3344,8 +3460,11 @@ async function restoreBacktestSession(sessionId) {
     }
     // Determine strategy from result
     const isAtrEma = result.strategy === 'atr_ema' || (result.topStrategies && result.topStrategies[0]?.strategy === 'atr_ema');
+    const isTrail = result.strategy === 'reversal_trail' || (result.topStrategies && result.topStrategies[0]?.strategy === 'reversal_trail');
     const isRecap = result.recapitalize === true;
-    const strategy = isAtrEma ? (isRecap ? 'atr_ema_recap' : 'atr_ema') : (isRecap ? 'reversal_recap' : 'reversal');
+    const strategy = isAtrEma
+      ? (isRecap ? 'atr_ema_recap' : 'atr_ema')
+      : (isTrail ? (isRecap ? 'reversal_trail_recap' : 'reversal_trail') : (isRecap ? 'reversal_recap' : 'reversal'));
     const isTop = !!result.topStrategies;
     // Close drawer if open
     if (currentDrawerSession) closeDrawer();
@@ -4366,6 +4485,7 @@ function profReadPem(suffix, input) {
     const savedRecap = localStorage.getItem('cc_recap');
     if (savedRecap === '1') { const cb = document.getElementById('recapCheckbox'); if (cb) cb.checked = true; }
   } catch(e) {}
+  applyStrategySpecificForm();
   updateTradeForm();
   updateExchangeBadge();
   updateTradeCommissionDisplay();
