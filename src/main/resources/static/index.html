@@ -1102,8 +1102,18 @@ function selectStrategy(strategyId) {
   const isRecap = strategyId.endsWith('_recap');
   _selectedStrategy = isRecap ? strategyId.replace('_recap', '') : strategyId;
   const cb = document.getElementById('recapCheckbox');
-  if (cb) cb.checked = isRecap;
-  try { localStorage.setItem('cc_strategy', _selectedStrategy); localStorage.setItem('cc_recap', isRecap ? '1' : '0'); } catch(e) {}
+  if (cb) {
+    cb.checked = _selectedStrategy === 'ladder' ? false : isRecap;
+    cb.disabled = _selectedStrategy === 'ladder';
+    cb.parentElement.style.opacity = _selectedStrategy === 'ladder' ? '0.6' : '1';
+    cb.parentElement.title = _selectedStrategy === 'ladder'
+      ? 'Для Ladder v1 рекапитализация пока не поддерживается'
+      : '';
+  }
+  try {
+    localStorage.setItem('cc_strategy', _selectedStrategy);
+    localStorage.setItem('cc_recap', (cb && cb.checked) ? '1' : '0');
+  } catch(e) {}
   document.getElementById('strategySelector').style.display = 'none';
   document.getElementById('strategyWorkspace').style.display = 'block';
   updateStrategyTitle();
@@ -1118,17 +1128,19 @@ function selectStrategy(strategyId) {
 }
 
 function updateStrategyTitle() {
-  const recap = document.getElementById('recapCheckbox')?.checked;
+  const cb = document.getElementById('recapCheckbox');
+  const recap = _selectedStrategy === 'ladder' ? false : cb?.checked;
   try { localStorage.setItem('cc_recap', recap ? '1' : '0'); } catch(e) {}
   const titles = { reversal: '📐 Разворотные точки', reversal_trail: '📐🎯 Разворотные + Трейлинг-профит', atr_ema: '📐📊 ATR+EMA Адаптивная', ladder: '🪜 Лесенка (v1)' };
   const base = titles[_selectedStrategy] || _selectedStrategy;
-  document.getElementById('strategyTitle').textContent = base + (recap ? ' + 💹 Рекап' : '');
+  const suffix = recap ? ' + 💹 Рекап' : (_selectedStrategy === 'ladder' ? ' (без рекапа)' : '');
+  document.getElementById('strategyTitle').textContent = base + suffix;
 }
 
 /** Returns the effective strategy ID including recap suffix */
 function getEffectiveStrategy() {
   const base = _selectedStrategy || 'reversal';
-  const recap = document.getElementById('recapCheckbox')?.checked;
+  const recap = base === 'ladder' ? false : document.getElementById('recapCheckbox')?.checked;
   return recap ? base + '_recap' : base;
 }
 
@@ -1821,6 +1833,7 @@ async function startBacktest() {
 function showBacktestResult(result) {
   if (!result||result.ready===false) return;
   document.getElementById('btResultCard').style.display='block';
+  const isLadder = (result.strategy || '') === 'ladder';
   const profit = result.profitUsd || 0;
   const profitAfterComm = result.profitUsdAfterCommission != null ? result.profitUsdAfterCommission : profit;
   const pct = result.profitPercent || 0;
@@ -1828,8 +1841,8 @@ function showBacktestResult(result) {
   const commission = result.totalCommission || 0;
   const pos = profit >= 0;
   const posAfter = profitAfterComm >= 0;
-  const profTrades = result.profitTradeCount || 0;
-  const lossTrades = result.lossTradeCount || 0;
+  const profTrades = isLadder ? (result.sellCount || 0) : (result.profitTradeCount || 0);
+  const lossTrades = isLadder ? 0 : (result.lossTradeCount || 0);
   const totalTrades = profTrades + lossTrades;
   const profitSum = result.totalProfit || 0;
   const lossSum = Math.abs(result.totalLoss || 0);
@@ -1856,9 +1869,14 @@ function showBacktestResult(result) {
   `;
 
   document.getElementById('btParamsDisplay').innerHTML = `
-    📥 Коэф. покупки: <b>${result.buyGap||'—'}%</b><br>
-    📈 Коэф. продажи+: <b>${result.sellWithProfitGap||'—'}%</b><br>
-    📉 Коэф. продажи-: <b>${result.sellWithLossGap||'—'}%</b><br>
+    ${isLadder
+      ? `🪜 Шаг сетки: <b>${result.stepPercent||'—'}%</b><br>
+         💵 Сумма ордера: <b>${result.orderUsdt||result.tradingSum||'—'} USDT</b><br>
+         🛒 Покупок: <b>${result.buyCount||0}</b><br>
+         💰 Продаж: <b>${result.sellCount||0}</b><br>`
+      : `📥 Коэф. покупки: <b>${result.buyGap||'—'}%</b><br>
+         📈 Коэф. продажи+: <b>${result.sellWithProfitGap||'—'}%</b><br>
+         📉 Коэф. продажи-: <b>${result.sellWithLossGap||'—'}%</b><br>`}
     📅 Период: <b>${periodLabel}</b><br>
     ${profTrades > 0 ? `💚 Прибыль (сделки+): <b>$${profitSum.toFixed(2)}</b><br>` : ''}
     ${lossTrades > 0 ? `❤️ Убыток (сделки-): <b>$${lossSum.toFixed(2)}</b><br>` : ''}

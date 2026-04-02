@@ -1565,13 +1565,19 @@ public class TradingSessionManager {
     }
 
     public Map<String, Object> getLastBacktestResult(String strategy) {
-        return lastBacktestResults.get(strategy != null ? strategy : "reversal");
+        return lastBacktestResults.get(normalizeStrategyKey(strategy));
     }
     public String getLastBacktestChartPath(String strategy) {
-        return lastBacktestChartPaths.get(strategy != null ? strategy : "reversal");
+        return lastBacktestChartPaths.get(normalizeStrategyKey(strategy));
     }
     public Map<String, Object> getLastTop10Result(String strategy) {
-        return lastTop10Results.get(strategy != null ? strategy : "reversal");
+        return lastTop10Results.get(normalizeStrategyKey(strategy));
+    }
+
+    private String normalizeStrategyKey(String strategy) {
+        String key = strategy != null ? strategy : "reversal";
+        if (key.startsWith("ladder")) return "ladder";
+        return key;
     }
 
     // ── ATR+EMA Top Strategies (custom ranges, stores in lastBacktestResults) ─
