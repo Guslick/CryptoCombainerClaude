@@ -114,7 +114,9 @@ public class ReversalPointStrategyBackTester {
             this.coin=Coin.createCoin(chart.getCoinName());
             Map<Coin, Double> testAssets = new HashMap<>();
             testAssets.put(USDT, 100d);
-            testAssets.put(coin, 0d);
+            // IMPORTANT: use the exact Coin instance stored in this.coin as wallet key
+            // otherwise wallet lookups by this.coin return 0 and all trade sizes become zero.
+            testAssets.put(this.coin, 0d);
             this.account= AccountBuilder.createNewTester(testAssets);
             this.tradingSum=tradingSum;
             this.initialTradingSum=tradingSum;
