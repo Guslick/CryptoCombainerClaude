@@ -319,9 +319,13 @@ public class MiniAppServer {
                         || "reversal_trail_recap".equals(strategy);
                 boolean isAtrEma = strategy != null && strategy.startsWith("atr_ema");
                 boolean isReversalTrail = strategy != null && strategy.startsWith("reversal_trail");
+                boolean isLadder = strategy != null && strategy.startsWith("ladder");
                 TradingSessionManager mgr = TradingSessionManager.forUser(userId);
                 TradingSessionManager.SessionInfo info;
-                if (isAtrEma) {
+                if (isLadder) {
+                    info = mgr.startTopStrategiesLadder(coinName, tradingSum, chartType, exchangeName,
+                            topN, buyMin, buyMax, buyStep);
+                } else if (isAtrEma) {
                     info = mgr.startTopStrategiesAtrEma(coinName, tradingSum, chartType, exchangeName,
                             commissionRate, topN,
                             buyMin, buyMax, buyStep,
@@ -354,9 +358,12 @@ public class MiniAppServer {
                         || "reversal_trail_recap".equals(strategy);
                 boolean isAtrEma = strategy != null && strategy.startsWith("atr_ema");
                 boolean isReversalTrail = strategy != null && strategy.startsWith("reversal_trail");
+                boolean isLadder = strategy != null && strategy.startsWith("ladder");
                 TradingSessionManager mgr = TradingSessionManager.forUser(userId);
                 TradingSessionManager.SessionInfo info;
-                if (isAtrEma) {
+                if (isLadder) {
+                    info = mgr.startTop10SearchLadder(coinName, tradingSum, chartType, exch);
+                } else if (isAtrEma) {
                     info = mgr.startTop10SearchAtrEma(coinName, tradingSum, chartType, exch, recapitalize);
                 } else {
                     info = mgr.startTop10Search(coinName, tradingSum, chartType, exch, recapitalize, isReversalTrail);

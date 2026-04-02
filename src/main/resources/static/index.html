@@ -1906,6 +1906,10 @@ function startTradingFromBacktest() {
 function startTradingFromOptResult(idx) {
   const r = _optResults[idx];
   if (!r) return;
+  if (getEffectiveStrategy().startsWith('ladder')) {
+    showToast('ℹ️ Ladder пока доступна только в backtest/optimize');
+    return;
+  }
   const coin = document.getElementById('optCoinInput')?.value || r.coinName || '';
   prefillTradingForm(coin, r.tradingSum, r.buyGap, r.sellWithProfitGap, r.sellWithLossGap);
 }
@@ -2317,6 +2321,7 @@ function showOptimizeResult(results) {
   _optResults = results;
   let html = '';
   results.forEach((r, i) => {
+    const isLadder = getEffectiveStrategy().startsWith('ladder');
     const profit = r.profitUsd || 0;
     const profitAfter = r.profitUsdAfterCommission != null ? r.profitUsdAfterCommission : profit;
     const pct = r.profitPercent || 0;
@@ -2324,8 +2329,8 @@ function showOptimizeResult(results) {
     const commission = r.totalCommission || 0;
     const pos = profit >= 0;
     const posAfter = profitAfter >= 0;
-    const profTrades = r.profitTradeCount || 0;
-    const lossTrades = r.lossTradeCount || 0;
+    const profTrades = isLadder ? (r.sellCount || 0) : (r.profitTradeCount || 0);
+    const lossTrades = isLadder ? 0 : (r.lossTradeCount || 0);
     const hasTrades = r.tradeEvents && r.tradeEvents.length > 0;
     const hasEquity = r.equityCurve && r.equityCurve.length > 1;
     html += `<div style="background:var(--bg3);border-radius:var(--radius-sm);padding:10px 12px;border:1px solid var(--border);margin-bottom:8px">
@@ -2340,9 +2345,11 @@ function showOptimizeResult(results) {
         <span style="font-size:11px;color:var(--muted);margin-left:auto">${posAfter?'+':''}${pctAfter.toFixed(2)}%</span>
       </div>` : ''}
       <div style="font-size:11px;color:var(--muted);line-height:1.7">
-        📥 Покупка: <b style="color:var(--text)">${r.buyGap}%</b> &nbsp;
-        📈 Продажа+: <b style="color:var(--green)">${r.sellWithProfitGap}%</b> &nbsp;
-        📉 Продажа−: <b style="color:var(--red)">${r.sellWithLossGap}%</b><br>
+        ${isLadder
+          ? `🪜 Шаг: <b style="color:var(--text)">${r.stepPercent}%</b> &nbsp; 💵 Ордер: <b style="color:var(--text)">${r.orderUsdt} USDT</b><br>`
+          : `📥 Покупка: <b style="color:var(--text)">${r.buyGap}%</b> &nbsp;
+             📈 Продажа+: <b style="color:var(--green)">${r.sellWithProfitGap}%</b> &nbsp;
+             📉 Продажа−: <b style="color:var(--red)">${r.sellWithLossGap}%</b><br>`}
         <span style="color:var(--green)">+${profTrades} сделок</span> &nbsp;
         <span style="color:var(--red)">-${lossTrades} сделок</span>
         ${commission > 0 ? `&nbsp; 💸 <span style="color:#ffea00">комиссия: $${commission.toFixed(4)}</span>` : ''}

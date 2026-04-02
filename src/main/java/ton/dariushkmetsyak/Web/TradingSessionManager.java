@@ -1229,6 +1229,128 @@ public class TradingSessionManager {
 
     // ── Top-10 strategy search ───────────────────────────────────────────────
 
+    public SessionInfo startTop10SearchLadder(String coinName, double tradingSum, String chartType, String exchange) {
+        return startTopStrategiesLadder(coinName, tradingSum, chartType, exchange, 10, 0.5, 10.0, 0.5);
+    }
+
+    public SessionInfo startTopStrategiesLadder(String coinName, double tradingSum, String chartType,
+                                                String exchangeName, int topN,
+                                                double stepMin, double stepMax, double stepInc) {
+        String id = "optimize_ladder_" + System.currentTimeMillis();
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("tradingSum", tradingSum);
+        params.put("chartType", chartType);
+        params.put("exchangeName", exchangeName);
+        params.put("strategy", "ladder");
+        params.put("topN", topN);
+        params.put("stepMin", stepMin);
+        params.put("stepMax", stepMax);
+        params.put("stepInc", stepInc);
+        SessionInfo info = new SessionInfo(id, SessionType.BACKTEST, coinName, params, userId);
+        lastBacktestResults.remove("ladder");
+        info.addEvent("START", "Поиск ТОП стратегий Лесенка: " + coinName);
+
+        Thread t = new Thread(() -> {
+            registerThread(id);
+            try {
+                Coin coin = CoinsList.getCoinByName(coinName);
+                Chart chart;
+                switch (chartType) {
+                    case "yearly":
+                        chart = Chart.getYearlyChart_1hourInterval(coin);
+                        break;
+                    case "monthly":
+                        chart = Chart.getMonthlyChart_1hourInterval(coin, YearMonth.now().minusMonths(1));
+                        break;
+                    default:
+                        chart = Chart.get1DayUntilNowChart_5MinuteInterval(coin);
+                        break;
+                }
+
+                List<Map<String, Object>> ranked = new ArrayList<>();
+                int total = (int) Math.max(1, Math.floor((stepMax - stepMin) / Math.max(stepInc, 0.0001)) + 1);
+                info.backtestProgressTotal = total;
+                int done = 0;
+
+                for (double step = stepMin; step <= stepMax + 1e-9; step += stepInc) {
+                    if (Thread.currentThread().isInterrupted()) break;
+                    LadderStrategyBackTester tester = new LadderStrategyBackTester(coin, chart, tradingSum, tradingSum, step);
+                    LadderStrategyBackTester.BackTestResult r = tester.run();
+                    if (r != null) {
+                        Map<String, Object> m = new LinkedHashMap<>();
+                        m.put("stepPercent", step);
+                        m.put("orderUsdt", tradingSum);
+                        m.put("profitUsd", r.profitUsd);
+                        m.put("profitPercent", r.profitPercent);
+                        m.put("buyCount", r.buyCount);
+                        m.put("sellCount", r.sellCount);
+                        m.put("totalTrades", r.totalTrades);
+
+                        List<Map<String, Object>> evList = new ArrayList<>();
+                        for (double[] ev : tester.getTradeEvents()) {
+                            Map<String, Object> evm = new LinkedHashMap<>();
+                            evm.put("timestamp", (long) ev[0]);
+                            evm.put("price", ev[1]);
+                            evm.put("eventType", (int) ev[2]);
+                            evList.add(evm);
+                        }
+                        m.put("tradeEvents", evList);
+
+                        List<Map<String, Object>> eqList = new ArrayList<>();
+                        for (double[] eq : tester.getEquityCurve()) {
+                            Map<String, Object> eqm = new LinkedHashMap<>();
+                            eqm.put("timestamp", (long) eq[0]);
+                            eqm.put("equity", eq[1]);
+                            eqList.add(eqm);
+                        }
+                        m.put("equityCurve", eqList);
+
+                        ranked.add(m);
+                    }
+                    done++;
+                    info.backtestProgressCurrent = done;
+                }
+
+                ranked.sort((a, b) -> Double.compare(toDouble(b.get("profitUsd")), toDouble(a.get("profitUsd"))));
+                List<Map<String, Object>> top = ranked.subList(0, Math.min(Math.max(topN, 1), ranked.size()));
+                int rank = 1;
+                for (Map<String, Object> m : top) m.put("rank", rank++);
+
+                Map<String, Object> resultMap = new LinkedHashMap<>();
+                resultMap.put("strategy", "ladder");
+                resultMap.put("coinName", coinName);
+                resultMap.put("tradingSum", tradingSum);
+                resultMap.put("topStrategies", top);
+                resultMap.put("ready", true);
+
+                lastBacktestResults.put("ladder", resultMap);
+                info.backtestResultData = resultMap;
+                info.status = "DONE";
+                info.endedAt = System.currentTimeMillis();
+                info.backtestProgressCurrent = info.backtestProgressTotal;
+                info.addEvent("DONE", "Поиск Лесенка завершен. Найдено: " + top.size());
+            } catch (Exception e) {
+                if (Thread.currentThread().isInterrupted()) {
+                    info.status = "STOPPED";
+                    info.addEvent("STOP", "Прервано");
+                } else {
+                    info.status = "ERROR";
+                    info.addEvent("ERROR", "Ошибка: " + e.getMessage());
+                    log.error("Top ladder error for user {}", userId, e);
+                }
+                info.endedAt = System.currentTimeMillis();
+            } finally {
+                unregisterThread();
+                saveSessions();
+            }
+        });
+        t.setDaemon(true);
+        info.thread = t;
+        sessions.put(id, info);
+        t.start();
+        return info;
+    }
+
     public SessionInfo startTop10Search(String coinName, double tradingSum, String chartType, String exchange) {
         return startTop10Search(coinName, tradingSum, chartType, exchange, false);
     }
