@@ -354,6 +354,12 @@
       <div id="strategyWorkspace" style="display:none">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
           <button class="btn btn-secondary btn-sm" onclick="deselectStrategy()" style="font-size:10px">← Назад</button>
+          <select id="quickStrategySelect" onchange="selectStrategy(this.value)" style="max-width:210px;font-size:11px;padding:6px 8px">
+            <option value="reversal">📐 Разворотные точки</option>
+            <option value="reversal_trail">📐🎯 Reversal + Trail</option>
+            <option value="atr_ema">📐📊 ATR+EMA</option>
+            <option value="ladder">🪜 Лесенка (v1)</option>
+          </select>
           <span id="strategyTitle" style="font-family:var(--font-head);font-size:12px;color:var(--accent)"></span>
           <label style="margin-left:auto;display:flex;align-items:center;gap:5px;font-size:11px;color:var(--green);cursor:pointer">
             <input type="checkbox" id="recapCheckbox" onchange="updateStrategyTitle()"> 💹 Рекапитализация
@@ -1116,6 +1122,8 @@ function selectStrategy(strategyId) {
   } catch(e) {}
   document.getElementById('strategySelector').style.display = 'none';
   document.getElementById('strategyWorkspace').style.display = 'block';
+  const quickSel = document.getElementById('quickStrategySelect');
+  if (quickSel) quickSel.value = _selectedStrategy;
   updateStrategyTitle();
   // Clear previous strategy results to prevent leaking between strategies
   _btLastResult = null;
