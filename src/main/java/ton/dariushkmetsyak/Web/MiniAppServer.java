@@ -314,6 +314,7 @@ public class MiniAppServer {
                 double lossMin = toDouble(body.get("lossMin"), 3.0);
                 double lossMax = toDouble(body.get("lossMax"), 15.0);
                 double lossStep = toDouble(body.get("lossStep"), 1.0);
+                double orderUsdt = toDouble(body.get("orderUsdt"), tradingSum);
                 String strategy = (String) body.getOrDefault("strategy", "reversal");
                 boolean recapitalize = "reversal_recap".equals(strategy) || "atr_ema_recap".equals(strategy)
                         || "reversal_trail_recap".equals(strategy);
@@ -324,7 +325,7 @@ public class MiniAppServer {
                 TradingSessionManager.SessionInfo info;
                 if (isLadder) {
                     info = mgr.startTopStrategiesLadder(coinName, tradingSum, chartType, exchangeName,
-                            topN, buyMin, buyMax, buyStep);
+                            topN, buyMin, buyMax, buyStep, orderUsdt);
                 } else if (isAtrEma) {
                     info = mgr.startTopStrategiesAtrEma(coinName, tradingSum, chartType, exchangeName,
                             commissionRate, topN,
@@ -353,6 +354,7 @@ public class MiniAppServer {
                 double tradingSum = toDouble(body.get("tradingSum"), 100.0);
                 String chartType = (String) body.getOrDefault("chartType", "1d");
                 String exch = (String) body.getOrDefault("exchange", "binance");
+                double orderUsdt = toDouble(body.get("orderUsdt"), tradingSum);
                 String strategy = (String) body.getOrDefault("strategy", "reversal");
                 boolean recapitalize = "reversal_recap".equals(strategy) || "atr_ema_recap".equals(strategy)
                         || "reversal_trail_recap".equals(strategy);
@@ -362,7 +364,7 @@ public class MiniAppServer {
                 TradingSessionManager mgr = TradingSessionManager.forUser(userId);
                 TradingSessionManager.SessionInfo info;
                 if (isLadder) {
-                    info = mgr.startTop10SearchLadder(coinName, tradingSum, chartType, exch);
+                    info = mgr.startTop10SearchLadder(coinName, tradingSum, orderUsdt, chartType, exch);
                 } else if (isAtrEma) {
                     info = mgr.startTop10SearchAtrEma(coinName, tradingSum, chartType, exch, recapitalize);
                 } else {
@@ -697,6 +699,8 @@ public class MiniAppServer {
         boolean isAtrEma = strategy.startsWith("atr_ema");
         boolean isReversalTrail = strategy != null && strategy.startsWith("reversal_trail");
         boolean isLadder = strategy != null && strategy.startsWith("ladder");
+        double ladderOrderUsdt = toDouble(body.get("orderUsdt"), tradingSum);
+        double ladderStepPercent = toDouble(body.get("stepPercent"), buyGap);
 
         UserProfileManager.UserProfile profile = userId > 0
             ? UserProfileManager.getInstance().loadProfile(userId) : null;
@@ -706,7 +710,7 @@ public class MiniAppServer {
         switch (type.toLowerCase()) {
             case "binance": case "binance_real":
                 if (isLadder) {
-                    result = mgr.startBinanceTradingLadder(coinName, tradingSum, buyGap, timeout, chartRefresh, chatId, profile);
+                    result = mgr.startBinanceTradingLadder(coinName, ladderOrderUsdt, ladderStepPercent, timeout, chartRefresh, chatId, profile);
                 } else if (isAtrEma) {
                     result = mgr.startBinanceTradingAtrEma(coinName, tradingSum, buyGap, spg, slg,
                             timeout, chartRefresh, chatId, profile, recapitalize);
@@ -717,7 +721,7 @@ public class MiniAppServer {
                 break;
             case "binance_test":
                 if (isLadder) {
-                    result = mgr.startBinanceTestTradingLadder(coinName, tradingSum, buyGap, timeout, chartRefresh, chatId, profile);
+                    result = mgr.startBinanceTestTradingLadder(coinName, ladderOrderUsdt, ladderStepPercent, timeout, chartRefresh, chatId, profile);
                 } else if (isAtrEma) {
                     result = mgr.startBinanceTestTradingAtrEma(coinName, tradingSum, buyGap, spg, slg,
                             timeout, chartRefresh, chatId, profile, recapitalize);
@@ -728,7 +732,7 @@ public class MiniAppServer {
                 break;
             case "research":
                 if (isLadder) {
-                    result = mgr.startResearchTradingLadder(coinName, startAssets, tradingSum, buyGap, timeout, chartRefresh, chatId);
+                    result = mgr.startResearchTradingLadder(coinName, startAssets, ladderOrderUsdt, ladderStepPercent, timeout, chartRefresh, chatId);
                 } else if (isAtrEma) {
                     result = mgr.startResearchTradingAtrEma(coinName, startAssets, tradingSum, buyGap, spg, slg,
                             timeout, chartRefresh, chatId, recapitalize);
@@ -739,7 +743,7 @@ public class MiniAppServer {
                 break;
             default:
                 if (isLadder) {
-                    result = mgr.startTesterTradingLadder(coinName, startAssets, tradingSum, buyGap, timeout, chartRefresh, chatId);
+                    result = mgr.startTesterTradingLadder(coinName, startAssets, ladderOrderUsdt, ladderStepPercent, timeout, chartRefresh, chatId);
                 } else if (isAtrEma) {
                     result = mgr.startTesterTradingAtrEma(coinName, startAssets, tradingSum, buyGap, spg, slg,
                             timeout, chartRefresh, chatId, recapitalize);

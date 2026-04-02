@@ -1304,13 +1304,13 @@ public class TradingSessionManager {
 
     // ── Top-10 strategy search ───────────────────────────────────────────────
 
-    public SessionInfo startTop10SearchLadder(String coinName, double tradingSum, String chartType, String exchange) {
-        return startTopStrategiesLadder(coinName, tradingSum, chartType, exchange, 10, 0.5, 10.0, 0.5);
+    public SessionInfo startTop10SearchLadder(String coinName, double tradingSum, double orderUsdt, String chartType, String exchange) {
+        return startTopStrategiesLadder(coinName, tradingSum, chartType, exchange, 10, 0.5, 10.0, 0.5, orderUsdt);
     }
 
     public SessionInfo startTopStrategiesLadder(String coinName, double tradingSum, String chartType,
                                                 String exchangeName, int topN,
-                                                double stepMin, double stepMax, double stepInc) {
+                                                double stepMin, double stepMax, double stepInc, double orderUsdt) {
         String id = "optimize_ladder_" + System.currentTimeMillis();
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("tradingSum", tradingSum);
@@ -1321,6 +1321,7 @@ public class TradingSessionManager {
         params.put("stepMin", stepMin);
         params.put("stepMax", stepMax);
         params.put("stepInc", stepInc);
+        params.put("orderUsdt", orderUsdt);
         SessionInfo info = new SessionInfo(id, SessionType.BACKTEST, coinName, params, userId);
         lastBacktestResults.remove("ladder");
         info.addEvent("START", "Поиск ТОП стратегий Лесенка: " + coinName);
@@ -1349,12 +1350,12 @@ public class TradingSessionManager {
 
                 for (double step = stepMin; step <= stepMax + 1e-9; step += stepInc) {
                     if (Thread.currentThread().isInterrupted()) break;
-                    LadderStrategyBackTester tester = new LadderStrategyBackTester(coin, chart, tradingSum, tradingSum, step);
+                    LadderStrategyBackTester tester = new LadderStrategyBackTester(coin, chart, tradingSum, orderUsdt, step);
                     LadderStrategyBackTester.BackTestResult r = tester.run();
                     if (r != null) {
                         Map<String, Object> m = new LinkedHashMap<>();
                         m.put("stepPercent", step);
-                        m.put("orderUsdt", tradingSum);
+                        m.put("orderUsdt", orderUsdt);
                         m.put("profitUsd", r.profitUsd);
                         m.put("profitPercent", r.profitPercent);
                         m.put("buyCount", r.buyCount);

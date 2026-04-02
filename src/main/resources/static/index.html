@@ -402,15 +402,19 @@
             <label class="input-label">СУММА СДЕЛКИ (USDT)</label>
             <input type="number" id="tradeTradingSum" value="100" min="10" step="10" oninput="saveField('tradeTradingSum')">
           </div>
+          <div class="input-wrap" id="tradeOrderWrap" style="display:none">
+            <label class="input-label">ОРДЕР ЛЕСЕНКИ (USDT)</label>
+            <input type="number" id="tradeOrderUsdt" value="25" min="5" step="5" oninput="saveField('tradeOrderUsdt')">
+          </div>
           <div class="input-wrap">
             <label class="input-label">КОЭ. ПОКУПКИ (%)</label>
             <input type="number" id="tradeBuyGap" value="3.5" min="0.1" step="0.1" oninput="saveField('tradeBuyGap')">
           </div>
-          <div class="input-wrap">
+          <div class="input-wrap" id="tradeSellProfitWrap">
             <label class="input-label">КОЭ. ПРОДАЖИ + (%)</label>
             <input type="number" id="tradeSellProfit" value="2.0" min="0.1" step="0.1" oninput="saveField('tradeSellProfit')">
           </div>
-          <div class="input-wrap">
+          <div class="input-wrap" id="tradeSellLossWrap">
             <label class="input-label">КОЭ. ПРОДАЖИ - (%)</label>
             <input type="number" id="tradeSellLoss" value="8.0" min="0.1" step="0.1" oninput="saveField('tradeSellLoss')">
           </div>
@@ -523,15 +527,19 @@
             <label class="input-label">СУММА (USDT)</label>
             <input type="number" id="btTradingSum" value="100" min="10" step="10" oninput="saveField('btTradingSum')">
           </div>
+          <div class="input-wrap" id="btOrderWrap" style="display:none">
+            <label class="input-label">ОРДЕР ЛЕСЕНКИ (USDT)</label>
+            <input type="number" id="btOrderUsdt" value="25" min="5" step="5" oninput="saveField('btOrderUsdt')">
+          </div>
           <div class="input-wrap">
             <label class="input-label">КОЭ. ПОКУПКИ (%)</label>
             <input type="number" id="btBuyGap" value="3.5" min="0.1" step="0.1" oninput="saveField('btBuyGap')">
           </div>
-          <div class="input-wrap">
+          <div class="input-wrap" id="btSellProfitWrap">
             <label class="input-label">КОЭ. ПРОДАЖИ + (%)</label>
             <input type="number" id="btSellProfit" value="2.0" min="0.1" step="0.1" oninput="saveField('btSellProfit')">
           </div>
-          <div class="input-wrap">
+          <div class="input-wrap" id="btSellLossWrap">
             <label class="input-label">КОЭ. ПРОДАЖИ - (%)</label>
             <input type="number" id="btSellLoss" value="8.0" min="0.1" step="0.1" oninput="saveField('btSellLoss')">
           </div>
@@ -639,6 +647,10 @@
             <label class="input-label">СУММА (USDT)</label>
             <input type="number" id="optTradingSum" value="100" min="10" step="10" oninput="saveField('optTradingSum')">
           </div>
+          <div class="input-wrap" id="optOrderWrap" style="display:none">
+            <label class="input-label">ОРДЕР ЛЕСЕНКИ (USDT)</label>
+            <input type="number" id="optOrderUsdt" value="25" min="5" step="5" oninput="saveField('optOrderUsdt')">
+          </div>
           <div class="input-wrap">
             <label class="input-label">КОЛИЧЕСТВО ТОП</label>
             <input type="number" id="optTopN" value="10" min="1" max="20" oninput="saveField('optTopN')">
@@ -661,7 +673,7 @@
               <div class="input-wrap"><label class="input-label">ШАГ</label><input type="number" id="optBuyStep" value="1" min="0.1" step="0.1" oninput="updateCombinationsCount();saveField('optBuyStep')"></div>
             </div>
           </div>
-          <div class="form-full" style="margin-top:4px">
+          <div class="form-full" id="optProfitRange" style="margin-top:4px">
             <div style="font-family:var(--font-head);font-size:10px;color:var(--green);margin-bottom:8px">📈 ДИАПАЗОН ПРОДАЖИ + (%)</div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
               <div class="input-wrap"><label class="input-label">МИН</label><input type="number" id="optProfitMin" value="1" min="0.1" step="0.1" oninput="updateCombinationsCount();saveField('optProfitMin')"></div>
@@ -669,7 +681,7 @@
               <div class="input-wrap"><label class="input-label">ШАГ</label><input type="number" id="optProfitStep" value="0.5" min="0.1" step="0.1" oninput="updateCombinationsCount();saveField('optProfitStep')"></div>
             </div>
           </div>
-          <div class="form-full" style="margin-top:4px">
+          <div class="form-full" id="optLossRange" style="margin-top:4px">
             <div style="font-family:var(--font-head);font-size:10px;color:var(--red);margin-bottom:8px">📉 ДИАПАЗОН ПРОДАЖИ - (%)</div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
               <div class="input-wrap"><label class="input-label">МИН</label><input type="number" id="optLossMin" value="3" min="0.1" step="0.1" oninput="updateCombinationsCount();saveField('optLossMin')"></div>
@@ -1124,6 +1136,7 @@ function selectStrategy(strategyId) {
   document.getElementById('strategyWorkspace').style.display = 'block';
   const quickSel = document.getElementById('quickStrategySelect');
   if (quickSel) quickSel.value = _selectedStrategy;
+  applyStrategySpecificForm();
   updateStrategyTitle();
   // Clear previous strategy results to prevent leaking between strategies
   _btLastResult = null;
@@ -1143,6 +1156,7 @@ function updateStrategyTitle() {
   const base = titles[_selectedStrategy] || _selectedStrategy;
   const suffix = recap ? ' + 💹 Рекап' : (_selectedStrategy === 'ladder' ? ' (без рекапа)' : '');
   document.getElementById('strategyTitle').textContent = base + suffix;
+  applyStrategySpecificForm();
 }
 
 /** Returns the effective strategy ID including recap suffix */
@@ -1150,6 +1164,35 @@ function getEffectiveStrategy() {
   const base = _selectedStrategy || 'reversal';
   const recap = base === 'ladder' ? false : document.getElementById('recapCheckbox')?.checked;
   return recap ? base + '_recap' : base;
+}
+
+function applyStrategySpecificForm() {
+  const isLadder = (_selectedStrategy || '').startsWith('ladder');
+  const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
+  const relabel = (inputId, text) => {
+    const input = document.getElementById(inputId);
+    const lbl = input?.closest('.input-wrap')?.querySelector('.input-label');
+    if (lbl && text) lbl.textContent = text;
+  };
+
+  show('tradeOrderWrap', isLadder);
+  show('tradeSellProfitWrap', !isLadder);
+  show('tradeSellLossWrap', !isLadder);
+  relabel('tradeBuyGap', isLadder ? 'ШАГ ЛЕСЕНКИ (%)' : 'КОЭ. ПОКУПКИ (%)');
+  relabel('tradeTradingSum', isLadder ? 'СУММА КАПИТАЛА (USDT)' : 'СУММА СДЕЛКИ (USDT)');
+
+  show('btOrderWrap', isLadder);
+  show('btSellProfitWrap', !isLadder);
+  show('btSellLossWrap', !isLadder);
+  relabel('btBuyGap', isLadder ? 'ШАГ ЛЕСЕНКИ (%)' : 'КОЭ. ПОКУПКИ (%)');
+  relabel('btTradingSum', isLadder ? 'СТАРТОВЫЙ КАПИТАЛ (USDT)' : 'СУММА (USDT)');
+
+  show('optOrderWrap', isLadder);
+  show('optProfitRange', !isLadder);
+  show('optLossRange', !isLadder);
+  relabel('optBuyMin', isLadder ? 'МИН ШАГ (%)' : 'МИН');
+  relabel('optBuyMax', isLadder ? 'МАКС ШАГ (%)' : 'МАКС');
+  relabel('optBuyStep', isLadder ? 'ШАГ (%)' : 'ШАГ');
 }
 
 function deselectStrategy() {
@@ -1682,6 +1725,10 @@ async function startTrading() {
     updateTimeout: +(document.getElementById('tradeTimeout')?.value)||30,
     chartRefreshInterval: +(document.getElementById('tradeChartRefresh')?.value)||60,
   };
+  if (getEffectiveStrategy().startsWith('ladder')) {
+    body.orderUsdt = +document.getElementById('tradeOrderUsdt')?.value || body.tradingSum;
+    body.stepPercent = body.buyGap;
+  }
   try {
     const r = await fetchWithTimeout(`${API_BASE}/api/trading/start`, {method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
     const data = await r.json();
@@ -1783,7 +1830,7 @@ async function startBacktest() {
     strategy: getEffectiveStrategy(),
   };
   if ((body.strategy || '').startsWith('ladder')) {
-    body.orderUsdt = body.tradingSum;
+    body.orderUsdt = +document.getElementById('btOrderUsdt')?.value || body.tradingSum;
     body.stepPercent = body.buyGap;
   }
   if (body.chartType === 'custom') {
@@ -2275,6 +2322,9 @@ async function startOptimize() {
     lossStep: +document.getElementById('optLossStep').value || 1,
     strategy: getEffectiveStrategy(),
   };
+  if ((body.strategy || '').startsWith('ladder')) {
+    body.orderUsdt = +document.getElementById('optOrderUsdt')?.value || body.tradingSum;
+  }
 
   if (_optPollTimer) { clearInterval(_optPollTimer); _optPollTimer = null; }
 
@@ -2497,6 +2547,7 @@ function toggleOptYield(idx) {
 }
 
 function updateCombinationsCount() {
+  const isLadder = getEffectiveStrategy().startsWith('ladder');
   const buyMin = +document.getElementById('optBuyMin')?.value || 1;
   const buyMax = +document.getElementById('optBuyMax')?.value || 10;
   const buyStep = +document.getElementById('optBuyStep')?.value || 1;
@@ -2507,7 +2558,9 @@ function updateCombinationsCount() {
   const lossMax = +document.getElementById('optLossMax')?.value || 15;
   const lossStep = +document.getElementById('optLossStep')?.value || 1;
   const count = (v1, v2, s) => s > 0 ? Math.floor((v2 - v1) / s) + 1 : 1;
-  const total = count(buyMin, buyMax, buyStep) * count(profitMin, profitMax, profitStep) * count(lossMin, lossMax, lossStep);
+  const total = isLadder
+    ? count(buyMin, buyMax, buyStep)
+    : count(buyMin, buyMax, buyStep) * count(profitMin, profitMax, profitStep) * count(lossMin, lossMax, lossStep);
   const el = document.getElementById('optCombinationsCount');
   if (el) el.textContent = 'Комбинаций: ~' + total;
 }
@@ -4432,6 +4485,7 @@ function profReadPem(suffix, input) {
     const savedRecap = localStorage.getItem('cc_recap');
     if (savedRecap === '1') { const cb = document.getElementById('recapCheckbox'); if (cb) cb.checked = true; }
   } catch(e) {}
+  applyStrategySpecificForm();
   updateTradeForm();
   updateExchangeBadge();
   updateTradeCommissionDisplay();
