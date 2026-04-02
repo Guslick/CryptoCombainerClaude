@@ -341,6 +341,10 @@
             <div style="font-family:var(--font-head);font-size:13px;font-weight:700">📐📊 ATR+EMA Адаптивная</div>
             <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:4px">Разворотные точки с адаптивными порогами (ATR — волатильность, EMA-50 — тренд). Покупает только в восходящем тренде.</div>
           </button>
+          <button class="btn btn-primary" style="text-align:left;padding:12px 16px;border:1px solid #26C6DA" onclick="selectStrategy('reversal_trail')">
+            <div style="font-family:var(--font-head);font-size:13px;font-weight:700">📐🎯 Разворотные + Трейлинг-профит</div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:4px">Покупка как в Reversal, а фиксация прибыли — по откату от локального пика после достижения цели.</div>
+          </button>
         </div>
       </div>
       <div id="strategyWorkspace" style="display:none">
@@ -1112,7 +1116,7 @@ function selectStrategy(strategyId) {
 function updateStrategyTitle() {
   const recap = document.getElementById('recapCheckbox')?.checked;
   try { localStorage.setItem('cc_recap', recap ? '1' : '0'); } catch(e) {}
-  const titles = { reversal: '📐 Разворотные точки', atr_ema: '📐📊 ATR+EMA Адаптивная' };
+  const titles = { reversal: '📐 Разворотные точки', reversal_trail: '📐🎯 Разворотные + Трейлинг-профит', atr_ema: '📐📊 ATR+EMA Адаптивная' };
   const base = titles[_selectedStrategy] || _selectedStrategy;
   document.getElementById('strategyTitle').textContent = base + (recap ? ' + 💹 Рекап' : '');
 }
@@ -3344,8 +3348,11 @@ async function restoreBacktestSession(sessionId) {
     }
     // Determine strategy from result
     const isAtrEma = result.strategy === 'atr_ema' || (result.topStrategies && result.topStrategies[0]?.strategy === 'atr_ema');
+    const isTrail = result.strategy === 'reversal_trail' || (result.topStrategies && result.topStrategies[0]?.strategy === 'reversal_trail');
     const isRecap = result.recapitalize === true;
-    const strategy = isAtrEma ? (isRecap ? 'atr_ema_recap' : 'atr_ema') : (isRecap ? 'reversal_recap' : 'reversal');
+    const strategy = isAtrEma
+      ? (isRecap ? 'atr_ema_recap' : 'atr_ema')
+      : (isTrail ? (isRecap ? 'reversal_trail_recap' : 'reversal_trail') : (isRecap ? 'reversal_recap' : 'reversal'));
     const isTop = !!result.topStrategies;
     // Close drawer if open
     if (currentDrawerSession) closeDrawer();

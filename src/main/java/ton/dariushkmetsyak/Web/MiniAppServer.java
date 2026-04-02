@@ -315,8 +315,10 @@ public class MiniAppServer {
                 double lossMax = toDouble(body.get("lossMax"), 15.0);
                 double lossStep = toDouble(body.get("lossStep"), 1.0);
                 String strategy = (String) body.getOrDefault("strategy", "reversal");
-                boolean recapitalize = "reversal_recap".equals(strategy) || "atr_ema_recap".equals(strategy);
+                boolean recapitalize = "reversal_recap".equals(strategy) || "atr_ema_recap".equals(strategy)
+                        || "reversal_trail_recap".equals(strategy);
                 boolean isAtrEma = strategy != null && strategy.startsWith("atr_ema");
+                boolean isReversalTrail = strategy != null && strategy.startsWith("reversal_trail");
                 TradingSessionManager mgr = TradingSessionManager.forUser(userId);
                 TradingSessionManager.SessionInfo info;
                 if (isAtrEma) {
@@ -330,7 +332,7 @@ public class MiniAppServer {
                             commissionRate, topN,
                             buyMin, buyMax, buyStep,
                             profitMin, profitMax, profitStep,
-                            lossMin, lossMax, lossStep, recapitalize);
+                            lossMin, lossMax, lossStep, recapitalize, isReversalTrail);
                 }
                 return info.toMap();
             });
@@ -348,14 +350,16 @@ public class MiniAppServer {
                 String chartType = (String) body.getOrDefault("chartType", "1d");
                 String exch = (String) body.getOrDefault("exchange", "binance");
                 String strategy = (String) body.getOrDefault("strategy", "reversal");
-                boolean recapitalize = "reversal_recap".equals(strategy) || "atr_ema_recap".equals(strategy);
+                boolean recapitalize = "reversal_recap".equals(strategy) || "atr_ema_recap".equals(strategy)
+                        || "reversal_trail_recap".equals(strategy);
                 boolean isAtrEma = strategy != null && strategy.startsWith("atr_ema");
+                boolean isReversalTrail = strategy != null && strategy.startsWith("reversal_trail");
                 TradingSessionManager mgr = TradingSessionManager.forUser(userId);
                 TradingSessionManager.SessionInfo info;
                 if (isAtrEma) {
                     info = mgr.startTop10SearchAtrEma(coinName, tradingSum, chartType, exch, recapitalize);
                 } else {
-                    info = mgr.startTop10Search(coinName, tradingSum, chartType, exch, recapitalize);
+                    info = mgr.startTop10Search(coinName, tradingSum, chartType, exch, recapitalize, isReversalTrail);
                 }
                 return info.toMap();
             });
@@ -681,8 +685,10 @@ public class MiniAppServer {
         int chartRefresh = toInt(body.get("chartRefreshInterval"), 60);
         long chatId = toLong(body.get("chatId"), AppConfig.getInstance().getDefaultChatId());
         String strategy = (String) body.getOrDefault("strategy", "reversal");
-        boolean recapitalize = "reversal_recap".equals(strategy) || "atr_ema_recap".equals(strategy);
+        boolean recapitalize = "reversal_recap".equals(strategy) || "atr_ema_recap".equals(strategy)
+                || "reversal_trail_recap".equals(strategy);
         boolean isAtrEma = strategy.startsWith("atr_ema");
+        boolean isReversalTrail = strategy != null && strategy.startsWith("reversal_trail");
 
         UserProfileManager.UserProfile profile = userId > 0
             ? UserProfileManager.getInstance().loadProfile(userId) : null;
@@ -696,7 +702,7 @@ public class MiniAppServer {
                             timeout, chartRefresh, chatId, profile, recapitalize);
                 } else {
                     result = mgr.startBinanceTrading(coinName, tradingSum, buyGap, spg, slg,
-                            timeout, chartRefresh, chatId, profile, recapitalize);
+                            timeout, chartRefresh, chatId, profile, recapitalize, isReversalTrail);
                 }
                 break;
             case "binance_test":
@@ -705,7 +711,7 @@ public class MiniAppServer {
                             timeout, chartRefresh, chatId, profile, recapitalize);
                 } else {
                     result = mgr.startBinanceTestTrading(coinName, tradingSum, buyGap, spg, slg,
-                            timeout, chartRefresh, chatId, profile, recapitalize);
+                            timeout, chartRefresh, chatId, profile, recapitalize, isReversalTrail);
                 }
                 break;
             case "research":
@@ -714,7 +720,7 @@ public class MiniAppServer {
                             timeout, chartRefresh, chatId, recapitalize);
                 } else {
                     result = mgr.startResearchTrading(coinName, startAssets, tradingSum, buyGap, spg, slg,
-                            timeout, chartRefresh, chatId, recapitalize);
+                            timeout, chartRefresh, chatId, recapitalize, isReversalTrail);
                 }
                 break;
             default:
@@ -723,7 +729,7 @@ public class MiniAppServer {
                             timeout, chartRefresh, chatId, recapitalize);
                 } else {
                     result = mgr.startTesterTrading(coinName, startAssets, tradingSum, buyGap, spg, slg,
-                            timeout, chartRefresh, chatId, recapitalize);
+                            timeout, chartRefresh, chatId, recapitalize, isReversalTrail);
                 }
         }
         if (result instanceof TradingSessionManager.SessionInfo)
@@ -741,8 +747,10 @@ public class MiniAppServer {
         String chartType = (String) body.getOrDefault("chartType", "1d");
         String exch = (String) body.getOrDefault("exchange", "binance");
         String strategy = (String) body.getOrDefault("strategy", "reversal");
-        boolean recapitalize = "reversal_recap".equals(strategy) || "atr_ema_recap".equals(strategy);
+        boolean recapitalize = "reversal_recap".equals(strategy) || "atr_ema_recap".equals(strategy)
+                || "reversal_trail_recap".equals(strategy);
         boolean isAtrEma = strategy.startsWith("atr_ema");
+        boolean isReversalTrail = strategy.startsWith("reversal_trail");
         long customFrom = toLong(body.get("customFrom"), 0);
         long customTo = toLong(body.get("customTo"), 0);
         TradingSessionManager mgr = TradingSessionManager.forUser(userId);
@@ -750,7 +758,7 @@ public class MiniAppServer {
         if (isAtrEma) {
             info = mgr.startBacktestAtrEma(coinName, tradingSum, buyGap, spg, slg, chartType, exch, 0.1, customFrom, customTo, recapitalize);
         } else {
-            info = mgr.startBacktest(coinName, tradingSum, buyGap, spg, slg, chartType, exch, 0.1, customFrom, customTo, recapitalize);
+            info = mgr.startBacktest(coinName, tradingSum, buyGap, spg, slg, chartType, exch, 0.1, customFrom, customTo, recapitalize, isReversalTrail);
         }
         return info.toMap();
     }

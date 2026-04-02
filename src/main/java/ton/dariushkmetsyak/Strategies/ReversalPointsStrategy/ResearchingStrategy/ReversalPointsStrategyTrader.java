@@ -92,6 +92,7 @@ public class ReversalPointsStrategyTrader {
     private ReversalDecisionEngine.Params decisionParams;
     // Let profits run: exit profit position on pullback from local peak after target is reached
     private final double profitTrailGapPercent = 1.0;
+    private final boolean trailProfitEnabled;
     private boolean profitTrailArmed = false;
     private double peakPriceSinceBuy = 0;
 
@@ -164,9 +165,19 @@ public class ReversalPointsStrategyTrader {
                                         double sellWithLossGap, int updateTimeout, Long chatID,
                                         TradingState savedState, String sessionId, boolean isResume,
                                         long storageUserId, boolean recapitalize) {
+        this(account, coin, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, updateTimeout, chatID,
+                savedState, sessionId, isResume, storageUserId, recapitalize, false);
+    }
+
+    public ReversalPointsStrategyTrader(Account account, Coin coin, double tradingSum,
+                                        double buyGap, double sellWithProfitGap,
+                                        double sellWithLossGap, int updateTimeout, Long chatID,
+                                        TradingState savedState, String sessionId, boolean isResume,
+                                        long storageUserId, boolean recapitalize, boolean trailProfitEnabled) {
         this.account = account;
         this.coin = coin;
         this.recapitalize = recapitalize;
+        this.trailProfitEnabled = trailProfitEnabled;
         this.chatID = chatID;
         this.sessionId = sessionId != null ? sessionId : "trader_" + System.currentTimeMillis();
         this.accountType = account.getClass().getSimpleName().toUpperCase();
@@ -416,16 +427,16 @@ public class ReversalPointsStrategyTrader {
                 decisionState, decisionParams, pointTimestamp, pointPrice
         );
         syncRuntimeFromDecisionState();
-        if (wasTrading) {
+        if (trailProfitEnabled && wasTrading) {
             if (pointPrice > peakPriceSinceBuy) peakPriceSinceBuy = pointPrice;
             if (buyPrice > 0 && pointPrice >= buyPrice * (1 + sellWithProfitGap / 100.0)) {
                 profitTrailArmed = true;
             }
         }
         boolean trailingProfitExit = wasTrading
-                && profitTrailArmed
+                && (!trailProfitEnabled || (profitTrailArmed
                 && peakPriceSinceBuy > 0
-                && ((peakPriceSinceBuy - pointPrice) / peakPriceSinceBuy * 100.0) >= profitTrailGapPercent;
+                && ((peakPriceSinceBuy - pointPrice) / peakPriceSinceBuy * 100.0) >= profitTrailGapPercent));
         if (decision.newReversalPoint != null) {
             reversalArrayList.add(new Reversal(
                     new double[]{decision.newReversalPoint.timestamp, decision.newReversalPoint.price},
@@ -498,7 +509,7 @@ public class ReversalPointsStrategyTrader {
                 persistState();
                 return true;
             }
-            if (decision.action == ReversalDecisionEngine.Action.SELL_PROFIT && !trailingProfitExit) {
+            if (trailProfitEnabled && decision.action == ReversalDecisionEngine.Action.SELL_PROFIT && !trailingProfitExit) {
                 decisionState.trading = true;
                 decisionState.buyPrice = buyPrice;
             }

@@ -76,6 +76,7 @@ public class ReversalPointStrategyBackTester {
     private double lastMaxPriceForReport = 0;
     // Let profits run: sell only after pullback from local peak once target is reached
     private final double profitTrailGapPercent = 1.0;
+    private final boolean trailProfitEnabled;
     private boolean profitTrailArmed = false;
     private double peakPriceSinceBuy = 0;
     private final ReversalDecisionEngine decisionEngine = new ReversalDecisionEngine();
@@ -102,18 +103,22 @@ public class ReversalPointStrategyBackTester {
     public List<Map<String, Object>> getTradeReport() { return tradeReport; }
 
     public ReversalPointStrategyBackTester(Coin coin, Chart chart, double tradingSum, double buyGap, double sellWithProfitGap, double sellWithLossGap) {
-        this(coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, new CommissionCalculator(CommissionCalculator.Exchange.BINANCE));
+        this(coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, new CommissionCalculator(CommissionCalculator.Exchange.BINANCE), false, false);
     }
 
     public ReversalPointStrategyBackTester(Coin coin, Chart chart, double tradingSum, double buyGap, double sellWithProfitGap, double sellWithLossGap, String exchangeName, double commissionRate) {
-        this(coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, new CommissionCalculator(CommissionCalculator.Exchange.BINANCE));
+        this(coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, new CommissionCalculator(CommissionCalculator.Exchange.BINANCE), false, false);
     }
 
     public ReversalPointStrategyBackTester(Coin coin, Chart chart, double tradingSum, double buyGap, double sellWithProfitGap, double sellWithLossGap, CommissionCalculator commissionCalc) {
-        this(coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, commissionCalc, false);
+        this(coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, commissionCalc, false, false);
     }
 
     public ReversalPointStrategyBackTester(Coin coin, Chart chart, double tradingSum, double buyGap, double sellWithProfitGap, double sellWithLossGap, CommissionCalculator commissionCalc, boolean recapitalize) {
+        this(coin, chart, tradingSum, buyGap, sellWithProfitGap, sellWithLossGap, commissionCalc, recapitalize, false);
+    }
+
+    public ReversalPointStrategyBackTester(Coin coin, Chart chart, double tradingSum, double buyGap, double sellWithProfitGap, double sellWithLossGap, CommissionCalculator commissionCalc, boolean recapitalize, boolean trailProfitEnabled) {
         try {
             this.coin=Coin.createCoin(chart.getCoinName());
             Map<Coin, Double> testAssets = new HashMap<>();
@@ -131,6 +136,7 @@ public class ReversalPointStrategyBackTester {
             this.decisionParams = new ReversalDecisionEngine.Params(buyGap, sellWithProfitGap, sellWithLossGap);
             this.commissionCalc = commissionCalc;
             this.recapitalize = recapitalize;
+            this.trailProfitEnabled = trailProfitEnabled;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -330,16 +336,16 @@ public class ReversalPointStrategyBackTester {
             ));
         }
 
-        if (wasTrading) {
+        if (trailProfitEnabled && wasTrading) {
             if (pointPrice > peakPriceSinceBuy) peakPriceSinceBuy = pointPrice;
             if (buyPrice > 0 && pointPrice >= buyPrice * (1 + sellWithProfitGap / 100.0)) {
                 profitTrailArmed = true;
             }
         }
         boolean trailingProfitExit = wasTrading
-                && profitTrailArmed
+                && (!trailProfitEnabled || (profitTrailArmed
                 && peakPriceSinceBuy > 0
-                && ((peakPriceSinceBuy - pointPrice) / peakPriceSinceBuy * 100.0) >= profitTrailGapPercent;
+                && ((peakPriceSinceBuy - pointPrice) / peakPriceSinceBuy * 100.0) >= profitTrailGapPercent));
 
         if (decision.action == ReversalDecisionEngine.Action.SELL_PROFIT && wasTrading && trailingProfitExit) {
                     Double coinQuantityInWallet = account.wallet().getAllAssets().get(coin);
@@ -395,7 +401,7 @@ public class ReversalPointStrategyBackTester {
                 isSold=false;
                 return true;
         }
-        if (decision.action == ReversalDecisionEngine.Action.SELL_PROFIT && wasTrading && !trailingProfitExit) {
+        if (trailProfitEnabled && decision.action == ReversalDecisionEngine.Action.SELL_PROFIT && wasTrading && !trailingProfitExit) {
             // keep position open until pullback condition is reached
             decisionState.trading = true;
             decisionState.buyPrice = buyPrice;
