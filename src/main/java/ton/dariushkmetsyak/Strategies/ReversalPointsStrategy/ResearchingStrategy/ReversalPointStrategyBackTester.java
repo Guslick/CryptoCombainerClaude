@@ -305,12 +305,12 @@ public class ReversalPointStrategyBackTester {
 
         this.pointPrice = pointPrice;
         hasPrices = true;
+        boolean wasTrading = this.trading;
 
         ReversalDecisionEngine.Decision decision = decisionEngine.onTick(
                 decisionState, decisionParams, pointTimestamp, pointPrice
         );
-        this.trading = decisionState.trading;
-        this.buyPrice = decisionState.buyPrice;
+        // Keep runtime position state authoritative; sync only wave extrema from decision state.
         this.currentMinPrice[0] = decisionState.currentMinPrice;
         this.currentMaxPrice[0] = decisionState.currentMaxPrice;
         this.currentMinPriceTimestamp[0] = decisionState.currentMinPriceTimestamp;
@@ -323,7 +323,7 @@ public class ReversalPointStrategyBackTester {
             ));
         }
 
-        if (decision.action == ReversalDecisionEngine.Action.SELL_PROFIT) {
+        if (decision.action == ReversalDecisionEngine.Action.SELL_PROFIT && wasTrading) {
                     Double coinQuantityInWallet = account.wallet().getAllAssets().get(coin);
                     Double UsdtQuantityInWallet = account.wallet().getAllAssets().get(USDT);
                     double sellValue = coinQuantityInWallet * pointPrice;
@@ -371,10 +371,11 @@ public class ReversalPointStrategyBackTester {
                 isSold =true;
                 chartScreenshotMessage = "SOLD WITH PROFIT";
                 trading = false;
+                decisionState.trading = false;
                 isSold=false;
                 return true;
         }
-        if (decision.action == ReversalDecisionEngine.Action.SELL_LOSS) {
+        if (decision.action == ReversalDecisionEngine.Action.SELL_LOSS && wasTrading) {
                     Double coinQuantityInWallet = account.wallet().getAllAssets().get(coin);
                     Double UsdtQuantityInWallet = account.wallet().getAllAssets().get(USDT);
                     double sellValue = coinQuantityInWallet * pointPrice;
@@ -422,10 +423,11 @@ public class ReversalPointStrategyBackTester {
                 isSold=true;
                 chartScreenshotMessage = "SOLD WITH LOSS";
                 trading = false;
+                decisionState.trading = false;
                 isSold=false;
                 return true;
         }
-        if (decision.action == ReversalDecisionEngine.Action.BUY && !trading) {
+        if (decision.action == ReversalDecisionEngine.Action.BUY && !wasTrading) {
             Double coinQuantityInWallet = account.wallet().getAllAssets().get(coin);
             Double UsdtQuantityInWallet = account.wallet().getAllAssets().get(USDT);
             // Use tradingSum (not full wallet balance) to determine buy amount

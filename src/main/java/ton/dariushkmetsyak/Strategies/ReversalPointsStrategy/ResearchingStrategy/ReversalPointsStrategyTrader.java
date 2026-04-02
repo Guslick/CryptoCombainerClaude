@@ -393,8 +393,6 @@ public class ReversalPointsStrategyTrader {
 
     private void syncRuntimeFromDecisionState() {
         if (decisionState == null) return;
-        trading = decisionState.trading;
-        buyPrice = decisionState.buyPrice;
         currentMinPrice[0] = decisionState.currentMinPrice;
         currentMaxPrice[0] = decisionState.currentMaxPrice;
         currentMinPriceTimestamp[0] = decisionState.currentMinPriceTimestamp;
@@ -408,6 +406,7 @@ public class ReversalPointsStrategyTrader {
         prices.put(pointTimestamp, pointPrice);
         TradingChart.addSimplePoint(pointTimestamp, pointPrice);
         TradingChart.addSimplePriceMarker(pointTimestamp, pointPrice);
+        boolean wasTrading = trading;
         syncDecisionStateFromRuntime();
         ReversalDecisionEngine.Decision decision = decisionEngine.onTick(
                 decisionState, decisionParams, pointTimestamp, pointPrice
@@ -420,7 +419,7 @@ public class ReversalPointsStrategyTrader {
             ));
         }
 
-        if (trading) {
+        if (wasTrading) {
             if (decision.action == ReversalDecisionEngine.Action.SELL_PROFIT) {
                 System.out.println("Timestamp: " + pointTimestamp + "  Price: " + pointPrice);
                 try {
@@ -466,6 +465,7 @@ public class ReversalPointsStrategyTrader {
                 prevMessageId = 0;
                 TradingChart.clearChart();
                 trading = false;
+                decisionState.trading = false;
                 isSold = false;
                 // Recapitalize: next cycle uses current USDT balance
                 if (recapitalize) {
@@ -527,6 +527,7 @@ public class ReversalPointsStrategyTrader {
                 prevMessageId = 0;
                 TradingChart.clearChart();
                 trading = false;
+                decisionState.trading = false;
                 isSold = false;
                 // Recapitalize: next cycle uses current USDT balance
                 if (recapitalize) {
@@ -551,7 +552,7 @@ public class ReversalPointsStrategyTrader {
             }
         }
 
-        if (!prices.isEmpty() && !trading && decision.action == ReversalDecisionEngine.Action.BUY) {
+        if (!prices.isEmpty() && !wasTrading && decision.action == ReversalDecisionEngine.Action.BUY) {
             boolean bought = attemptBuy(pointTimestamp, pointPrice);
             if (!bought) {
                 // restore engine state: buy was signaled but exchange order wasn't executed
