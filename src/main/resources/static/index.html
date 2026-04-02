@@ -1899,6 +1899,17 @@ function showBacktestResult(result) {
 function startTradingFromBacktest() {
   const r = _btLastResult;
   if (!r) return;
+  if ((r.strategy || '').startsWith('ladder')) {
+    prefillTradingForm(
+      document.getElementById('btCoinInput')?.value || r.coinName || '',
+      r.orderUsdt || r.tradingSum,
+      r.stepPercent || 3.5,
+      2.0,
+      8.0
+    );
+    showToast('🪜 Параметры Ladder перенесены в форму торговли');
+    return;
+  }
   const coin = document.getElementById('btCoinInput')?.value || r.coinName || '';
   prefillTradingForm(coin, r.tradingSum, r.buyGap, r.sellWithProfitGap, r.sellWithLossGap);
 }
@@ -1907,7 +1918,14 @@ function startTradingFromOptResult(idx) {
   const r = _optResults[idx];
   if (!r) return;
   if (getEffectiveStrategy().startsWith('ladder')) {
-    showToast('ℹ️ Ladder пока доступна только в backtest/optimize');
+    prefillTradingForm(
+      document.getElementById('optCoinInput')?.value || r.coinName || '',
+      r.orderUsdt || +document.getElementById('optTradingSum')?.value || 100,
+      r.stepPercent || 3.5,
+      2.0,
+      8.0
+    );
+    showToast('🪜 Лучшие параметры Ladder перенесены в форму торговли');
     return;
   }
   const coin = document.getElementById('optCoinInput')?.value || r.coinName || '';

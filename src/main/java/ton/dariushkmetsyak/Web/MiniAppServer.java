@@ -702,14 +702,12 @@ public class MiniAppServer {
             ? UserProfileManager.getInstance().loadProfile(userId) : null;
         TradingSessionManager mgr = TradingSessionManager.forUser(userId);
 
-        if (isLadder) {
-            return errorMap("Стратегия 'ladder' пока доступна только в режиме backtest");
-        }
-
         Object result;
         switch (type.toLowerCase()) {
             case "binance": case "binance_real":
-                if (isAtrEma) {
+                if (isLadder) {
+                    result = mgr.startBinanceTradingLadder(coinName, tradingSum, buyGap, timeout, chartRefresh, chatId, profile);
+                } else if (isAtrEma) {
                     result = mgr.startBinanceTradingAtrEma(coinName, tradingSum, buyGap, spg, slg,
                             timeout, chartRefresh, chatId, profile, recapitalize);
                 } else {
@@ -718,7 +716,9 @@ public class MiniAppServer {
                 }
                 break;
             case "binance_test":
-                if (isAtrEma) {
+                if (isLadder) {
+                    result = mgr.startBinanceTestTradingLadder(coinName, tradingSum, buyGap, timeout, chartRefresh, chatId, profile);
+                } else if (isAtrEma) {
                     result = mgr.startBinanceTestTradingAtrEma(coinName, tradingSum, buyGap, spg, slg,
                             timeout, chartRefresh, chatId, profile, recapitalize);
                 } else {
@@ -727,7 +727,9 @@ public class MiniAppServer {
                 }
                 break;
             case "research":
-                if (isAtrEma) {
+                if (isLadder) {
+                    result = mgr.startResearchTradingLadder(coinName, startAssets, tradingSum, buyGap, timeout, chartRefresh, chatId);
+                } else if (isAtrEma) {
                     result = mgr.startResearchTradingAtrEma(coinName, startAssets, tradingSum, buyGap, spg, slg,
                             timeout, chartRefresh, chatId, recapitalize);
                 } else {
@@ -736,7 +738,9 @@ public class MiniAppServer {
                 }
                 break;
             default:
-                if (isAtrEma) {
+                if (isLadder) {
+                    result = mgr.startTesterTradingLadder(coinName, startAssets, tradingSum, buyGap, timeout, chartRefresh, chatId);
+                } else if (isAtrEma) {
                     result = mgr.startTesterTradingAtrEma(coinName, startAssets, tradingSum, buyGap, spg, slg,
                             timeout, chartRefresh, chatId, recapitalize);
                 } else {

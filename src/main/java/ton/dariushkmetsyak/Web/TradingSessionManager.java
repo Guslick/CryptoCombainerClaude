@@ -13,6 +13,7 @@ import ton.dariushkmetsyak.Commission.CommissionCalculator;
 import ton.dariushkmetsyak.Strategies.AtrEmaStrategy.AtrEmaBackTester;
 import ton.dariushkmetsyak.Strategies.AtrEmaStrategy.AtrEmaTrader;
 import ton.dariushkmetsyak.Strategies.LadderStrategy.LadderStrategyBackTester;
+import ton.dariushkmetsyak.Strategies.LadderStrategy.LadderStrategyTrader;
 import ton.dariushkmetsyak.Strategies.ReversalPointsStrategy.ResearchingStrategy.ReversalPointStrategyBackTester;
 import ton.dariushkmetsyak.Strategies.ReversalPointsStrategy.ResearchingStrategy.ReversalPointsStrategyTrader;
 import ton.dariushkmetsyak.Telegram.ImageAndMessageSender;
@@ -593,6 +594,23 @@ public class TradingSessionManager {
         return info;
     }
 
+    public Object startTesterTradingLadder(String coinName, double startAssets, double orderUsdt,
+                                           double stepPercent, int timeout, int chartRefresh, long chatId) {
+        if (hasActiveSessionOfType(SessionType.TESTER)) return tooManySessionsError(SessionType.TESTER);
+        String id = "tester_ladder_" + System.currentTimeMillis();
+        Map<String, Object> params = buildParams(orderUsdt, stepPercent, stepPercent, stepPercent, timeout, chartRefresh, "ladder");
+        params.put("startAssets", startAssets);
+        params.put("orderUsdt", orderUsdt);
+        params.put("stepPercent", stepPercent);
+        SessionInfo info = new SessionInfo(id, SessionType.TESTER, coinName, params, userId);
+        info.addEvent("START", "Ladder TESTER сессия запущена: " + coinName);
+        info.startUsdtBalance = startAssets;
+        sessions.put(id, info);
+        launchTesterThread(info, startAssets, orderUsdt, stepPercent, stepPercent, stepPercent, timeout, null, chatId, false);
+        saveSessions();
+        return info;
+    }
+
     // ── Start Research (same logic as Tester, separate type for concurrent sessions) ──
 
     public Object startResearchTrading(String coinName, double startAssets, double tradingSum,
@@ -615,6 +633,23 @@ public class TradingSessionManager {
         info.startUsdtBalance = startAssets;
         sessions.put(id, info);
         launchTesterThread(info, startAssets, tradingSum, buyGap, spg, slg, timeout, null, chatId, recapitalize);
+        saveSessions();
+        return info;
+    }
+
+    public Object startResearchTradingLadder(String coinName, double startAssets, double orderUsdt,
+                                             double stepPercent, int timeout, int chartRefresh, long chatId) {
+        if (hasActiveSessionOfType(SessionType.RESEARCH)) return tooManySessionsError(SessionType.RESEARCH);
+        String id = "research_ladder_" + System.currentTimeMillis();
+        Map<String, Object> params = buildParams(orderUsdt, stepPercent, stepPercent, stepPercent, timeout, chartRefresh, "ladder");
+        params.put("startAssets", startAssets);
+        params.put("orderUsdt", orderUsdt);
+        params.put("stepPercent", stepPercent);
+        SessionInfo info = new SessionInfo(id, SessionType.RESEARCH, coinName, params, userId);
+        info.addEvent("START", "Ladder RESEARCH сессия запущена: " + coinName);
+        info.startUsdtBalance = startAssets;
+        sessions.put(id, info);
+        launchTesterThread(info, startAssets, orderUsdt, stepPercent, stepPercent, stepPercent, timeout, null, chatId, false);
         saveSessions();
         return info;
     }
@@ -651,9 +686,13 @@ public class TradingSessionManager {
                 boolean resume = savedState != null || info.events.stream()
                     .anyMatch(e -> "START".equals(e.type) && e.message != null && e.message.contains("возобновлена"));
                 String strategy = String.valueOf(info.params.getOrDefault("strategy", "reversal"));
-                boolean trailProfit = strategy.startsWith("reversal_trail");
-                new ReversalPointsStrategyTrader(account, coin, tradingSum, buyGap, spg, slg,
-                        timeout, chatId, savedState, info.id, resume, userId, recapitalize, trailProfit).startTrading();
+                if (strategy.startsWith("ladder")) {
+                    new LadderStrategyTrader(account, coin, tradingSum, buyGap, timeout).startTrading();
+                } else {
+                    boolean trailProfit = strategy.startsWith("reversal_trail");
+                    new ReversalPointsStrategyTrader(account, coin, tradingSum, buyGap, spg, slg,
+                            timeout, chatId, savedState, info.id, resume, userId, recapitalize, trailProfit).startTrading();
+                }
                 setFinalStatus(info);
             } catch (Exception e) {
                 info.status = "ERROR"; info.endedAt = System.currentTimeMillis();
@@ -702,6 +741,22 @@ public class TradingSessionManager {
         return info;
     }
 
+    public Object startBinanceTradingLadder(String coinName, double orderUsdt, double stepPercent,
+                                            int timeout, int chartRefresh, long chatId,
+                                            UserProfileManager.UserProfile profile) {
+        if (hasActiveSessionOfType(SessionType.BINANCE_REAL)) return tooManySessionsError(SessionType.BINANCE_REAL);
+        String id = "binance_ladder_" + System.currentTimeMillis();
+        Map<String, Object> params = buildParams(orderUsdt, stepPercent, stepPercent, stepPercent, timeout, chartRefresh, "ladder");
+        params.put("orderUsdt", orderUsdt);
+        params.put("stepPercent", stepPercent);
+        SessionInfo info = new SessionInfo(id, SessionType.BINANCE_REAL, coinName, params, userId);
+        info.addEvent("START", "Ladder Binance REAL сессия запущена: " + coinName);
+        sessions.put(id, info);
+        launchBinanceThread(info, orderUsdt, stepPercent, stepPercent, stepPercent, timeout, false, null, chatId, profile, false);
+        saveSessions();
+        return info;
+    }
+
     public Object startBinanceTestTrading(String coinName, double tradingSum, double buyGap,
             double spg, double slg, int timeout, int chartRefresh,
             long chatId, UserProfileManager.UserProfile profile) {
@@ -732,6 +787,22 @@ public class TradingSessionManager {
         return info;
     }
 
+    public Object startBinanceTestTradingLadder(String coinName, double orderUsdt, double stepPercent,
+                                                int timeout, int chartRefresh, long chatId,
+                                                UserProfileManager.UserProfile profile) {
+        if (hasActiveSessionOfType(SessionType.BINANCE_TEST)) return tooManySessionsError(SessionType.BINANCE_TEST);
+        String id = "binance_test_ladder_" + System.currentTimeMillis();
+        Map<String, Object> params = buildParams(orderUsdt, stepPercent, stepPercent, stepPercent, timeout, chartRefresh, "ladder");
+        params.put("orderUsdt", orderUsdt);
+        params.put("stepPercent", stepPercent);
+        SessionInfo info = new SessionInfo(id, SessionType.BINANCE_TEST, coinName, params, userId);
+        info.addEvent("START", "Ladder Binance TEST сессия запущена: " + coinName);
+        sessions.put(id, info);
+        launchBinanceThread(info, orderUsdt, stepPercent, stepPercent, stepPercent, timeout, true, null, chatId, profile, false);
+        saveSessions();
+        return info;
+    }
+
     private void launchBinanceThread(SessionInfo info, double tradingSum,
             double buyGap, double spg, double slg, int timeout, boolean testnet,
             TradingState savedState, long chatId, UserProfileManager.UserProfile profile) {
@@ -757,9 +828,13 @@ public class TradingSessionManager {
                 boolean resume = savedState != null || info.events.stream()
                     .anyMatch(e -> "START".equals(e.type) && e.message != null && e.message.contains("возобновлена"));
                 String strategy = String.valueOf(info.params.getOrDefault("strategy", "reversal"));
-                boolean trailProfit = strategy.startsWith("reversal_trail");
-                new ReversalPointsStrategyTrader(account, coin, tradingSum, buyGap, spg, slg,
-                        timeout, chatId, savedState, info.id, resume, userId, recapitalize, trailProfit).startTrading();
+                if (strategy.startsWith("ladder")) {
+                    new LadderStrategyTrader(account, coin, tradingSum, buyGap, timeout).startTrading();
+                } else {
+                    boolean trailProfit = strategy.startsWith("reversal_trail");
+                    new ReversalPointsStrategyTrader(account, coin, tradingSum, buyGap, spg, slg,
+                            timeout, chatId, savedState, info.id, resume, userId, recapitalize, trailProfit).startTrading();
+                }
                 setFinalStatus(info);
             } catch (Exception e) {
                 info.status = "ERROR"; info.endedAt = System.currentTimeMillis();
