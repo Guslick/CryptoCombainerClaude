@@ -12,6 +12,7 @@ import ton.dariushkmetsyak.Persistence.TradingState;
 import ton.dariushkmetsyak.Commission.CommissionCalculator;
 import ton.dariushkmetsyak.Strategies.AtrEmaStrategy.AtrEmaBackTester;
 import ton.dariushkmetsyak.Strategies.AtrEmaStrategy.AtrEmaTrader;
+import ton.dariushkmetsyak.Strategies.LadderStrategy.LadderStrategyBackTester;
 import ton.dariushkmetsyak.Strategies.ReversalPointsStrategy.ResearchingStrategy.ReversalPointStrategyBackTester;
 import ton.dariushkmetsyak.Strategies.ReversalPointsStrategy.ResearchingStrategy.ReversalPointsStrategyTrader;
 import ton.dariushkmetsyak.Telegram.ImageAndMessageSender;
@@ -1095,6 +1096,134 @@ public class TradingSessionManager {
         });
         t.setDaemon(true); info.thread = t;
         sessions.put(id, info); t.start();
+        return info;
+    }
+
+    public SessionInfo startBacktestLadder(String coinName, double tradingSum, double orderUsdt,
+                                           double stepPercent, String chartType,
+                                           String exchangeName, long customFrom, long customTo) {
+        String id = "backtest_ladder_" + System.currentTimeMillis();
+        String strategy = "ladder";
+        Map<String, Object> params = buildParams(tradingSum, stepPercent, stepPercent, stepPercent, 30, 60, strategy);
+        params.put("orderUsdt", orderUsdt);
+        params.put("stepPercent", stepPercent);
+        params.put("chartType", chartType);
+        params.put("exchangeName", exchangeName);
+        if (customFrom > 0) params.put("customFrom", customFrom);
+        if (customTo > 0) params.put("customTo", customTo);
+        SessionInfo info = new SessionInfo(id, SessionType.BACKTEST, coinName, params, userId);
+        lastBacktestResults.remove(strategy);
+        lastBacktestChartPaths.remove(strategy);
+        info.addEvent("START", "Бэктест Лесенки запущен: " + coinName);
+        Thread t = new Thread(() -> {
+            registerThread(id);
+            try {
+                Coin coin = CoinsList.getCoinByName(coinName);
+                Chart chart;
+                switch (chartType) {
+                    case "5yr":
+                        chart = Chart.getBinanceChart(coin, 5);
+                        break;
+                    case "3yr":
+                        chart = Chart.getBinanceChart(coin, 3);
+                        break;
+                    case "yearly":
+                        chart = Chart.getBinanceChart(coin, 1);
+                        break;
+                    case "monthly":
+                        chart = Chart.getMonthlyChart_1hourInterval(coin, java.time.YearMonth.now().minusMonths(1));
+                        break;
+                    case "custom":
+                        long cfrom = customFrom > 0 ? customFrom : toLong(params.get("customFrom"));
+                        long cto = customTo > 0 ? customTo : toLong(params.get("customTo"));
+                        if (cfrom <= 0 || cto <= 0) {
+                            cto = System.currentTimeMillis();
+                            cfrom = cto - 365L * 24 * 3600 * 1000;
+                        }
+                        chart = Chart.getBinanceChart(coin, cfrom, cto);
+                        break;
+                    default:
+                        chart = Chart.get1DayUntilNowChart_5MinuteInterval(coin);
+                        break;
+                }
+
+                LadderStrategyBackTester tester = new LadderStrategyBackTester(
+                        coin, chart, tradingSum, orderUsdt, stepPercent);
+                LadderStrategyBackTester.BackTestResult result = tester.run();
+                if (result == null) {
+                    info.status = "ERROR";
+                    info.endedAt = System.currentTimeMillis();
+                    info.addEvent("ERROR", "Бэктест Лесенки завершился без результата");
+                    return;
+                }
+
+                Map<String, Object> rm = new LinkedHashMap<>();
+                rm.put("coinName", coinName);
+                rm.put("strategy", "ladder");
+                rm.put("orderUsdt", result.orderUsdt);
+                rm.put("stepPercent", result.stepPercent);
+                rm.put("profitUsd", result.profitUsd);
+                rm.put("profitPercent", result.profitPercent);
+                rm.put("tradingSum", tradingSum);
+                rm.put("chartType", chartType);
+                rm.put("totalTrades", result.totalTrades);
+                rm.put("buyCount", result.buyCount);
+                rm.put("sellCount", result.sellCount);
+                rm.put("finalEquity", result.finalEquity);
+
+                List<Map<String, Object>> evList = new ArrayList<>();
+                for (double[] ev : tester.getTradeEvents()) {
+                    Map<String, Object> evm = new LinkedHashMap<>();
+                    evm.put("timestamp", (long) ev[0]);
+                    evm.put("price", ev[1]);
+                    evm.put("eventType", (int) ev[2]);
+                    evList.add(evm);
+                }
+                rm.put("tradeEvents", evList);
+
+                List<Map<String, Object>> eqList = new ArrayList<>();
+                for (double[] eq : tester.getEquityCurve()) {
+                    Map<String, Object> eqm = new LinkedHashMap<>();
+                    eqm.put("timestamp", (long) eq[0]);
+                    eqm.put("equity", eq[1]);
+                    eqList.add(eqm);
+                }
+                rm.put("equityCurve", eqList);
+
+                List<Map<String, Object>> holdList = new ArrayList<>();
+                for (double[] h : tester.getHoldCurve()) {
+                    Map<String, Object> hm = new LinkedHashMap<>();
+                    hm.put("timestamp", (long) h[0]);
+                    hm.put("equity", h[1]);
+                    holdList.add(hm);
+                }
+                rm.put("holdCurve", holdList);
+
+                lastBacktestResults.put(strategy, rm);
+                info.backtestResultData = rm;
+                info.status = "DONE";
+                info.endedAt = System.currentTimeMillis();
+                info.addEvent("DONE", String.format("Лесенка: прибыль %.2f USD (%.2f%%), сделок %d",
+                        result.profitUsd, result.profitPercent, result.totalTrades));
+            } catch (Exception e) {
+                if (Thread.currentThread().isInterrupted()) {
+                    info.status = "STOPPED";
+                    info.addEvent("STOP", "Прервано");
+                } else {
+                    info.status = "ERROR";
+                    info.addEvent("ERROR", "Ошибка: " + e.getMessage());
+                    log.error("Ladder backtest error for user {}", userId, e);
+                }
+                info.endedAt = System.currentTimeMillis();
+            } finally {
+                unregisterThread();
+                saveSessions();
+            }
+        });
+        t.setDaemon(true);
+        info.thread = t;
+        sessions.put(id, info);
+        t.start();
         return info;
     }
 

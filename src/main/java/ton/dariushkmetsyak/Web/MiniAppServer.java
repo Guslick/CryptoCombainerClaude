@@ -689,10 +689,15 @@ public class MiniAppServer {
                 || "reversal_trail_recap".equals(strategy);
         boolean isAtrEma = strategy.startsWith("atr_ema");
         boolean isReversalTrail = strategy != null && strategy.startsWith("reversal_trail");
+        boolean isLadder = strategy != null && strategy.startsWith("ladder");
 
         UserProfileManager.UserProfile profile = userId > 0
             ? UserProfileManager.getInstance().loadProfile(userId) : null;
         TradingSessionManager mgr = TradingSessionManager.forUser(userId);
+
+        if (isLadder) {
+            return errorMap("Стратегия 'ladder' пока доступна только в режиме backtest");
+        }
 
         Object result;
         switch (type.toLowerCase()) {
@@ -751,11 +756,16 @@ public class MiniAppServer {
                 || "reversal_trail_recap".equals(strategy);
         boolean isAtrEma = strategy.startsWith("atr_ema");
         boolean isReversalTrail = strategy.startsWith("reversal_trail");
+        boolean isLadder = strategy.startsWith("ladder");
         long customFrom = toLong(body.get("customFrom"), 0);
         long customTo = toLong(body.get("customTo"), 0);
         TradingSessionManager mgr = TradingSessionManager.forUser(userId);
         TradingSessionManager.SessionInfo info;
-        if (isAtrEma) {
+        if (isLadder) {
+            double orderUsdt = toDouble(body.get("orderUsdt"), tradingSum);
+            double stepPercent = toDouble(body.get("stepPercent"), buyGap);
+            info = mgr.startBacktestLadder(coinName, tradingSum, orderUsdt, stepPercent, chartType, exch, customFrom, customTo);
+        } else if (isAtrEma) {
             info = mgr.startBacktestAtrEma(coinName, tradingSum, buyGap, spg, slg, chartType, exch, 0.1, customFrom, customTo, recapitalize);
         } else {
             info = mgr.startBacktest(coinName, tradingSum, buyGap, spg, slg, chartType, exch, 0.1, customFrom, customTo, recapitalize, isReversalTrail);

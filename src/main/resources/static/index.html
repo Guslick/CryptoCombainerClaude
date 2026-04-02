@@ -345,6 +345,10 @@
             <div style="font-family:var(--font-head);font-size:13px;font-weight:700">📐🎯 Разворотные + Трейлинг-профит</div>
             <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:4px">Покупка как в Reversal, а фиксация прибыли — по откату от локального пика после достижения цели.</div>
           </button>
+          <button class="btn btn-primary" style="text-align:left;padding:12px 16px;border:1px solid #7E57C2" onclick="selectStrategy('ladder')">
+            <div style="font-family:var(--font-head);font-size:13px;font-weight:700">🪜 Лесенка (v1)</div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:4px">Сетка уровней от стартовой цены: покупка на новой ступени, продажа самого дешёвого лота при росте на шаг.</div>
+          </button>
         </div>
       </div>
       <div id="strategyWorkspace" style="display:none">
@@ -1116,7 +1120,7 @@ function selectStrategy(strategyId) {
 function updateStrategyTitle() {
   const recap = document.getElementById('recapCheckbox')?.checked;
   try { localStorage.setItem('cc_recap', recap ? '1' : '0'); } catch(e) {}
-  const titles = { reversal: '📐 Разворотные точки', reversal_trail: '📐🎯 Разворотные + Трейлинг-профит', atr_ema: '📐📊 ATR+EMA Адаптивная' };
+  const titles = { reversal: '📐 Разворотные точки', reversal_trail: '📐🎯 Разворотные + Трейлинг-профит', atr_ema: '📐📊 ATR+EMA Адаптивная', ladder: '🪜 Лесенка (v1)' };
   const base = titles[_selectedStrategy] || _selectedStrategy;
   document.getElementById('strategyTitle').textContent = base + (recap ? ' + 💹 Рекап' : '');
 }
@@ -1758,6 +1762,10 @@ async function startBacktest() {
     exchangeName: exchange, commissionRate,
     strategy: getEffectiveStrategy(),
   };
+  if ((body.strategy || '').startsWith('ladder')) {
+    body.orderUsdt = body.tradingSum;
+    body.stepPercent = body.buyGap;
+  }
   if (body.chartType === 'custom') {
     const fromVal = document.getElementById('btCustomFrom').value;
     const toVal = document.getElementById('btCustomTo').value;
