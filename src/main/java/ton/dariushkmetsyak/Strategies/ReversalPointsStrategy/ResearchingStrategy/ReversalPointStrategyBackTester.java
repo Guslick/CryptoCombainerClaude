@@ -74,6 +74,10 @@ public class ReversalPointStrategyBackTester {
     private final List<Map<String, Object>> tradeReport = new ArrayList<>();
     // Track last max price seen (for buy report: drop from max)
     private double lastMaxPriceForReport = 0;
+    // Let profits run: sell only after pullback from local peak once target is reached
+    private final double profitTrailGapPercent = 1.0;
+    private boolean profitTrailArmed = false;
+    private double peakPriceSinceBuy = 0;
     private final ReversalDecisionEngine decisionEngine = new ReversalDecisionEngine();
     private ReversalDecisionEngine.State decisionState;
     private ReversalDecisionEngine.Params decisionParams;
@@ -306,6 +310,9 @@ public class ReversalPointStrategyBackTester {
         this.pointPrice = pointPrice;
         hasPrices = true;
         boolean wasTrading = this.trading;
+        // Keep decision state aligned with runtime position before evaluating next tick
+        decisionState.trading = this.trading;
+        decisionState.buyPrice = this.buyPrice;
 
         ReversalDecisionEngine.Decision decision = decisionEngine.onTick(
                 decisionState, decisionParams, pointTimestamp, pointPrice
@@ -323,7 +330,18 @@ public class ReversalPointStrategyBackTester {
             ));
         }
 
-        if (decision.action == ReversalDecisionEngine.Action.SELL_PROFIT && wasTrading) {
+        if (wasTrading) {
+            if (pointPrice > peakPriceSinceBuy) peakPriceSinceBuy = pointPrice;
+            if (buyPrice > 0 && pointPrice >= buyPrice * (1 + sellWithProfitGap / 100.0)) {
+                profitTrailArmed = true;
+            }
+        }
+        boolean trailingProfitExit = wasTrading
+                && profitTrailArmed
+                && peakPriceSinceBuy > 0
+                && ((peakPriceSinceBuy - pointPrice) / peakPriceSinceBuy * 100.0) >= profitTrailGapPercent;
+
+        if (decision.action == ReversalDecisionEngine.Action.SELL_PROFIT && wasTrading && trailingProfitExit) {
                     Double coinQuantityInWallet = account.wallet().getAllAssets().get(coin);
                     Double UsdtQuantityInWallet = account.wallet().getAllAssets().get(USDT);
                     double sellValue = coinQuantityInWallet * pointPrice;
@@ -372,8 +390,15 @@ public class ReversalPointStrategyBackTester {
                 chartScreenshotMessage = "SOLD WITH PROFIT";
                 trading = false;
                 decisionState.trading = false;
+                profitTrailArmed = false;
+                peakPriceSinceBuy = 0;
                 isSold=false;
                 return true;
+        }
+        if (decision.action == ReversalDecisionEngine.Action.SELL_PROFIT && wasTrading && !trailingProfitExit) {
+            // keep position open until pullback condition is reached
+            decisionState.trading = true;
+            decisionState.buyPrice = buyPrice;
         }
         if (decision.action == ReversalDecisionEngine.Action.SELL_LOSS && wasTrading) {
                     Double coinQuantityInWallet = account.wallet().getAllAssets().get(coin);
@@ -424,6 +449,8 @@ public class ReversalPointStrategyBackTester {
                 chartScreenshotMessage = "SOLD WITH LOSS";
                 trading = false;
                 decisionState.trading = false;
+                profitTrailArmed = false;
+                peakPriceSinceBuy = 0;
                 isSold=false;
                 return true;
         }
@@ -447,6 +474,8 @@ public class ReversalPointStrategyBackTester {
             trading = true;
             decisionState.trading = true;
             decisionState.buyPrice = pointPrice;
+            profitTrailArmed = false;
+            peakPriceSinceBuy = pointPrice;
             // Record trade event for chart
             tradeEvents.add(new double[]{pointTimestamp, pointPrice, 0}); // 0=buy
             recordEquity(pointTimestamp, pointPrice);

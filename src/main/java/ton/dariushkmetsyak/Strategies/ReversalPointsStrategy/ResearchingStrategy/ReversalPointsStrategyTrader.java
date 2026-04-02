@@ -90,6 +90,10 @@ public class ReversalPointsStrategyTrader {
     private final ReversalDecisionEngine decisionEngine = new ReversalDecisionEngine();
     private ReversalDecisionEngine.State decisionState;
     private ReversalDecisionEngine.Params decisionParams;
+    // Let profits run: exit profit position on pullback from local peak after target is reached
+    private final double profitTrailGapPercent = 1.0;
+    private boolean profitTrailArmed = false;
+    private double peakPriceSinceBuy = 0;
 
     class Reversal {
         private final double[] data;
@@ -412,6 +416,16 @@ public class ReversalPointsStrategyTrader {
                 decisionState, decisionParams, pointTimestamp, pointPrice
         );
         syncRuntimeFromDecisionState();
+        if (wasTrading) {
+            if (pointPrice > peakPriceSinceBuy) peakPriceSinceBuy = pointPrice;
+            if (buyPrice > 0 && pointPrice >= buyPrice * (1 + sellWithProfitGap / 100.0)) {
+                profitTrailArmed = true;
+            }
+        }
+        boolean trailingProfitExit = wasTrading
+                && profitTrailArmed
+                && peakPriceSinceBuy > 0
+                && ((peakPriceSinceBuy - pointPrice) / peakPriceSinceBuy * 100.0) >= profitTrailGapPercent;
         if (decision.newReversalPoint != null) {
             reversalArrayList.add(new Reversal(
                     new double[]{decision.newReversalPoint.timestamp, decision.newReversalPoint.price},
@@ -420,7 +434,7 @@ public class ReversalPointsStrategyTrader {
         }
 
         if (wasTrading) {
-            if (decision.action == ReversalDecisionEngine.Action.SELL_PROFIT) {
+            if (decision.action == ReversalDecisionEngine.Action.SELL_PROFIT && trailingProfitExit) {
                 System.out.println("Timestamp: " + pointTimestamp + "  Price: " + pointPrice);
                 try {
                     soldFor = account.trader().sell(coin, pointPrice, tradingSum / buyPrice);
@@ -466,6 +480,8 @@ public class ReversalPointsStrategyTrader {
                 TradingChart.clearChart();
                 trading = false;
                 decisionState.trading = false;
+                profitTrailArmed = false;
+                peakPriceSinceBuy = 0;
                 isSold = false;
                 // Recapitalize: next cycle uses current USDT balance
                 if (recapitalize) {
@@ -481,6 +497,10 @@ public class ReversalPointsStrategyTrader {
                 currentMaxPriceTimestamp[0] = pointTimestamp;
                 persistState();
                 return true;
+            }
+            if (decision.action == ReversalDecisionEngine.Action.SELL_PROFIT && !trailingProfitExit) {
+                decisionState.trading = true;
+                decisionState.buyPrice = buyPrice;
             }
             if (decision.action == ReversalDecisionEngine.Action.SELL_LOSS) {
                 System.out.println("Timestamp: " + pointTimestamp + "  Price: " + pointPrice);
@@ -528,6 +548,8 @@ public class ReversalPointsStrategyTrader {
                 TradingChart.clearChart();
                 trading = false;
                 decisionState.trading = false;
+                profitTrailArmed = false;
+                peakPriceSinceBuy = 0;
                 isSold = false;
                 // Recapitalize: next cycle uses current USDT balance
                 if (recapitalize) {
@@ -622,6 +644,8 @@ public class ReversalPointsStrategyTrader {
                     new double[]{currentMaxPriceTimestamp[0], currentMaxPrice[0]}, "max"));
             buyPrice = boughtFor;
             trading = true;
+            profitTrailArmed = false;
+            peakPriceSinceBuy = boughtFor;
             currentMaxPrice[0] = boughtFor;
             double coinAmt = 0;
             try { coinAmt = account.wallet().getAmountOfCoin(coin); } catch (Exception ignored) {}
